@@ -1,0 +1,48 @@
+[project]
+name = "yolo11-3d"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.2.1",
+    "pyyaml>=6.0.2",
+    "torch>=2.5.1",
+    "torchvision>=0.20.1",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.0",
+    "ruff>=0.8.6",
+]
+
+[tool.ruff]
+line-length = 100
+required-version = ">=0.8.6"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "ERA001", # auto-removal of commented out code affects development and vscode integration
+  "FBT001", # we like to use booleans as function parameters
+  "FBT002", # ^^^
+  "TD003",  # we do not work with issues
+  "D10",    # document later, or so they said...
+  # "TRY",
+  "COM812", # we use the magic trailing comma
+]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
