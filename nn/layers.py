@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
-from typing import assert_never, overload
+from typing import TYPE_CHECKING, assert_never, overload
 
 import torch
 from torch import nn
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @overload
