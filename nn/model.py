@@ -111,13 +111,13 @@ class BaseModel(nn.Module, ABC):
 class DetectionModel(BaseModel):
     def __init__(
         self,
-        cfg: str | dict = "yolov11n.yaml",
+        cfg: dict,
         ch: int = 3,
         nc: int | None = None,
         verbose: bool = True,
     ) -> None:
         super().__init__()
-        self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)
+        self.yaml = cfg
 
         ch = self.yaml["ch"] = self.yaml.get("ch", ch)
         if nc and nc != self.yaml["nc"]:
