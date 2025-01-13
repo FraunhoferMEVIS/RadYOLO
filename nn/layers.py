@@ -427,7 +427,7 @@ class Concat(nn.Module):
         super().__init__()
         self.d: int = dimension
 
-    def forward(self, x: tuple[torch.Tensor] | list[torch.Tensor]) -> torch.Tensor:
+    def forward(self, x: tuple[torch.Tensor, ...] | list[torch.Tensor]) -> torch.Tensor:
         return torch.cat(x, self.d)
 
 
