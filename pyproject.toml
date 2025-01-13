@@ -29,6 +29,7 @@ ignore = [
   "ERA001", # auto-removal of commented out code affects development and vscode integration
   "FBT001", # we like to use booleans as function parameters
   "FBT002", # ^^^
+  "FBT003", # ^^^
   "TD003",  # we do not work with issues
   "D10",    # document later, or so they said...
   # "TRY",
