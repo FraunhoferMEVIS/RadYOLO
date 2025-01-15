@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 from torch import nn
 
 from nn.layers import C2PSA, C3, SPPF, Bottleneck, C2f, C3k2, Concat, Conv, Detect, DWConv
