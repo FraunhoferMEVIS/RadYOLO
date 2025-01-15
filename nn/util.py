@@ -16,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def parse_model(
-    d: dict, input_channels: int, verbose=True
+    d: dict, input_channels: int, verbose: bool = True
 ) -> tuple[nn.Sequential, list[int]]:  # model_dict, input_channels(3)
     """Parse a YOLO model.yaml dictionary into a PyTorch model."""
     import ast
