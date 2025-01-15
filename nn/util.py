@@ -129,7 +129,7 @@ def parse_model(
     return nn.Sequential(*layers), sorted(save)
 
 
-def make_divisible(x: int, divisor: int | torch.Tensor) -> int:
+def make_divisible(x: float, divisor: int | torch.Tensor) -> int:
     """Returns the nearest number that is divisible by the given divisor.
 
     Args:
