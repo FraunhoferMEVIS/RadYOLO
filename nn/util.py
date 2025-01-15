@@ -177,3 +177,13 @@ def scale_img(
     if not same_shape:
         h, w = (math.ceil(x * ratio / gs) * gs for x in (h, w))
     return F.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)
+
+
+def model_to_dict(model: nn.Module) -> dict:
+    return {
+        "type": type(model).__name__,
+        "parameters": {name: param.shape for name, param in model.named_parameters()},
+        "children": [model_to_dict(child) for child in model.children()],
+    }
+
+
