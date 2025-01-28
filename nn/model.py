@@ -20,7 +20,7 @@ class BaseModel(nn.Module, ABC):
     @abstractmethod
     def save(self) -> list[int]: ...
 
-    def forward(self, x, *args, **kwargs):
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.predict(x, *args, **kwargs)
 
     def predict(
@@ -189,7 +189,7 @@ class HardcodedModel(nn.Module):
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
-        output_channels = [input_channels]
+        output_channels: list[int] = [input_channels]
 
         # BACKBONE
 
