@@ -66,7 +66,7 @@ def autopad(
 
 
 class Conv(nn.Module):
-    default_activation = nn.SiLU()
+    default_activation = nn.SiLU(inplace=True)
 
     def __init__(  # noqa: PLR0913
         self,
@@ -90,7 +90,7 @@ class Conv(nn.Module):
             dilation=dilation,
             bias=False,
         )
-        self.batch_norm = nn.BatchNorm2d(out_channels)
+        self.batch_norm = nn.BatchNorm2d(out_channels, eps=1e-3, momentum=0.03)
         self.activation = (
             self.default_activation
             if activation is True
