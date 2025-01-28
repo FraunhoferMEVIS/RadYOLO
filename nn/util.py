@@ -187,3 +187,32 @@ def model_to_dict(model: nn.Module) -> dict:
     }
 
 
+def export_model(model: nn.Module, name: str) -> Path:
+    inputs = torch.randn((1, 3, 320, 320)).to("cpu")
+    model.to("cpu")
+    for p in model.parameters():
+        p.requires_grad = False
+    model.eval()
+    model.float()
+
+    model(inputs)
+    model(inputs)
+
+    for m in model.modules():
+        if isinstance(m, Detect):
+            m.export = True
+        if isinstance(m, C2f):
+            m.forward = m.forward_split
+
+    onnx_path = Path(name).with_suffix(".onnx")
+
+    torch.onnx.export(
+        model,
+        inputs,
+        onnx_path,
+        verbose=False,
+        input_names=["images"],
+        output_names=["output0"],
+        dynamic_axes=None,
+    )
+    return onnx_path
