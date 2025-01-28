@@ -138,7 +138,7 @@ class DetectionModel(BaseModel):
                 [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))]
             )
             self.stride = m.stride
-            # m.bias_init()
+            m.bias_init()
         else:
             self.stride = torch.Tensor([32])
 
@@ -314,6 +314,12 @@ class HardcodedModel(nn.Module):
         output_channels.append(out_channels)
 
         self.l23 = Detect(num_classes, [output_channels[x] for x in [16, 19, 22]])
+        s = 256
+        self.l23.stride = torch.tensor(
+            [s / x.shape[-2] for x in self.forward(torch.zeros(1, input_channels, s, s))]
+        )
+        self.stride = self.l23.stride
+        self.l23.bias_init()
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.predict(x, *args, **kwargs)

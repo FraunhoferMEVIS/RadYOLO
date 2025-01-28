@@ -198,7 +198,11 @@ class C2f(nn.Module):
         return self.out_conv(torch.cat(hidden_layers, 1))
 
     def forward_split(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        split_output = self.in_conv(x).split((self.hidden_channels, self.hidden_channels), 1)
+        hidden_layers = [split_output[0], split_output[1]]
+        for m in self.m:
+            hidden_layers.append(m(hidden_layers[-1]))
+        return self.out_conv(torch.cat(hidden_layers, 1))
 
 
 class C3k2(C2f):
@@ -432,6 +436,7 @@ class Concat(nn.Module):
 
 
 class Detect(nn.Module):
+    export = False
     max_det = 300
     shape = None
     anchors = torch.empty(0)
@@ -476,16 +481,41 @@ class Detect(nn.Module):
 
     def _inference(self, x: torch.Tensor) -> torch.Tensor:
         shape = x[0].shape
+        if self.shape != shape:
+            self.anchors, self.strides = (
+                x.transpose(0, 1) for x in self.make_anchors(x, self.stride, 0.5)
+            )
+            self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
         box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
         dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
 
         return torch.cat((dbox, cls.sigmoid()), 1)
 
-    # def bias_init(self):
-    #     for a, b, s in zip(self.cv2, self.cv3, self.stride, strict=True):
-    #         a[-1].bias.data[:] = 1.0
-    #         b[-1].bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
+    def bias_init(self) -> None:
+        for a, b, s in zip(self.cv2, self.cv3, self.stride, strict=True):
+            if not isinstance(a, nn.Sequential):
+                raise TypeError
+            if not isinstance(b, nn.Sequential):
+                raise TypeError
+
+            a_last = a[-1]
+            if not isinstance(a_last, nn.Conv2d):
+                raise TypeError
+
+            b_last = b[-1]
+            if not isinstance(b_last, nn.Conv2d):
+                raise TypeError
+
+            a_bias = a_last.bias
+            if a_bias is None:
+                raise ValueError
+            a_bias.data[:] = 1.0
+
+            b_bias = b_last.bias
+            if b_bias is None:
+                raise ValueError
+            b_bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
 
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
@@ -504,3 +534,26 @@ class Detect(nn.Module):
             wh = x2y2 - x1y1
             return torch.cat((c_xy, wh), dim)
         return torch.cat((x1y1, x2y2), dim)
+
+    def make_anchors(
+        self,
+        feats: torch.Tensor | Sequence | None,
+        strides: torch.Tensor,
+        grid_cell_offset: float = 0.5,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        anchor_points, stride_tensor = [], []
+        if feats is None:
+            raise ValueError
+        dtype, device = feats[0].dtype, feats[0].device
+        for i, stride in enumerate(strides):
+            h, w = (
+                feats[i].shape[2:]
+                if isinstance(feats, list)
+                else (int(feats[i][0]), int(feats[i][1]))
+            )
+            sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset
+            sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset
+            sy, sx = torch.meshgrid(sy, sx, indexing="ij")
+            anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
+            stride_tensor.append(torch.full((h * w, 1), stride.item(), dtype=dtype, device=device))
+        return torch.cat(anchor_points), torch.cat(stride_tensor)
