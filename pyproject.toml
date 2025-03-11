@@ -5,13 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.2.1",
+  "numpy>=2.2.1",
   "onnx>=1.17.0",
   "onnxscript>=0.1.0.dev20250114",
-    "pyyaml>=6.0.2",
-    "torch>=2.5.1",
-    "torchvision>=0.20.1",
-    "tqdm>=4.67.1",
+  "pydantic>=2.10.6",
+  "pyyaml>=6.0.2",
+  "torch>=2.5.1",
+  "torchvision>=0.20.1",
+  "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
