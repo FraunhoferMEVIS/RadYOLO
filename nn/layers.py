@@ -528,7 +528,7 @@ class Detect(nn.Module):
     ) -> torch.Tensor:
         lt, rb = distance.chunk(2, dim)
         x1y1 = anchor_points - lt
-        x2y2 = anchor_points - rb
+        x2y2 = anchor_points + rb
         if xywh:
             c_xy = (x1y1 + x2y2) / 2
             wh = x2y2 - x1y1
