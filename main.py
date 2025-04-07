@@ -59,5 +59,11 @@ def main() -> None:
     # print(result1)
 
 
+def train() -> None:
+    trainer = Trainer("config/custom.yaml")
+    trainer.train()
+
+
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(level=logging.INFO)
+    train()
