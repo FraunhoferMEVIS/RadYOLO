@@ -11,3 +11,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# ephemeral paths
+datasets/
