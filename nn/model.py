@@ -168,7 +168,14 @@ class DetectionModel(BaseModel):
 
 class HardcodedModel(nn.Module):
     def __init__(
-        self, input_channels: int, num_classes: int, scale: Literal["n", "s", "m", "l", "x"]
+        self,
+        input_channels: int,
+        num_classes: int,
+        scale: Literal["n", "s", "m", "l", "x"],
+        box: float,
+        cls: float,
+        dfl: float,
+        device: torch.device,
     ) -> None:
         super().__init__()
 
@@ -321,8 +328,32 @@ class HardcodedModel(nn.Module):
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        self.criterion = v8DetectionLoss(self, box, cls, dfl, self.l23, device)
+
+    @overload
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor: ...
+
+    @overload
+    def forward(self, x: dict, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
+
+    def forward(
+        self, x: torch.Tensor | dict, *args, **kwargs
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        if isinstance(x, dict):
+            return self.loss(x, *args, **kwargs)
         return self.predict(x, *args, **kwargs)
+
+    def loss(
+        self, batch: dict, preds: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        preds = self.forward(batch["img"]) if preds is None else preds
+        return self.criterion(preds, batch)
+
+    def load(self, weights: ModelCheckpoint | nn.Module) -> None:
+        model = weights.ema if isinstance(weights, ModelCheckpoint) else weights
+        csd = model.float().state_dict()
+        csd = intersect_dicts(csd, self.state_dict())
+        self.load_state_dict(csd, strict=False)
 
     def predict(self, x: torch.Tensor, augment: bool = False) -> torch.Tensor:
         # BACKBONE
