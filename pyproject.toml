@@ -5,9 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "nibabel>=5.3.2",
   "numpy>=2.2.1",
   "onnx>=1.17.0",
   "onnxscript>=0.1.0.dev20250114",
+  "opencv-python-headless>=4.11.0.86",
   "pydantic>=2.10.6",
   "pyyaml>=6.0.2",
   "torch>=2.5.1",
