@@ -188,7 +188,9 @@ class DefaultConfig(BaseModel):
 class DatasetConfig(BaseModel):
     path: Path
     train: Path | list[Path]
-    val: Path | list[Path] = Field(validation_alias=AliasChoices("val", "validation"))
+    val: Path | list[Path] | None = Field(
+        validation_alias=AliasChoices("val", "validation"), default=None
+    )
     test: Path | list[Path] | None = None
     names: dict[NonNegativeInt, str] | None = None
     nc: NonNegativeInt = 0
