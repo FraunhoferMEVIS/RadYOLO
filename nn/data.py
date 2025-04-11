@@ -6,7 +6,7 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import Sized
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, TypedDict
 
 import cv2
 import nibabel as nib
@@ -14,7 +14,6 @@ import nibabel.filebasedimages
 import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
-from pydantic import BaseModel, Field
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -37,7 +36,6 @@ class BaseDataset(Dataset, Sized, ABC):
         pad: float = 0.5,
         prefix: str = "",
         fraction: float = 1.0,
-        device: torch.device | str = "cpu",
     ) -> None:
         super().__init__()
         self.src_path = src_path
@@ -48,7 +46,6 @@ class BaseDataset(Dataset, Sized, ABC):
         self.pad = pad
         self.prefix = prefix
         self.fraction = fraction
-        self.device = device
 
         self.img_paths: list[Path] = self.get_img_files(self.src_path)
         self.samples = self.get_samples()
@@ -85,14 +82,14 @@ class BaseDataset(Dataset, Sized, ABC):
 
     def load_image_and_label(self, index: int) -> Label:
         label = self.samples[index]
-        img, original_shape, resized_shape = self.load_image(label.im_file)
+        img, original_shape, resized_shape = self.load_image(label["im_file"])
         return Label(
-            im_file=label.im_file,
+            im_file=label["im_file"],
             shape=resized_shape,
-            classes=label.classes,
-            bboxes=label.bboxes,
-            normalized=label.normalized,
-            bbox_format=label.bbox_format,
+            classes=label["classes"],
+            bboxes=label["bboxes"],
+            normalized=label["normalized"],
+            bbox_format=label["bbox_format"],
             img=img,
         )
 
@@ -112,16 +109,17 @@ class BaseDataset(Dataset, Sized, ABC):
     def collate_fn(batch: list[Label]) -> dict:
         new_batch = {}
 
-        new_batch["img"] = torch.stack([item.img for item in batch])
-        new_batch["im_file"] = tuple(item.im_file for item in batch)
-        new_batch["shape"] = tuple(item.shape for item in batch)
-        new_batch["cls"] = torch.cat([item.classes for item in batch], 0)
-        new_batch["bboxes"] = torch.cat([item.bboxes for item in batch], 0)
-        new_batch["normalized"] = tuple(item.normalized for item in batch)
-        new_batch["bbox_format"] = tuple(item.bbox_format for item in batch)
-        new_batch["batch_idx"] = torch.cat(
-            [torch.full(item.classes.size()[:1], idx) for idx, item in enumerate(batch)], 0
-        )
+        with torch.no_grad():
+            new_batch["img"] = torch.stack([item["img"] for item in batch])
+            new_batch["im_file"] = tuple(item["im_file"] for item in batch)
+            new_batch["shape"] = tuple(item["shape"] for item in batch)
+            new_batch["cls"] = torch.cat([item["classes"] for item in batch], 0)
+            new_batch["bboxes"] = torch.cat([item["bboxes"] for item in batch], 0)
+            new_batch["normalized"] = tuple(item["normalized"] for item in batch)
+            new_batch["bbox_format"] = tuple(item["bbox_format"] for item in batch)
+            new_batch["batch_idx"] = torch.cat(
+                [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)], 0
+            )
 
         return new_batch
 
@@ -142,7 +140,7 @@ class MIPDataset(BaseDataset):
         im = cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)[..., None]  # BGR
         if im is None:
             raise ValueError
-        im_t = torch.as_tensor(im, dtype=torch.float32, device=self.device).movedim(-1, 0) / 255.0
+        im_t = torch.as_tensor(im, dtype=torch.float32).movedim(-1, 0).contiguous() / 255.0
         im_t.clamp_(0.0, 1.0)
         im_t_scaled = F.interpolate(im_t[None, ...], size=(256, 448), mode="bilinear")[0]
 
@@ -331,15 +329,15 @@ class DummyDataset(Dataset, Sized):
         #     new_batch["batch_idx"][i] += i
         # new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
 
-        new_batch["img"] = torch.stack([item.img for item in batch])
-        new_batch["im_file"] = tuple(item.im_file for item in batch)
-        new_batch["shape"] = tuple(item.shape for item in batch)
-        new_batch["cls"] = torch.cat([item.classes for item in batch], 0)
-        new_batch["bboxes"] = torch.cat([item.bboxes for item in batch], 0)
-        new_batch["normalized"] = tuple(item.normalized for item in batch)
-        new_batch["bbox_format"] = tuple(item.bbox_format for item in batch)
+        new_batch["img"] = torch.stack([item["img"] for item in batch]).contiguous()
+        new_batch["im_file"] = tuple(item["im_file"] for item in batch)
+        new_batch["shape"] = tuple(item["shape"] for item in batch)
+        new_batch["cls"] = torch.cat([item["classes"] for item in batch], 0)
+        new_batch["bboxes"] = torch.cat([item["bboxes"] for item in batch], 0)
+        new_batch["normalized"] = tuple(item["normalized"] for item in batch)
+        new_batch["bbox_format"] = tuple(item["bbox_format"] for item in batch)
         new_batch["batch_idx"] = torch.cat(
-            [torch.full(item.classes.size()[:1], idx) for idx, item in enumerate(batch)], 0
+            [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)], 0
         )
         return new_batch
 
@@ -370,11 +368,11 @@ class DummyDataset(Dataset, Sized):
         return labels
 
 
-class LazyLabel(BaseModel, arbitrary_types_allowed=True):
+class LazyLabel(TypedDict):
     im_file: Path
     shape: tuple[int, int] | tuple[int, int, int]
-    classes: torch.Tensor = Field(exclude=True)
-    bboxes: torch.Tensor = Field(exclude=True)
+    classes: torch.Tensor
+    bboxes: torch.Tensor
     normalized: bool
     bbox_format: Literal["xywh"]
 
