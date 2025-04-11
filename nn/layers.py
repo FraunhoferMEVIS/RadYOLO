@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, assert_never, cast, overload
 import torch
 from torch import nn
 
-from ultralytics.utils.tal import dist2bbox, make_anchors
+from ultralytics.utils.tal import dist2bbox, make_anchors, make_anchors_3d
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -860,3 +860,93 @@ class Detect(nn.Module):
     ) -> torch.Tensor:
         return dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
 
+
+class Detect_3D(nn.Module):
+    export = False
+    max_det = 300
+    shape = None
+    anchors = torch.empty(0)
+    strides = torch.empty(0)
+
+    def __init__(self, num_classes: int = 80, ch: Sequence[int] = ()) -> None:
+        super().__init__()
+        self.nc = num_classes  # number of classes
+        self.nl = len(ch)  # number of detection layers
+        self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
+        self.no = num_classes + self.reg_max * 6  # number of outputs per anchor
+        self.stride = torch.zeros(self.nl)  # strides computed during build
+        c2, c3 = (
+            max((16, ch[0] // 4, self.reg_max * 6)),
+            max(ch[0], min(self.nc, 100)),
+        )  # channels
+        self.cv2 = nn.ModuleList(
+            nn.Sequential(
+                Conv_3D(x, c2, 3),
+                Conv_3D(c2, c2, 3),
+                nn.Conv3d(c2, 6 * self.reg_max, 1),
+            )
+            for x in ch
+        )
+        self.cv3 = nn.ModuleList(
+            nn.Sequential(
+                nn.Sequential(DWConv_3D(x, x, 3), Conv_3D(x, c3, 1)),
+                nn.Sequential(DWConv_3D(c3, c3, 3), Conv_3D(c3, c3, 1)),
+                nn.Conv3d(c3, self.nc, 1),
+            )
+            for x in ch
+        )
+        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+
+    def forward(
+        self, x: list[torch.Tensor]
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
+        for i in range(self.nl):
+            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+        if self.training:
+            return x
+        y = self._inference(x)
+        return y if self.export else (y, x)
+
+    def _inference(self, x: list[torch.Tensor]) -> torch.Tensor:
+        shape = x[0].shape
+        if self.shape != shape:
+            self.anchors, self.strides = (
+                x.transpose(0, 1) for x in make_anchors_3d(x, self.stride, 0.5)
+            )
+            self.shape = shape
+        x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
+        # TODO(muellergroh): check if self.reg_max * 4 is still valid here or we should use *6
+        box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
+        dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+
+        return torch.cat((dbox, cls.sigmoid()), 1)
+
+    def bias_init(self) -> None:
+        for a, b, s in zip(self.cv2, self.cv3, self.stride, strict=True):
+            if not isinstance(a, nn.Sequential):
+                raise TypeError
+            if not isinstance(b, nn.Sequential):
+                raise TypeError
+
+            a_last = a[-1]
+            if not isinstance(a_last, nn.Conv3d):
+                raise TypeError
+
+            b_last = b[-1]
+            if not isinstance(b_last, nn.Conv3d):
+                raise TypeError
+
+            a_bias = a_last.bias
+            if a_bias is None:
+                raise ValueError
+            a_bias.data[:] = 1.0
+
+            b_bias = b_last.bias
+            if b_bias is None:
+                raise ValueError
+            b_bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
+
+    def decode_bboxes(
+        self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
+    ) -> torch.Tensor:
+        return dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
