@@ -220,7 +220,7 @@ class MIPDataset(BaseDataset):
         return samples
 
 
-class NifTIDataset(BaseDataset):
+class NIfTIDataset(BaseDataset):
     img_formats: ClassVar[set[str]] = {"nii"}
 
     def get_samples(self) -> list[LazyLabel]:
