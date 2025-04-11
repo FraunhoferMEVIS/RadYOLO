@@ -17,7 +17,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """Calculate intersection-over-union (IoU) of boxes. Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
+    """Calculate intersection-over-union (IoU) of boxes.
+
+    Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
     Based on https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py.
 
     Args:
@@ -26,7 +28,8 @@ def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.
         eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
 
     Returns:
-        (torch.Tensor): An NxM tensor containing the pairwise IoU values for every element in box1 and box2.
+        (torch.Tensor): An NxM tensor containing the pairwise IoU values for every element in box1
+        and box2.
     """
     # NOTE: Need .float() to get accurate iou values
     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
