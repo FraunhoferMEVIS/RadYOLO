@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, assert_never, overload
+from typing import TYPE_CHECKING, assert_never, cast, overload
 
 import torch
 from torch import nn
@@ -11,32 +11,25 @@ if TYPE_CHECKING:
 
 
 @overload
-def autopad(kernel_size: int, padding: None, dilation: int) -> int: ...
+def autopad[T: int | tuple[int, int] | tuple[int, int, int]](
+    kernel_size: T, padding: None, dilation: int
+) -> T: ...
 
 
 @overload
-def autopad(kernel_size: tuple[int, int], padding: None, dilation: int) -> tuple[int, int]: ...
+def autopad[U: int | str | tuple[int, int] | tuple[int, int, int]](
+    kernel_size: int | tuple[int, int] | tuple[int, int, int], padding: U, dilation: int
+) -> U: ...
 
 
-@overload
-def autopad(kernel_size: int | tuple[int, int], padding: int, dilation: int) -> int: ...
-
-
-@overload
-def autopad(kernel_size: int | tuple[int, int], padding: str, dilation: int) -> str: ...
-
-
-@overload
-def autopad(
-    kernel_size: int | tuple[int, int], padding: tuple[int, int], dilation: int
-) -> tuple[int, int]: ...
-
-
-def autopad(
-    kernel_size: int | tuple[int, int],
-    padding: int | str | tuple[int, int] | None = None,
+def autopad[
+    T: int | tuple[int, int] | tuple[int, int, int],
+    U: int | tuple[int, int] | tuple[int, int, int] | str,
+](
+    kernel_size: T,
+    padding: U | None = None,
     dilation: int = 1,
-) -> int | str | tuple[int, int]:
+) -> U | T:
     """Pad to 'same' shape outputs."""
     if padding is not None:
         return padding
@@ -49,8 +42,7 @@ def autopad(
         if isinstance(kernel_size, int):
             kernel_size = dilate(kernel_size)
         elif isinstance(kernel_size, tuple):
-            # kernel_size = tuple(dilate(x) for x in kernel_size) # cleaner but not supported by Pylance
-            kernel_size = (dilate(kernel_size[0]), dilate(kernel_size[1]))
+            kernel_size = cast(T, tuple(dilate(x) for x in kernel_size))
         else:
             assert_never(kernel_size)
 
@@ -60,8 +52,7 @@ def autopad(
     if isinstance(kernel_size, int):
         return pad(kernel_size)
     if isinstance(kernel_size, tuple):
-        # padding_ = tuple([pad(x) for x in kernel_size]) # cleaner but not supported by Pylance
-        return (pad(kernel_size[0]), pad(kernel_size[1]))
+        return cast(T, tuple([pad(x) for x in kernel_size]))
     assert_never(kernel_size)
 
 
