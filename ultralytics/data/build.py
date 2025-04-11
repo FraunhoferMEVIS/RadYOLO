@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import random
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from typing import Any, NoReturn
 
 import numpy as np
