@@ -71,7 +71,7 @@ class BaseModel(nn.Module, ABC):
                 if isinstance(m.f, int):
                     x_ = ys[m.f]
                     if x_ is None:
-                        raise ValueError  # TODO add error message
+                        raise ValueError  # TODO(muellergroh): add error message
                     x = x_
                 else:
                     x_prev = x
@@ -83,12 +83,12 @@ class BaseModel(nn.Module, ABC):
                             if not isinstance(x_prev, torch.Tensor):
                                 # the idea is to break a potential recursion of adding lists to
                                 # lists, this should not happen
-                                raise ValueError  # TODO add error message
+                                raise ValueError  # TODO(muellergroh): add error message
                             x.append(x_prev)
                         else:
                             x_ = ys[j]
                             if x_ is None:
-                                raise ValueError  # TODO add error message
+                                raise ValueError  # TODO(muellergroh): add error message
                             x.append(x_)
 
             # if profile:
@@ -170,14 +170,14 @@ class DetectionModel(BaseModel):
         # img_size = x.shape[-2:]
         # s = [1, 0.83, 0.67]
         # f = [None, 3, None]
-        f = [None, 3]  # TODO check axis for 3D
+        f = [None, 3]  # TODO(muellergroh): check axis for 3D
         y = []
         # for si, fi in zip(s, f):
         for fi in f:
             xi = x.flip(fi) if fi else x
-            yi = super().predict(xi)  # TODO check indexing
+            yi = super().predict(xi)  # TODO(muellergroh): check indexing
             y.append(yi)
-        return torch.cat(y, -1)  # TODO check indexing
+        return torch.cat(y, -1)  # TODO(muellergroh): check indexing
 
 
 class HardcodedModel(nn.Module):
