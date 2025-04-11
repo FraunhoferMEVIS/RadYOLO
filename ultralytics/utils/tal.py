@@ -7,7 +7,7 @@ import logging
 import torch
 from torch import nn
 
-from ultralytics.utils.metrics import bbox_iou
+from ultralytics.utils.metrics import bbox_iou, bbox_iou_3d
 
 LOGGER = logging.getLogger(__name__)
 
@@ -371,6 +371,104 @@ class TaskAlignedAssigner(nn.Module):
         # Find each grid serve which gt(index)
         target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
         return target_gt_idx, fg_mask, mask_pos
+
+
+class TaskAlignedAssigner_3D(TaskAlignedAssigner):
+    """A task-aligned assigner for object detection.
+
+    This class assigns ground-truth (gt) objects to anchors based on the task-aligned metric, which
+    combines both classification and localization information.
+
+    Attributes:
+        topk (int): The number of top candidates to consider.
+        num_classes (int): The number of object classes.
+        alpha (float): The alpha parameter for the classification component of the task-aligned
+        metric.
+        beta (float): The beta parameter for the localization component of the task-aligned metric.
+        eps (float): A small value to prevent division by zero.
+    """
+
+    def __init__(
+        self,
+        topk: int = 13,
+        num_classes: int = 80,
+        alpha: float = 1.0,
+        beta: float = 6.0,
+        eps: float = 1e-9,
+    ) -> None:
+        """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
+        super().__init__()
+        self.topk = topk
+        self.num_classes = num_classes
+        self.bg_idx = num_classes
+        self.alpha = alpha
+        self.beta = beta
+        self.eps = eps
+
+    def get_box_metrics(
+        self,
+        pd_scores: torch.Tensor,
+        pd_bboxes: torch.Tensor,
+        gt_labels: torch.Tensor,
+        gt_bboxes: torch.Tensor,
+        mask_gt: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute alignment metric given predicted and ground truth bounding boxes."""
+        na = pd_bboxes.shape[-2]
+        mask_gt = mask_gt.bool()  # b, max_num_obj, h*w*d
+        overlaps = torch.zeros(
+            [self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device
+        )
+        bbox_scores = torch.zeros(
+            [self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device
+        )
+
+        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
+        ind[0] = (
+            torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)
+        )  # b, max_num_obj
+        ind[1] = gt_labels.squeeze(-1)  # b, max_num_obj
+        # Get the scores of each grid for each gt cls
+        bbox_scores[mask_gt] = pd_scores[ind[0], :, ind[1]][mask_gt]  # b, max_num_obj, h*w*d
+
+        # (b, max_num_obj, 1, 6), (b, 1, h*w*d, 6)
+        pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
+        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
+        overlaps[mask_gt] = self.iou_calculation(gt_boxes, pd_boxes)
+
+        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
+        return align_metric, overlaps
+
+    def iou_calculation(self, gt_bboxes: torch.Tensor, pd_bboxes: torch.Tensor) -> torch.Tensor:
+        """IoU calculation for horizontal bounding boxes."""
+        return bbox_iou_3d(gt_bboxes, pd_bboxes, xyzwhd=False, CIoU=True).squeeze(-1).clamp_(0)
+
+    @staticmethod
+    def select_candidates_in_gts(
+        xy_centers: torch.Tensor, gt_bboxes: torch.Tensor, eps: float = 1e-9
+    ) -> torch.Tensor:
+        """Select positive anchor centers within ground truth bounding boxes.
+
+        Args:
+            xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w*d, 2).
+            gt_bboxes (torch.Tensor): Ground truth bounding boxes, shape (b, n_boxes, 6).
+            eps (float, optional): Small value for numerical stability. Defaults to 1e-9.
+
+        Returns:
+            (torch.Tensor): Boolean mask of positive anchors, shape (b, n_boxes, h*w*d).
+
+        Note:
+            b: batch size, n_boxes: number of ground truth boxes, h: height, w: width, d: depth.
+            Bounding box format: [x_min, y_min, z_min, x_max, y_max, z_max].
+        """
+        n_anchors = xy_centers.shape[0]
+        bs, n_boxes, _ = gt_bboxes.shape
+        lt, rb = gt_bboxes.view(-1, 1, 6).chunk(2, 2)  # left-top, right-bottom
+        bbox_deltas = torch.cat((xy_centers[None] - lt, rb - xy_centers[None]), dim=2).view(
+            bs, n_boxes, n_anchors, -1
+        )
+        # return (bbox_deltas.min(3)[0] > eps).to(gt_bboxes.dtype)
+        return bbox_deltas.amin(3).gt_(eps)
 
 
 def make_anchors(
