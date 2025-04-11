@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, assert_never, cast, overload
 import torch
 from torch import nn
 
+from ultralytics.utils.tal import dist2bbox, make_anchors
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -819,7 +821,7 @@ class Detect(nn.Module):
         shape = x[0].shape
         if self.shape != shape:
             self.anchors, self.strides = (
-                x.transpose(0, 1) for x in self.make_anchors(x, self.stride, 0.5)
+                x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5)
             )
             self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
@@ -856,40 +858,5 @@ class Detect(nn.Module):
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
     ) -> torch.Tensor:
-        return self._dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
+        return dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
 
-    @staticmethod
-    def _dist2bbox(
-        distance: torch.Tensor, anchor_points: torch.Tensor, xywh: bool = True, dim: int = -1
-    ) -> torch.Tensor:
-        lt, rb = distance.chunk(2, dim)
-        x1y1 = anchor_points - lt
-        x2y2 = anchor_points + rb
-        if xywh:
-            c_xy = (x1y1 + x2y2) / 2
-            wh = x2y2 - x1y1
-            return torch.cat((c_xy, wh), dim)
-        return torch.cat((x1y1, x2y2), dim)
-
-    def make_anchors(
-        self,
-        feats: torch.Tensor | Sequence | None,
-        strides: torch.Tensor,
-        grid_cell_offset: float = 0.5,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        anchor_points, stride_tensor = [], []
-        if feats is None:
-            raise ValueError
-        dtype, device = feats[0].dtype, feats[0].device
-        for i, stride in enumerate(strides):
-            h, w = (
-                feats[i].shape[2:]
-                if isinstance(feats, list)
-                else (int(feats[i][0]), int(feats[i][1]))
-            )
-            sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset
-            sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset
-            sy, sx = torch.meshgrid(sy, sx, indexing="ij")
-            anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
-            stride_tensor.append(torch.full((h * w, 1), stride.item(), dtype=dtype, device=device))
-        return torch.cat(anchor_points), torch.cat(stride_tensor)
