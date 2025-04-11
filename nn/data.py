@@ -226,7 +226,7 @@ class NIfTIDataset(BaseDataset):
     def get_samples(self) -> list[LazyLabel]:
         # find all images and corresponding labels
         self.label_paths = [
-            Path(*("labels" if part == "images" else part for part in path.parts)).with_suffix(
+            Path(*("labels" if part == "volumes" else part for part in path.parts)).with_suffix(
                 ".txt"
             )
             for path in self.img_paths
@@ -238,7 +238,7 @@ class NIfTIDataset(BaseDataset):
             total=len(self.img_paths),
         ):
             try:
-                img = nib.load(img_path)
+                img = nib.loadsave.load(img_path)
             except (FileNotFoundError, nibabel.filebasedimages.ImageFileError):
                 LOGGER.warning("An error occurred loading image, skipping: %s", img_path)
                 continue
