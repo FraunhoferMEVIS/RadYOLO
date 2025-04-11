@@ -148,7 +148,9 @@ class v8DetectionLoss:  # noqa: N801
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
-    def __call__(self, preds: torch.Tensor, batch: dict):
+    def __call__(
+        self, preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]], batch: dict
+    ):
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
         feats = preds[1] if isinstance(preds, tuple) else preds

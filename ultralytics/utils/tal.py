@@ -369,7 +369,7 @@ class TaskAlignedAssigner(nn.Module):
 
 
 def make_anchors(
-    feats: torch.Tensor, strides: torch.Tensor, grid_cell_offset: float = 0.5
+    feats: list[torch.Tensor], strides: torch.Tensor, grid_cell_offset: float = 0.5
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Generate anchors from features."""
     anchor_points, stride_tensor = [], []

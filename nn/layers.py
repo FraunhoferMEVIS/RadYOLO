@@ -809,7 +809,9 @@ class Detect(nn.Module):
         )
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: list[torch.Tensor]
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         for i in range(self.nl):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
         if self.training:
@@ -817,7 +819,7 @@ class Detect(nn.Module):
         y = self._inference(x)
         return y if self.export else (y, x)
 
-    def _inference(self, x: torch.Tensor) -> torch.Tensor:
+    def _inference(self, x: list[torch.Tensor]) -> torch.Tensor:
         shape = x[0].shape
         if self.shape != shape:
             self.anchors, self.strides = (
