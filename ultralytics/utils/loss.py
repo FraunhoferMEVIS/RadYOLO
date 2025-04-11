@@ -8,9 +8,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
-from ultralytics.utils.metrics import bbox_iou
-from ultralytics.utils.ops import xywh2xyxy
-from ultralytics.utils.tal import TaskAlignedAssigner, bbox2dist, dist2bbox, make_anchors
+from ultralytics.utils.metrics import bbox_iou, bbox_iou_3d
 
 if TYPE_CHECKING:
     from nn.layers import Detect
@@ -63,6 +61,45 @@ class BboxLoss(nn.Module):
         """IoU loss."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
+        loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+
+        # DFL loss
+        if self.dfl_loss:
+            target_ltrb = bbox2dist(anchor_points, target_bboxes, self.dfl_loss.reg_max - 1)
+            loss_dfl = (
+                self.dfl_loss(
+                    pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]
+                )
+                * weight
+            )
+            loss_dfl = loss_dfl.sum() / target_scores_sum
+        else:
+            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+
+        return loss_iou, loss_dfl
+
+
+class BboxLoss_3D(nn.Module):
+    """Criterion class for computing training losses during training."""
+
+    def __init__(self, reg_max: int = 16) -> None:
+        """Initialize the BboxLoss module with regularization maximum and DFL settings."""
+        super().__init__()
+        self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+
+    def forward(
+        self,
+        pred_dist: torch.Tensor,
+        pred_bboxes: torch.Tensor,
+        anchor_points: torch.Tensor,
+        target_bboxes: torch.Tensor,
+        target_scores: torch.Tensor,
+        target_scores_sum: torch.Tensor,
+        fg_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """IoU loss."""
+        weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
+        iou = bbox_iou_3d(pred_bboxes[fg_mask], target_bboxes[fg_mask], xyzwhd=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
