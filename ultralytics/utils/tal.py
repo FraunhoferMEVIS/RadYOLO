@@ -388,7 +388,34 @@ def make_anchors(
         sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
         sy, sx = torch.meshgrid(sy, sx, indexing="ij")
         anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
-        stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
+        stride_tensor.append(torch.full((h * w, 1), stride.item(), dtype=dtype, device=device))
+    return torch.cat(anchor_points), torch.cat(stride_tensor)
+
+
+def make_anchors_3d(
+    feats: list[torch.Tensor],
+    strides: torch.Tensor,
+    grid_cell_offset: float = 0.5,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    anchor_points, stride_tensor = [], []
+    if feats is None:
+        raise ValueError
+    dtype, device = feats[0].dtype, feats[0].device
+    for i, stride in enumerate(strides):
+        d, h, w = (
+            feats[i].shape[2:]
+            if isinstance(feats, list)
+            else (int(feats[i][0]), int(feats[i][1]), int(feats[i][2]))
+        )
+        sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset
+        sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset
+        sz = torch.arange(end=d, device=device, dtype=dtype) + grid_cell_offset
+        sz, sy, sx = torch.meshgrid(sz, sy, sx, indexing="ij")
+
+        # this creates a tensor of shape (d*h*w, 3) which represents each coordinate triple
+        anchor_points.append(torch.stack((sx, sy, sz), -1).view(-1, 3))
+
+        stride_tensor.append(torch.full((d * h * w, 1), stride.item(), dtype=dtype, device=device))
     return torch.cat(anchor_points), torch.cat(stride_tensor)
 
 
