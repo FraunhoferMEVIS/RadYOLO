@@ -2,27 +2,20 @@
 
 from __future__ import annotations
 
-from typing import overload
-
 import numpy as np
 import numpy.typing as npt
 import torch
 
 
-@overload
-def xyxy2xywh(x: torch.Tensor) -> torch.Tensor: ...
+def xyxy2xywh[T: torch.Tensor | npt.NDArray](x: T) -> T:
+    """Convert bounding box coordinates.
 
-
-@overload
-def xyxy2xywh(x: npt.NDArray) -> npt.NDArray: ...
-
-
-def xyxy2xywh(x: torch.Tensor | npt.NDArray) -> torch.Tensor | npt.NDArray:
-    """Convert bounding box coordinates from (x1, y1, x2, y2) format to (x, y, width, height) format where (x1, y1) is the
-    top-left corner and (x2, y2) is the bottom-right corner.
+    From (x1, y1, x2, y2) format to (x, y, width, height) format where (x1, y1) is the top-left
+    corner and (x2, y2) is the bottom-right corner.
 
     Args:
-        x (np.ndarray | torch.Tensor): The input bounding box coordinates in (x1, y1, x2, y2) format.
+        x (np.ndarray | torch.Tensor): The input bounding box coordinates in (x1, y1, x2, y2)
+        format.
 
     Returns:
         y (np.ndarray | torch.Tensor): The bounding box coordinates in (x, y, width, height) format.
@@ -36,20 +29,17 @@ def xyxy2xywh(x: torch.Tensor | npt.NDArray) -> torch.Tensor | npt.NDArray:
     return y
 
 
-@overload
-def xywh2xyxy(x: torch.Tensor) -> torch.Tensor: ...
+def xywh2xyxy[T: torch.Tensor | npt.NDArray](x: T) -> T:
+    """Convert bounding box coordinates.
 
+    From (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the top-left
+    corner and (x2, y2) is the bottom-right corner.
 
-@overload
-def xywh2xyxy(x: npt.NDArray) -> npt.NDArray: ...
-
-
-def xywh2xyxy(x: torch.Tensor | npt.NDArray) -> torch.Tensor | npt.NDArray:
-    """Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the
-    top-left corner and (x2, y2) is the bottom-right corner. Note: ops per 2 channels faster than per channel.
+    Note: ops per 2 channels faster than per channel.
 
     Args:
-        x (np.ndarray | torch.Tensor): The input bounding box coordinates in (x, y, width, height) format.
+        x (np.ndarray | torch.Tensor): The input bounding box coordinates in (x, y, width, height)
+        format.
 
     Returns:
         y (np.ndarray | torch.Tensor): The bounding box coordinates in (x1, y1, x2, y2) format.
@@ -63,15 +53,7 @@ def xywh2xyxy(x: torch.Tensor | npt.NDArray) -> torch.Tensor | npt.NDArray:
     return y
 
 
-@overload
-def empty_like(x: torch.Tensor) -> torch.Tensor: ...
-
-
-@overload
-def empty_like(x: npt.NDArray) -> npt.NDArray: ...
-
-
-def empty_like(x: torch.Tensor | npt.NDArray) -> torch.Tensor | npt.NDArray:
+def empty_like[T: torch.Tensor | npt.NDArray](x: T) -> T:
     """Creates empty torch.Tensor or np.ndarray with same shape as input and float32 dtype."""
     return (
         torch.empty_like(x, dtype=torch.float32)
