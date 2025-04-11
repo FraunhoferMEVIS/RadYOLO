@@ -54,7 +54,8 @@ class BaseDataset(Dataset, Sized, ABC):
         return len(self.samples)
 
     def __getitem__(self, index: int) -> Label:
-        return self.load_image_and_label(index)
+        with torch.no_grad():
+            return self.load_image_and_label(index)
 
     def get_img_files(self, src_path: Path | list[Path]) -> list[Path]:
         try:
