@@ -102,18 +102,20 @@ class v8DetectionLoss:  # noqa: N801
         m = detect_layer
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
         # self.hyp: DefaultConfig = h
-        self.box = box
-        self.cls = cls
-        self.dfl = dfl
+        self.box_gain = box
+        self.classification_gain = cls
+        self.dfl_gain = dfl
         self.stride: torch.Tensor = m.stride  # model strides
-        self.nc: int = m.nc  # number of classes
+        self.num_classes: int = m.nc  # number of classes
         self.no: int = m.nc + m.reg_max * 4
         self.reg_max: int = m.reg_max
         self.device: torch.device = device
 
         self.use_dfl: bool = m.reg_max > 1
 
-        self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
+        self.assigner = TaskAlignedAssigner(
+            topk=tal_topk, num_classes=self.num_classes, alpha=0.5, beta=6.0
+        )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
@@ -156,7 +158,7 @@ class v8DetectionLoss:  # noqa: N801
         feats = preds[1] if isinstance(preds, tuple) else preds
         pred_distri, pred_scores = torch.cat(
             [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2
-        ).split((self.reg_max * 4, self.nc), 1)
+        ).split((self.reg_max * 4, self.num_classes), 1)
 
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
@@ -212,8 +214,8 @@ class v8DetectionLoss:  # noqa: N801
                 fg_mask,
             )
 
-        loss[0] *= self.box  # box gain
-        loss[1] *= self.cls  # cls gain
-        loss[2] *= self.dfl  # dfl gain
+        loss[0] *= self.box_gain  # box gain
+        loss[1] *= self.classification_gain  # cls gain
+        loss[2] *= self.dfl_gain  # dfl gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
