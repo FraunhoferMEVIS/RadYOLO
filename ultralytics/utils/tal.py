@@ -15,13 +15,14 @@ LOGGER = logging.getLogger(__name__)
 class TaskAlignedAssigner(nn.Module):
     """A task-aligned assigner for object detection.
 
-    This class assigns ground-truth (gt) objects to anchors based on the task-aligned metric, which combines both
-    classification and localization information.
+    This class assigns ground-truth (gt) objects to anchors based on the task-aligned metric, which
+    combines both classification and localization information.
 
     Attributes:
         topk (int): The number of top candidates to consider.
         num_classes (int): The number of object classes.
-        alpha (float): The alpha parameter for the classification component of the task-aligned metric.
+        alpha (float): The alpha parameter for the classification component of the task-aligned
+        metric.
         beta (float): The beta parameter for the localization component of the task-aligned metric.
         eps (float): A small value to prevent division by zero.
     """
@@ -56,7 +57,9 @@ class TaskAlignedAssigner(nn.Module):
         tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
         | tuple[torch.Tensor, ...]
     ):
-        """Compute the task-aligned assignment. Reference code is available at
+        """Compute the task-aligned assignment.
+
+        Reference code is available at
         https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py.
 
         Args:
@@ -107,7 +110,9 @@ class TaskAlignedAssigner(nn.Module):
         gt_bboxes: torch.Tensor,
         mask_gt: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute the task-aligned assignment. Reference code is available at
+        """Compute the task-aligned assignment.
+
+        Reference code is available at
         https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py.
 
         Args:
