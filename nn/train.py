@@ -7,7 +7,7 @@ import math
 import time
 from copy import copy, deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import torch
@@ -54,6 +54,16 @@ class Trainer:
         self.tloss = None
         # self.loss_names = ["Loss"]
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+
+        run_dir = Path() / "runs"
+        if not run_dir.is_dir():
+            msg = f"{run_dir} does not exist or is not a directory!"
+            raise RuntimeError(msg)
+        self.wdir = run_dir / datetime.datetime.now(tz=datetime.UTC).strftime("%Y_%m_%d-%H_%M_%S")
+        self.wdir.mkdir()
+        self.last_model_path = self.wdir / "last.pt"
+        self.best_model_path = self.wdir / "best.pt"
+        self.save_period = self.args.save_period
 
     def setup_model(
         self,
@@ -298,7 +308,7 @@ class Trainer:
         epoch_time_start = time.time()
         train_time_start = time.time()
         epoch = 0
-        # best_fitness = None
+        best_fitness: float | None = None
         optimizer.zero_grad()
         while True:
             # epoch_ = epoch
@@ -355,7 +365,7 @@ class Trainer:
                 with torch.autocast(amp_device_type):
                     # batch = self.preprocess_batch(batch)
                     loss_items: torch.Tensor
-                    loss, loss_items = model(batch)
+                    loss, loss_items = cast("tuple[torch.Tensor, torch.Tensor]", model(batch))
 
                     tloss = (tloss * i + loss_items) / (i + 1) if tloss is not None else loss_items
 
@@ -396,21 +406,24 @@ class Trainer:
 
             # if self.args.val or final_epoch or stop:
             #     metrics, fitness, best_fitness = self.validate(best_fitness=best_fitness, loss=loss)
+            if best_fitness is None:
+                best_fitness = loss.item()
+            best_fitness = min(loss.item(), best_fitness)
 
             stop |= final_epoch
             if args.time:
                 raise NotImplementedError
 
-            # if args.save or final_epoch:
-            #     self.save_model(
-            #         epoch=epoch,
-            #         best_fitness=best_fitness,
-            #         ema=ema,
-            #         optimizer=optimizer,
-            #         train_args=args,
-            #         metrics={},
-            #         fitness=0,
-            #     )
+            if args.save or final_epoch:
+                self.save_model(
+                    epoch=epoch,
+                    best_fitness=best_fitness,
+                    ema=ema,
+                    optimizer=optimizer,
+                    train_args=args,
+                    metrics={},
+                    fitness=0,
+                )
 
             t = time.time()
             epoch_time = t - epoch_time_start
@@ -570,11 +583,11 @@ class Trainer:
         torch.save(dict(checkpoint), buffer)
         serialized_checkpoint = buffer.getvalue()
 
-        self.last.write_bytes(serialized_checkpoint)
+        self.last_model_path.write_bytes(serialized_checkpoint)
         if self.best_fitness == self.fitness:
-            self.best.write_bytes(serialized_checkpoint)
-        if (self.save_period > 0) and (self.epoch % self.save_period == 0):
-            (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_checkpoint)
+            self.best_model_path.write_bytes(serialized_checkpoint)
+        if (self.save_period > 0) and (epoch % self.save_period == 0):
+            (self.wdir / f"epoch{epoch}.pt").write_bytes(serialized_checkpoint)
 
     # def get_validator(self):
     #     self.loss_names = "box_cls", "cls_loss", "dfl_loss"
