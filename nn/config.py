@@ -3,9 +3,10 @@ from __future__ import annotations
 import datetime
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, assert_never, overload
+from typing import Annotated, Any, Literal, Self, TypedDict, assert_never
 
 import annotated_types
+import torch  # noqa: TC002
 import yaml
 from pydantic import (
     AliasChoices,
@@ -19,9 +20,6 @@ from pydantic import (
     field_serializer,
     model_validator,
 )
-
-if TYPE_CHECKING:
-    import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS_DIR = Path("datasets")  # Path(SETTINGS["datasets_dir"])
@@ -244,22 +242,17 @@ class DatasetConfig(BaseModel):
         raise ValueError(msg)
 
 
-class ModelCheckpoint(BaseModel):
+class ModelCheckpoint(TypedDict):
     epoch: int
     best_fitness: float
-    model: None = None
+    model: None
     ema: torch.nn.Module
     updates: int
-    optimizer: dict | None = None
+    optimizer: dict | None
     train_args: DefaultConfig
     train_metrics: dict
     train_results: dict
-    date: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now(datetime.UTC))
-
-    @staticmethod
-    @field_serializer("train_args")
-    def serialize_train_args(train_args: DefaultConfig) -> dict[str, Any]:
-        return train_args.model_dump()
+    date: datetime.datetime
 
 
 def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:

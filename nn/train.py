@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import gc
 import logging
 import math
@@ -564,8 +565,9 @@ class Trainer:
             train_args=train_args,
             train_metrics={**metrics, "fitness": fitness},
             train_results={},
+            date=datetime.datetime.now(tz=datetime.UTC),
         )
-        torch.save(checkpoint.model_dump(), buffer)
+        torch.save(dict(checkpoint), buffer)
         serialized_checkpoint = buffer.getvalue()
 
         self.last.write_bytes(serialized_checkpoint)
@@ -593,18 +595,22 @@ class Trainer:
     #     return metrics, fitness, best_fitness
 
     def resume_training(
-        self, ckpt: ModelCheckpoint | None, optimizer: torch.optim.Optimizer, ema: ModelEMA
+        self,
+        ckpt: ModelCheckpoint | None,
+        optimizer: torch.optim.Optimizer,
+        ema: ModelEMA,
+        best_fitness: float | None,
     ) -> float | None:
         if ckpt is None:  # or not self.resume:
-            return self.best_fitness
-        best_fitness = 0.0
-        start_epoch = ckpt.epoch + 1
-        if ckpt.optimizer is not None:
-            optimizer.load_state_dict(ckpt.optimizer)
-            best_fitness = ckpt.best_fitness
-        if self.ema and ckpt.ema:
-            ema.ema.load_state_dict(ckpt.ema.float().state_dict())
-            ema.updates = ckpt.updates
+            return best_fitness
+        # best_fitness = 0.0
+        start_epoch = ckpt["epoch"] + 1
+        if ckpt["optimizer"] is not None:
+            optimizer.load_state_dict(ckpt["optimizer"])
+            best_fitness = ckpt["best_fitness"]
+        if self.ema and ckpt["ema"]:
+            ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
+            ema.updates = ckpt["updates"]
         assert start_epoch > 0
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",
@@ -616,7 +622,7 @@ class Trainer:
             LOGGER.info(
                 "%s has been trained for %d epochs. Fine-tuning for %d more epochs.",
                 self.model,
-                ckpt.epoch,
+                ckpt["epoch"],
                 self.epochs,
             )
         # self.best_fitness = best_fitness
