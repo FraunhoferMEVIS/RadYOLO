@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from nn.config import DatasetConfig, DefaultConfig, ModelCheckpoint, get_cfg
 from nn.data import DummyDataset, MIPDataset
-from nn.model import HardcodedModel
+from nn.model import Hardcoded3DModel, HardcodedModel
 from nn.util import ModelEMA, init_seeds, select_device
 from ultralytics.data.build import build_dataloader
 from ultralytics.utils.checks import check_imgsz
@@ -88,7 +88,17 @@ class Trainer:
             raise NotImplementedError
             weights_ema = torch.load(self.args.pretrained)
 
-        model = HardcodedModel(
+        # model = HardcodedModel(
+        #     input_channels=input_channels,
+        #     num_classes=num_classes,
+        #     scale=scale,
+        #     box=self.args.box,
+        #     cls=self.args.cls,
+        #     dfl=self.args.dfl,
+        #     device=device,
+        # )
+
+        model = Hardcoded3DModel(
             input_channels=input_channels,
             num_classes=num_classes,
             scale=scale,
