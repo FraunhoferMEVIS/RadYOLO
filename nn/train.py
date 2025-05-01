@@ -15,7 +15,7 @@ import yaml
 from tqdm import tqdm
 
 from nn.config import DatasetConfig, DefaultConfig, ModelCheckpoint, get_cfg
-from nn.data import DummyDataset, MIPDataset
+from nn.data import DummyDataset, MIPDataset, NIfTIDataset
 from nn.model import Hardcoded3DModel, HardcodedModel
 from nn.util import ModelEMA, init_seeds, select_device
 from ultralytics.data.build import build_dataloader
@@ -518,7 +518,7 @@ class Trainer:
     ) -> torch.utils.data.DataLoader:
         assert mode in {"train", "val"}
         dataset = self.build_dataset(
-            img_path=dataset_path, mode=mode, model=model, batch=batch_size, device=device
+            img_path=dataset_path, mode=mode, model=model, batch=batch_size
         )
         shuffle = mode == "train"
         if getattr(dataset, "rect", False) and shuffle:
@@ -535,21 +535,20 @@ class Trainer:
         batch: int,
         mode: Literal["train", "val"] = "train",
         model: torch.nn.Module | None = None,
-        device: torch.device | str = "cpu",
     ) -> torch.utils.data.Dataset:
         grid_size = max(int(model.stride.max() if model else 0), 32)
-        if not isinstance(self.args.imgsz, int):
-            raise TypeError
-        return MIPDataset(
+        # if not isinstance(self.args.imgsz, int):
+        #     raise TypeError
+        # return MIPDataset(
+        return NIfTIDataset(
             src_path=img_path,
-            imgsz=self.args.imgsz,
+            imgsz=tuple(self.args.imgsz),
             # augment=mode == "train",
             augment=False,
             batch_size=batch,
             stride=grid_size,
             pad=0.0 if mode == "train" else 0.5,
             fraction=self.args.fraction if mode == "train" else 1.0,
-            device=device,
         )
         return DummyDataset(256, self.data.nc, (3, 640, 640))
         return YOLODataset(
