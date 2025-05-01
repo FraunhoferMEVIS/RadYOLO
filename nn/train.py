@@ -364,6 +364,7 @@ class Trainer:
                 # Forward
                 with torch.autocast(amp_device_type):
                     # batch = self.preprocess_batch(batch)
+                    batch["img"] = batch["img"].to(self.device, non_blocking=True)
                     loss_items: torch.Tensor
                     loss, loss_items = cast("tuple[torch.Tensor, torch.Tensor]", model(batch))
 
