@@ -30,7 +30,7 @@ DATASETS_DIR = Path("datasets")  # Path(SETTINGS["datasets_dir"])
 
 LOGGER = logging.getLogger(__name__)
 
-Max2List = Annotated[list[int], annotated_types.Len(max_length=2)]
+DimList = Annotated[list[int], annotated_types.Len(min_length=2, max_length=3)]
 
 
 class DefaultConfig(BaseModel):
@@ -48,9 +48,7 @@ class DefaultConfig(BaseModel):
         100  # epochs to wait for no observable improvement for early stopping of training
     )
     batch: int = 16  # number of images per batch (-1 for AutoBatch)
-    imgsz: int | Max2List = (
-        640  # input images size as int for train and val modes, or list[h,w] for predict and export modes
-    )
+    imgsz: DimList  # input images size as int for train and val modes, or list[h,w] for predict and export modes
     save: bool = True  # save train checkpoints and predict results
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     cache: bool = False  # True/ram, disk or False. use cache for data loading
