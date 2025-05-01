@@ -6,7 +6,7 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import Sized
 from pathlib import Path
-from typing import ClassVar, Literal, TypedDict
+from typing import ClassVar, Literal, TypedDict, cast
 
 import cv2
 import nibabel as nib
@@ -273,18 +273,21 @@ class NIfTIDataset(BaseDataset):
     ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
         if not f.is_file():
             raise FileNotFoundError(f"Image Not Found {f}")
-        im = nib.load(f)
-        if not isinstance(im, nibabel.nifti1.Nifti1Image):
+        nifti_image = nib.loadsave.load(f)
+        if not isinstance(nifti_image, nibabel.nifti1.Nifti1Image):
             raise TypeError
-        im_t = torch.as_tensor(
-            im.get_fdata(caching="unchanged", dtype=np.float32),
-            dtype=torch.float32,
-            device=self.device,
-        ).movedim(-1, 0)
-        im_t.clamp_(0.0, 1.0)
-        im_t_scaled = F.interpolate(im_t[None, ...], self.imgsz, mode="trilinear")[0]
+        orig_shape = nifti_image.shape
+        # image = nifti_image.get_fdata(caching="unchanged", dtype=np.float32)
+        image = np.asanyarray(nifti_image.dataobj, dtype=np.float32)
+        im_t = torch.from_numpy(image)
+        im_t = im_t.moveaxis(-1, 0)
+        im_t_scaled = cast(
+            "torch.Tensor", F.interpolate(im_t.unsqueeze_(0), self.imgsz, mode="trilinear")
+        ).squeeze_(0)
+        im_t_scaled = im_t_scaled.div_(255)
+        im_t_scaled = im_t_scaled.clamp_(0.0, 1.0)
 
-        return im_t_scaled, im.shape[1:], im_t_scaled.shape[1:]
+        return im_t_scaled, orig_shape[1:], im_t_scaled.shape[1:]
 
 
 class DummyDataset(Dataset, Sized):
