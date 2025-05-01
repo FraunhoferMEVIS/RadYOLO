@@ -185,7 +185,7 @@ class Trainer:
 
         # Check imgsz
         grid_size = max(int(model.stride.max() if hasattr(model, "stride") else 32), 32)
-        args.imgsz = check_imgsz(args.imgsz, stride=grid_size, floor=grid_size, max_dim=1)
+        # args.imgsz = check_imgsz(args.imgsz, stride=grid_size, floor=grid_size, max_dim=1)
         stride = grid_size
 
         # Batch size # TODO: maybe later integrate this
