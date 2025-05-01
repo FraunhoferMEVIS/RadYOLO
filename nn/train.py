@@ -150,7 +150,7 @@ class Trainer:
         torch.optim.lr_scheduler.LRScheduler,
         Callable[[int], float],
     ]:
-        ckpt, model = self.setup_model(self.data.nc, input_channels=1, scale="n", device=device)
+        ckpt, model = self.setup_model(self.data.nc, input_channels=4, scale="n", device=device)
         model = model.to(device)
         # self.set_model_attributes(model)
 
