@@ -371,7 +371,12 @@ class Trainer:
                     tloss = (tloss * i + loss_items) / (i + 1) if tloss is not None else loss_items
 
                 # Backward
-                scaler.scale(loss).backward()
+                deterministic_restore = torch.are_deterministic_algorithms_enabled()
+                try:
+                    torch.use_deterministic_algorithms(False)
+                    scaler.scale(loss).backward()
+                finally:
+                    torch.use_deterministic_algorithms(deterministic_restore)
 
                 # Optimize
                 if num_iterations - last_opt_step >= accumulate:
