@@ -226,7 +226,7 @@ class DatasetConfig(BaseModel):
                     return self
 
                 msg = (
-                    f"{self.nc}-class dataset requires class indices 0-{self.nc-1}, but you have invalid class indices "
+                    f"{self.nc}-class dataset requires class indices 0-{self.nc - 1}, but you have invalid class indices "
                     f"{min(self.names.keys())}-{max(self.names.keys())} defined in your dataset YAML."
                 )
                 raise KeyError(msg)
