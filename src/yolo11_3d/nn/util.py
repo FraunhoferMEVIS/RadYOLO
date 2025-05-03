@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
 
-from nn.layers import C2PSA, C3, SPPF, Bottleneck, C2f, C3k2, Concat, Conv, Detect, DWConv
+from yolo11_3d.nn.layers import C2PSA, C3, SPPF, Bottleneck, C2f, C3k2, Concat, Conv, Detect, DWConv
 
 PYTHON_VERSION = platform.python_version()
 NUM_THREADS = min(8, max(1, (os.cpu_count() or 1) - 1))

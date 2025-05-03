@@ -8,9 +8,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
-from ultralytics.utils.metrics import bbox_iou, bbox_iou_3d
-from ultralytics.utils.ops import xywh2xyxy, xyzwhd2xyzxyz
-from ultralytics.utils.tal import (
+from yolo11_3d.ultralytics.utils.metrics import bbox_iou, bbox_iou_3d
+from yolo11_3d.ultralytics.utils.ops import xywh2xyxy, xyzwhd2xyzxyz
+from yolo11_3d.ultralytics.utils.tal import (
     TaskAlignedAssigner,
     TaskAlignedAssigner_3D,
     bbox2dist,
@@ -20,8 +20,8 @@ from ultralytics.utils.tal import (
 )
 
 if TYPE_CHECKING:
-    from nn.layers import Detect, Detect_3D
-    from nn.model import Hardcoded3DModel, HardcodedModel
+    from yolo11_3d.nn.layers import Detect, Detect_3D
+    from yolo11_3d.nn.model import Hardcoded3DModel, HardcodedModel
 
 
 class DFLoss(nn.Module):

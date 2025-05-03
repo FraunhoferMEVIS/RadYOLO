@@ -17,7 +17,7 @@ import torch.nn.functional as F  # noqa: N812
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from ultralytics.utils.ops import xyxy2xywh
+from yolo11_3d.ultralytics.utils.ops import xyxy2xywh
 
 LOGGER = logging.getLogger(__name__)
 # IMG_FORMATS = {"jpg", "jpeg", "png"}

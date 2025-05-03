@@ -1,10 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "yolo11-3d"
-version = "0.1.0"
+version = "0.1.0.dev20250503"
+authors = [
+  { name = "Laurens Müller-Groh", email = "laurens.mueller-groh@mevis.fraunhofer.de" },
+]
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "click>=8.1.8",
   "nibabel>=5.3.2",
   "numpy>=2.2.1",
   "onnx>=1.17.0",
@@ -17,8 +25,15 @@ dependencies = [
   "tqdm>=4.67.1",
 ]
 
+[project.scripts]
+"yolo11-3d" = "yolo11_3d:main"
+
 [dependency-groups]
 dev = ["jupyter>=1.1.1", "matplotlib>=3.10.0", "ruff>=0.8.6"]
+
+[tool.uv]
+package = true
+managed = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch" }]
@@ -29,9 +44,16 @@ name = "pytorch"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yolo11_3d"]
+
 [tool.ruff]
 line-length = 100
 required-version = ">=0.8.6"
+src = ["src"]
 
 [tool.ruff.lint]
 select = ["ALL"]

@@ -7,8 +7,8 @@ from typing import Literal, overload
 import torch
 from torch import nn
 
-from nn.config import ModelCheckpoint
-from nn.layers import (
+from yolo11_3d.nn.config import ModelCheckpoint
+from yolo11_3d.nn.layers import (
     C2PSA,
     C2PSA_3D,
     SPPF,
@@ -21,8 +21,8 @@ from nn.layers import (
     Detect,
     Detect_3D,
 )
-from nn.util import initialize_weights, intersect_dicts, make_divisible, parse_model
-from ultralytics.utils.loss import v8DetectionLoss, v8DetectionLoss_3D
+from yolo11_3d.nn.util import initialize_weights, intersect_dicts, make_divisible, parse_model
+from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss, v8DetectionLoss_3D
 
 
 class BaseModel(nn.Module, ABC):

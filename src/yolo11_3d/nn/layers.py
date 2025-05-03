@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, assert_never, cast, overload
 import torch
 from torch import nn
 
-from ultralytics.utils.tal import dist2bbox, make_anchors, make_anchors_3d
+from yolo11_3d.ultralytics.utils.tal import dist2bbox, make_anchors, make_anchors_3d
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

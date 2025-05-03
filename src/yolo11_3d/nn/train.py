@@ -14,13 +14,13 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from nn.config import DatasetConfig, DefaultConfig, ModelCheckpoint, get_cfg
-from nn.data import DummyDataset, MIPDataset, NIfTIDataset
-from nn.model import Hardcoded3DModel, HardcodedModel
-from nn.util import ModelEMA, init_seeds, select_device
-from ultralytics.data.build import build_dataloader
-from ultralytics.utils.checks import check_imgsz
-from ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
+from yolo11_3d.nn.config import DatasetConfig, DefaultConfig, ModelCheckpoint, get_cfg
+from yolo11_3d.nn.data import DummyDataset, MIPDataset, NIfTIDataset
+from yolo11_3d.nn.model import Hardcoded3DModel, HardcodedModel
+from yolo11_3d.nn.util import ModelEMA, init_seeds, select_device
+from yolo11_3d.ultralytics.data.build import build_dataloader
+from yolo11_3d.ultralytics.utils.checks import check_imgsz
+from yolo11_3d.ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
 
 if TYPE_CHECKING:
     from collections.abc import Callable
