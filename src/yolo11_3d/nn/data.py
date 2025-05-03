@@ -23,7 +23,20 @@ LOGGER = logging.getLogger(__name__)
 # IMG_FORMATS = {"jpg", "jpeg", "png"}
 
 
-class BaseDataset(Dataset, Sized, ABC):
+class LazyLabel(TypedDict):
+    im_file: Path
+    shape: tuple[int, int] | tuple[int, int, int]
+    classes: torch.Tensor
+    bboxes: torch.Tensor
+    normalized: bool
+    bbox_format: Literal["xywh"]
+
+
+class Label(LazyLabel):
+    img: torch.Tensor
+
+
+class BaseDataset(Dataset[Label], Sized, ABC):
     img_formats: ClassVar[set[str]]
 
     def __init__(
@@ -137,7 +150,8 @@ class MIPDataset(BaseDataset):
         """Loads 1 image from dataset index 'i', returns (im, resized hw)."""
         # f = self.img_paths[i]
         if not f.is_file():
-            raise FileNotFoundError(f"Image Not Found {f}")
+            msg = f"Image Not Found {f}"
+            raise FileNotFoundError(msg)
         im = cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)[..., None]  # BGR
         if im is None:
             raise ValueError
@@ -161,16 +175,16 @@ class MIPDataset(BaseDataset):
         # Add to buffer if training with augmentations
         if self.augment:
             raise NotImplementedError
-            self.ims[i], self.im_hw0[i], self.im_hw[i] = (
-                im,
-                (h0, w0),
-                im.shape[:2],
-            )  # im, hw_original, hw_resized
-            self.buffer.append(i)
-            if 1 < len(self.buffer) >= self.max_buffer_length:  # prevent empty buffer
-                j = self.buffer.pop(0)
-                # if self.cache != "ram":
-                self.ims[j], self.im_hw0[j], self.im_hw[j] = None, None, None
+            # self.ims[i], self.im_hw0[i], self.im_hw[i] = (
+            #     im,
+            #     (h0, w0),
+            #     im.shape[:2],
+            # )  # im, hw_original, hw_resized
+            # self.buffer.append(i)
+            # if 1 < len(self.buffer) >= self.max_buffer_length:  # prevent empty buffer
+            #     j = self.buffer.pop(0)
+            #     # if self.cache != "ram":
+            #     self.ims[j], self.im_hw0[j], self.im_hw[j] = None, None, None
 
         return im_t_scaled, (h0, w0), im_t_scaled.shape[1:]
 
@@ -272,7 +286,8 @@ class NIfTIDataset(BaseDataset):
         self, f: Path
     ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
         if not f.is_file():
-            raise FileNotFoundError(f"Image Not Found {f}")
+            msg = f"Image Not Found {f}"
+            raise FileNotFoundError(msg)
         nifti_image = nib.loadsave.load(f)
         if not isinstance(nifti_image, nibabel.nifti1.Nifti1Image):
             raise TypeError
@@ -370,16 +385,3 @@ class DummyDataset(Dataset, Sized):
             )
 
         return labels
-
-
-class LazyLabel(TypedDict):
-    im_file: Path
-    shape: tuple[int, int] | tuple[int, int, int]
-    classes: torch.Tensor
-    bboxes: torch.Tensor
-    normalized: bool
-    bbox_format: Literal["xywh"]
-
-
-class Label(LazyLabel):
-    img: torch.Tensor

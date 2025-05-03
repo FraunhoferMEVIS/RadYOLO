@@ -15,10 +15,10 @@ import yaml
 from tqdm import tqdm
 
 from yolo11_3d.nn.config import DatasetConfig, DefaultConfig, ModelCheckpoint, get_cfg
-from yolo11_3d.nn.data import DummyDataset, MIPDataset, NIfTIDataset
+from yolo11_3d.nn.data import BaseDataset, DummyDataset, MIPDataset, NIfTIDataset
 from yolo11_3d.nn.model import Hardcoded3DModel, HardcodedModel
 from yolo11_3d.nn.util import ModelEMA, init_seeds, select_device
-from yolo11_3d.ultralytics.data.build import build_dataloader
+from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
 from yolo11_3d.ultralytics.utils.checks import check_imgsz
 from yolo11_3d.ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
 
@@ -184,7 +184,14 @@ class Trainer:
             raise NotImplementedError
 
         # Check imgsz
-        grid_size = max(int(model.stride.max() if hasattr(model, "stride") else 32), 32)
+        grid_size = max(
+            int(
+                model.stride.max()
+                if hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
+                else 32
+            ),
+            32,
+        )
         # args.imgsz = check_imgsz(args.imgsz, stride=grid_size, floor=grid_size, max_dim=1)
         stride = grid_size
 
@@ -212,7 +219,7 @@ class Trainer:
         # Optimizer
         accumulate = max(round(args.nbs / batch_size), 1)
         weight_decay = args.weight_decay * batch_size * accumulate / args.nbs
-        iterations = math.ceil(len(train_loader.dataset) / max(batch_size, args.nbs)) * epochs
+        iterations = math.ceil(len(train_loader.dataset) / max(batch_size, args.nbs)) * epochs  # pyright: ignore[reportArgumentType]
         optimizer = self.build_optimizer(
             model=model,
             name=args.optimizer,
@@ -515,7 +522,7 @@ class Trainer:
         rank: int = 0,
         mode: Literal["train", "val"] = "train",
         device: torch.device | str = "cpu",
-    ) -> torch.utils.data.DataLoader:
+    ) -> InfiniteDataLoader:
         assert mode in {"train", "val"}
         dataset = self.build_dataset(
             img_path=dataset_path, mode=mode, model=model, batch=batch_size
@@ -535,8 +542,10 @@ class Trainer:
         batch: int,
         mode: Literal["train", "val"] = "train",
         model: torch.nn.Module | None = None,
-    ) -> torch.utils.data.Dataset:
-        grid_size = max(int(model.stride.max() if model else 0), 32)
+    ) -> BaseDataset:
+        grid_size = max(
+            int(model.stride.max() if model and isinstance(model.stride, torch.Tensor) else 0), 32
+        )
         # if not isinstance(self.args.imgsz, int):
         #     raise TypeError
         # return MIPDataset(
@@ -551,22 +560,22 @@ class Trainer:
             fraction=self.args.fraction if mode == "train" else 1.0,
         )
         return DummyDataset(256, self.data.nc, (3, 640, 640))
-        return YOLODataset(
-            img_path=img_path,
-            imgsz=self.args.imgsz,
-            batch_size=batch,
-            augment=mode == "train",  # sugmentation
-            hyp=self.args,  # TODO: probably add a get_hyps_from_cfg function
-            rect=self.args.rect or mode == "val",  # rectangular batches
-            cache=self.args.cache or None,
-            single_cls=self.args.single_cls or False,
-            stride=grid_size,
-            pad=0.0 if mode == "train" else 0.5,
-            task=self.args.task,
-            classes=self.args.classes,
-            data=self.data,
-            fraction=self.args.fraction if mode == "train" else 1.0,
-        )
+        # return YOLODataset(
+        #     img_path=img_path,
+        #     imgsz=self.args.imgsz,
+        #     batch_size=batch,
+        #     augment=mode == "train",  # sugmentation
+        #     hyp=self.args,  # TODO: probably add a get_hyps_from_cfg function
+        #     rect=self.args.rect or mode == "val",  # rectangular batches
+        #     cache=self.args.cache or None,
+        #     single_cls=self.args.single_cls or False,
+        #     stride=grid_size,
+        #     pad=0.0 if mode == "train" else 0.5,
+        #     task=self.args.task,
+        #     classes=self.args.classes,
+        #     data=self.data,
+        #     fraction=self.args.fraction if mode == "train" else 1.0,
+        # )
 
     def save_model(
         self,

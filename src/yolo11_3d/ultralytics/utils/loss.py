@@ -176,7 +176,7 @@ class v8DetectionLoss:  # noqa: N801
             i = targets[:, 0]  # image index
             _, counts = cast(torch.Tensor, i.unique(return_counts=True))
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), ne - 1, device=self.device)
+            out = torch.zeros(batch_size, int(counts.max()), ne - 1, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -314,9 +314,9 @@ class v8DetectionLoss_3D:  # noqa: N801
             out: torch.Tensor = torch.zeros(batch_size, 0, ne - 1, device=self.device)
         else:
             i = targets[:, 0]  # image index
-            _, counts = cast(tuple[torch.Tensor, torch.Tensor], i.unique(return_counts=True))
+            _, counts = cast("tuple[torch.Tensor, torch.Tensor]", i.unique(return_counts=True))
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), ne - 1, device=self.device)
+            out = torch.zeros(batch_size, int(counts.max()), ne - 1, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()

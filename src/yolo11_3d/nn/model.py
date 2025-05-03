@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from copy import deepcopy
-from typing import Literal, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 import torch
 from torch import nn
 
-from yolo11_3d.nn.config import ModelCheckpoint
 from yolo11_3d.nn.layers import (
     C2PSA,
     C2PSA_3D,
@@ -21,163 +18,165 @@ from yolo11_3d.nn.layers import (
     Detect,
     Detect_3D,
 )
-from yolo11_3d.nn.util import initialize_weights, intersect_dicts, make_divisible, parse_model
+from yolo11_3d.nn.util import intersect_dicts, make_divisible
 from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss, v8DetectionLoss_3D
 
+if TYPE_CHECKING:
+    from yolo11_3d.nn.config import ModelCheckpoint
 
-class BaseModel(nn.Module, ABC):
-    @property
-    @abstractmethod
-    def model(self) -> nn.Sequential: ...
+# class BaseModel(nn.Module, ABC):
+#     @property
+#     @abstractmethod
+#     def model(self) -> nn.Sequential: ...
 
-    @property
-    @abstractmethod
-    def save(self) -> list[int]: ...
+#     @property
+#     @abstractmethod
+#     def save(self) -> list[int]: ...
 
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        return self.predict(x, *args, **kwargs)
+#     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+#         return self.predict(x, *args, **kwargs)
 
-    def predict(
-        self,
-        x: torch.Tensor,
-        # profile: bool = False,
-        # visualize: bool = False,
-        augment: bool = False,
-        # embed: list[int] | None = None,
-    ) -> torch.Tensor:
-        if augment:
-            return self._predict_augment(x)
-        return self._predict_once(
-            x,
-            # profile,
-            # visualize,
-            # embed,
-        )
+#     def predict(
+#         self,
+#         x: torch.Tensor,
+#         # profile: bool = False,
+#         # visualize: bool = False,
+#         augment: bool = False,
+#         # embed: list[int] | None = None,
+#     ) -> torch.Tensor:
+#         if augment:
+#             return self._predict_augment(x)
+#         return self._predict_once(
+#             x,
+#             # profile,
+#             # visualize,
+#             # embed,
+#         )
 
-    def _predict_once(
-        self,
-        x_in: torch.Tensor,
-        # profile: bool = False,
-        # visualize: bool = False,
-        # embed: list[int] | None = None,
-    ) -> torch.Tensor:
-        x: torch.Tensor | list[torch.Tensor] = x_in
-        y: torch.Tensor = x
-        ys: list[torch.Tensor | None] = []
-        # dt = []
-        # embeddings: list[torch.Tensor] = []
-        for m in self.model:
-            if m.f != -1:
-                if isinstance(m.f, int):
-                    x_ = ys[m.f]
-                    if x_ is None:
-                        raise ValueError  # TODO(muellergroh): add error message
-                    x = x_
-                else:
-                    x_prev = x
-                    x = []
+#     def _predict_once(
+#         self,
+#         x_in: torch.Tensor,
+#         # profile: bool = False,
+#         # visualize: bool = False,
+#         # embed: list[int] | None = None,
+#     ) -> torch.Tensor:
+#         x: torch.Tensor | list[torch.Tensor] = x_in
+#         y: torch.Tensor = x
+#         ys: list[torch.Tensor | None] = []
+#         # dt = []
+#         # embeddings: list[torch.Tensor] = []
+#         for m in self.model:
+#             if m.f != -1:
+#                 if isinstance(m.f, int):
+#                     x_ = ys[m.f]
+#                     if x_ is None:
+#                         raise ValueError  # TODO(muellergroh): add error message
+#                     x = x_
+#                 else:
+#                     x_prev = x
+#                     x = []
 
-                    for j in m.f:
-                        j: int
-                        if j == -1:
-                            if not isinstance(x_prev, torch.Tensor):
-                                # the idea is to break a potential recursion of adding lists to
-                                # lists, this should not happen
-                                raise ValueError  # TODO(muellergroh): add error message
-                            x.append(x_prev)
-                        else:
-                            x_ = ys[j]
-                            if x_ is None:
-                                raise ValueError  # TODO(muellergroh): add error message
-                            x.append(x_)
+#                     for j in m.f:
+#                         j: int
+#                         if j == -1:
+#                             if not isinstance(x_prev, torch.Tensor):
+#                                 # the idea is to break a potential recursion of adding lists to
+#                                 # lists, this should not happen
+#                                 raise ValueError  # TODO(muellergroh): add error message
+#                             x.append(x_prev)
+#                         else:
+#                             x_ = ys[j]
+#                             if x_ is None:
+#                                 raise ValueError  # TODO(muellergroh): add error message
+#                             x.append(x_)
 
-            # if profile:
-            #     self._profile_one_layer(m, x_, dt)
-            x = y = m(x)
-            ys.append(y if m.i in self.save else None)
-            # if visualize:
-            #     feature_visualization(x_, m.type, m.i, save_dir=visualize)
-            # if embed and m.i in embed:
-            #     embeddings.append(
-            #         nn.functional.adaptive_avg_pool2d(
-            #             y,
-            #             (
-            #                 1,
-            #                 1,
-            #             ),
-            #         )
-            #         .squeeze(-1)
-            #         .squeeze(-1)
-            #     )
-            #     if m.i == max(embed):
-            #         return torch.unbind(torch.cat(embeddings, 1), dim=0)
-        return y
+#             # if profile:
+#             #     self._profile_one_layer(m, x_, dt)
+#             x = y = m(x)
+#             ys.append(y if m.i in self.save else None)
+#             # if visualize:
+#             #     feature_visualization(x_, m.type, m.i, save_dir=visualize)
+#             # if embed and m.i in embed:
+#             #     embeddings.append(
+#             #         nn.functional.adaptive_avg_pool2d(
+#             #             y,
+#             #             (
+#             #                 1,
+#             #                 1,
+#             #             ),
+#             #         )
+#             #         .squeeze(-1)
+#             #         .squeeze(-1)
+#             #     )
+#             #     if m.i == max(embed):
+#             #         return torch.unbind(torch.cat(embeddings, 1), dim=0)
+#         return y
 
-    def _predict_augment(self, x: torch.Tensor) -> torch.Tensor:
-        return self._predict_once(x)
+#     def _predict_augment(self, x: torch.Tensor) -> torch.Tensor:
+#         return self._predict_once(x)
 
-    def load(self, weights: dict | nn.Module, verbose: bool = True) -> None:
-        model: nn.Module = weights["model"] if isinstance(weights, dict) else weights
-        csd = model.float().state_dict()
-        csd = intersect_dicts(csd, self.state_dict())
-        self.load_state_dict(csd, strict=False)
+#     def load(self, weights: dict | nn.Module, verbose: bool = True) -> None:
+#         model: nn.Module = weights["model"] if isinstance(weights, dict) else weights
+#         csd = model.float().state_dict()
+#         csd = intersect_dicts(csd, self.state_dict())
+#         self.load_state_dict(csd, strict=False)
 
 
-class DetectionModel(BaseModel):
-    def __init__(
-        self,
-        cfg: dict,
-        ch: int = 3,
-        nc: int | None = None,
-        verbose: bool = True,
-    ) -> None:
-        super().__init__()
-        self.yaml = cfg
+# class DetectionModel(BaseModel):
+#     def __init__(
+#         self,
+#         cfg: dict,
+#         ch: int = 3,
+#         nc: int | None = None,
+#         verbose: bool = True,
+#     ) -> None:
+#         super().__init__()
+#         self.yaml = cfg
 
-        ch = self.yaml["ch"] = self.yaml.get("ch", ch)
-        if nc and nc != self.yaml["nc"]:
-            self.yaml["nc"] = nc
-        self._model, self._save = parse_model(
-            deepcopy(self.yaml), input_channels=ch, verbose=verbose
-        )
-        self.names = {i: f"{i}" for i in range(self.yaml["nc"])}
-        self.inplace = self.yaml.get("inplace", True)
+#         ch = self.yaml["ch"] = self.yaml.get("ch", ch)
+#         if nc and nc != self.yaml["nc"]:
+#             self.yaml["nc"] = nc
+#         self._model, self._save = parse_model(
+#             deepcopy(self.yaml), input_channels=ch, verbose=verbose
+#         )
+#         self.names = {i: f"{i}" for i in range(self.yaml["nc"])}
+#         self.inplace = self.yaml.get("inplace", True)
 
-        m = self.model[-1]
-        if isinstance(m, Detect):
-            s = 256
-            m.inplace = self.inplace
+#         m = self.model[-1]
+#         if isinstance(m, Detect):
+#             s = 256
+#             m.inplace = self.inplace
 
-            m.stride = torch.tensor(
-                [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))]
-            )
-            self.stride = m.stride
-            m.bias_init()
-        else:
-            self.stride = torch.Tensor([32])
+#             m.stride = torch.tensor(
+#                 [s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))]
+#             )
+#             self.stride = m.stride
+#             m.bias_init()
+#         else:
+#             self.stride = torch.Tensor([32])
 
-        initialize_weights(self)
+#         initialize_weights(self)
 
-    @property
-    def model(self) -> nn.Sequential:
-        return self._model
+#     @property
+#     def model(self) -> nn.Sequential:
+#         return self._model
 
-    @property
-    def save(self) -> list[int]:
-        return self._save
+#     @property
+#     def save(self) -> list[int]:
+#         return self._save
 
-    def _predict_augment(self, x: torch.Tensor) -> torch.Tensor:
-        # img_size = x.shape[-2:]
-        # s = [1, 0.83, 0.67]
-        # f = [None, 3, None]
-        f = [None, 3]  # TODO(muellergroh): check axis for 3D
-        y = []
-        # for si, fi in zip(s, f):
-        for fi in f:
-            xi = x.flip(fi) if fi else x
-            yi = super().predict(xi)  # TODO(muellergroh): check indexing
-            y.append(yi)
-        return torch.cat(y, -1)  # TODO(muellergroh): check indexing
+#     def _predict_augment(self, x: torch.Tensor) -> torch.Tensor:
+#         # img_size = x.shape[-2:]
+#         # s = [1, 0.83, 0.67]
+#         # f = [None, 3, None]
+#         f = [None, 3]  # TODO(muellergroh): check axis for 3D
+#         y = []
+#         # for si, fi in zip(s, f):
+#         for fi in f:
+#             xi = x.flip(fi) if fi else x
+#             yi = super().predict(xi)  # TODO(muellergroh): check indexing
+#             y.append(yi)
+#         return torch.cat(y, -1)  # TODO(muellergroh): check indexing
 
 
 class HardcodedModel(nn.Module):
@@ -358,13 +357,13 @@ class HardcodedModel(nn.Module):
         return self.predict(x, *args, **kwargs)
 
     def loss(
-        self, batch: dict, preds: torch.Tensor | None = None
+        self, batch: dict, preds: list[torch.Tensor] | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         preds = self.forward(batch["img"]) if preds is None else preds
         return self.criterion(preds, batch)
 
     def load(self, weights: ModelCheckpoint | nn.Module) -> None:
-        model = weights.ema if isinstance(weights, ModelCheckpoint) else weights
+        model = weights["ema"] if isinstance(weights, dict) else weights
         csd = model.float().state_dict()
         csd = intersect_dicts(csd, self.state_dict())
         self.load_state_dict(csd, strict=False)
@@ -413,7 +412,7 @@ class Hardcoded3DModel(nn.Module):
         cls: float,
         dfl: float,
         device: torch.device,
-    ):
+    ) -> None:
         super().__init__()
 
         scales: dict[str, tuple[float, float, int]] = {
@@ -588,7 +587,7 @@ class Hardcoded3DModel(nn.Module):
         return self.criterion(preds, batch)
 
     def load(self, weights: ModelCheckpoint | nn.Module) -> None:
-        model = weights.ema if isinstance(weights, ModelCheckpoint) else weights
+        model = weights["ema"] if isinstance(weights, dict) else weights
         csd = model.float().state_dict()
         csd = intersect_dicts(csd, self.state_dict())
         self.load_state_dict(csd, strict=False)

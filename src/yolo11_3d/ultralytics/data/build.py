@@ -4,37 +4,39 @@ from __future__ import annotations
 
 import os
 import random
-from collections.abc import Generator
+from collections.abc import Generator, Sized
 from typing import Any, NoReturn
 
 import numpy as np
 import torch
 from torch.utils.data import dataloader, sampler
 
+from yolo11_3d.nn.data import BaseDataset, Label
 
-class InfiniteDataLoader(dataloader.DataLoader):
+
+class InfiniteDataLoader(dataloader.DataLoader[Label], Sized):
     """Dataloader that reuses workers.
 
     Uses same syntax as vanilla DataLoader.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         """Dataloader that infinitely recycles workers, inherits from DataLoader."""
         super().__init__(*args, **kwargs)
         # self.batch_sampler = _RepeatSampler(self.batch_sampler)
-        object.__setattr__(self, "batch_sampler", _RepeatSampler(self.batch_sampler))
+        object.__setattr__(self, "batch_sampler", _RepeatSampler(self.batch_sampler))  # pyright: ignore[reportArgumentType]
         self.iterator = super().__iter__()
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Returns the length of the batch sampler's sampler."""
-        return len(self.batch_sampler.sampler)
+        return len(self.batch_sampler.sampler)  # pyright: ignore[reportArgumentType, reportAttributeAccessIssue, reportOptionalMemberAccess]
 
-    def __iter__(self) -> Generator[Any, Any, None]:
+    def __iter__(self) -> Generator[Label]:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Creates a sampler that repeats indefinitely."""
         for _ in range(len(self)):
             yield next(self.iterator)
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset iterator.
 
         This is useful when we want to modify settings of dataset while training.
@@ -59,7 +61,7 @@ class _RepeatSampler:
             yield from iter(self.sampler)
 
 
-def seed_worker(worker_id):  # noqa
+def seed_worker(worker_id) -> None:
     """Set dataloader worker seed https://pytorch.org/docs/stable/notes/randomness.html#dataloader."""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
@@ -67,7 +69,7 @@ def seed_worker(worker_id):  # noqa
 
 
 def build_dataloader(
-    dataset: torch.utils.data.Dataset,
+    dataset: BaseDataset,
     batch: int,
     workers: int,
     shuffle: bool = True,
