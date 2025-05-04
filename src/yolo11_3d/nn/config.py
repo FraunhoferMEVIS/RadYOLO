@@ -31,6 +31,11 @@ LOGGER = logging.getLogger(__name__)
 DimList = Annotated[list[int], annotated_types.Len(min_length=2, max_length=3)]
 
 
+class ModelConfig(BaseModel):
+    nc: int
+    scale: Literal["n", "s", "m", "l", "x"]
+
+
 class DefaultConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
@@ -70,7 +75,7 @@ class DefaultConfig(BaseModel):
     )
     cos_lr: bool = False  # use cosine learning rate scheduler
     close_mosaic: int = 10  # disable mosaic augmentation for final epochs (0 to disable)
-    resume: bool = False  # resume training from last checkpoint
+    resume: bool | FilePath = False  # resume training from last checkpoint
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
     fraction: float = 1.0  # dataset fraction to train on
     profile: bool = False  # profile ONNX and TensorRT speeds during training for loggers
@@ -255,6 +260,22 @@ class ModelCheckpoint(TypedDict):
     date: datetime.datetime
 
 
+def model_checkpoint_from_torch(checkpoint: Path) -> ModelCheckpoint:
+    ckpt = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    return ModelCheckpoint(
+        epoch=ckpt["epoch"],
+        best_fitness=ckpt["best_fitness"],
+        model=ckpt["model"],
+        ema=ckpt["ema"],
+        updates=ckpt["updates"],
+        optimizer=ckpt["optimizer"],
+        train_args=DefaultConfig.model_validate(ckpt["train_args"]),
+        train_metrics=ckpt["train_metrics"],
+        train_results=ckpt["train_results"],
+        date=ckpt["date"],
+    )
+
+
 def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:
     with Path(config_path).open() as f:
         yaml_config = yaml.safe_load(f)
@@ -274,3 +295,9 @@ def get_dataset_cfg(config_path: str | Path) -> DatasetConfig:
     with Path(config_path).open() as f:
         yaml_config = yaml.safe_load(f)
     return DatasetConfig.model_validate(yaml_config)
+
+
+def get_model_cfg(config_path: str | Path) -> ModelConfig:
+    with Path(config_path).open() as f:
+        yaml_config = yaml.safe_load(f)
+    return ModelConfig.model_validate(yaml_config)

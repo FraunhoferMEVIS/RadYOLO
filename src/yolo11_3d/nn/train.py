@@ -14,7 +14,14 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from yolo11_3d.nn.config import DatasetConfig, DefaultConfig, ModelCheckpoint, get_cfg
+from yolo11_3d.nn.config import (
+    DatasetConfig,
+    DefaultConfig,
+    ModelCheckpoint,
+    get_cfg,
+    get_model_cfg,
+    model_checkpoint_from_torch,
+)
 from yolo11_3d.nn.data import BaseDataset, DummyDataset, MIPDataset, NIfTIDataset
 from yolo11_3d.nn.model import Hardcoded3DModel, HardcodedModel
 from yolo11_3d.nn.util import ModelEMA, init_seeds, select_device
@@ -31,6 +38,12 @@ LOGGER = logging.getLogger(__name__)
 class Trainer:
     def __init__(self, cfg: str | Path) -> None:
         self.args = get_cfg(cfg, {})
+        self.model_config = get_model_cfg(self.args.model)
+        run_dir = Path() / "runs"
+        if not run_dir.is_dir():
+            msg = f"{run_dir} does not exist or is not a directory!"
+            raise RuntimeError(msg)
+        self.check_resume(run_dir)
         self.device = select_device(self.args.device)
 
         init_seeds(self.args.seed, deterministic=self.args.deterministic)
@@ -55,15 +68,35 @@ class Trainer:
         # self.loss_names = ["Loss"]
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
 
-        run_dir = Path() / "runs"
-        if not run_dir.is_dir():
-            msg = f"{run_dir} does not exist or is not a directory!"
-            raise RuntimeError(msg)
         self.wdir = run_dir / datetime.datetime.now(tz=datetime.UTC).strftime("%Y_%m_%d-%H_%M_%S")
         self.wdir.mkdir()
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
         self.save_period = self.args.save_period
+
+    def check_resume(self, run_dir: Path) -> None:
+        resume = self.args.resume
+        if resume:
+            try:
+                last = max(
+                    run_dir.rglob("**/last.pt"), key=lambda p: p.stat().st_ctime, default=None
+                )
+                if last is None:
+                    self.resume = False
+                    return
+
+                ckpt_args = model_checkpoint_from_torch(last)["train_args"]
+                if not Path(ckpt_args.data).exists():
+                    ckpt_args.data = self.args.data
+
+                resume = True
+                self.args = ckpt_args
+                self.args.model = self.args.resume = last
+
+            except Exception as e:
+                msg = "Resume checkpoint not found, please pass a valid checkpoint to resume from."
+                raise FileNotFoundError(msg) from e
+        self.resume = resume
 
     def setup_model(
         self,
@@ -79,11 +112,9 @@ class Trainer:
         weights_ema = None
         checkpoint: ModelCheckpoint | None = None
         if checkpoint_path.suffix == ".pt" and checkpoint_path.exists():
-            checkpoint = ModelCheckpoint.model_validate(
-                torch.load(checkpoint_path, weights_only=False)
-            )
-            self.args = self.args.model_copy(update=checkpoint.train_args.model_dump())
-            weights_ema = checkpoint.ema.to(self.device).float()
+            checkpoint = model_checkpoint_from_torch(checkpoint_path)
+            self.args = self.args.model_copy(update=checkpoint["train_args"].model_dump())
+            weights_ema = checkpoint["ema"].to(self.device).float()
         elif isinstance(self.args.pretrained, Path):
             raise NotImplementedError
             weights_ema = torch.load(self.args.pretrained)
@@ -131,7 +162,7 @@ class Trainer:
         args: DefaultConfig,
         batch_size: int,
         epochs: int,
-        start_epoch: int = 1,
+        start_epoch: int = 0,
     ) -> tuple[
         torch.nn.Module,
         bool,
@@ -149,8 +180,15 @@ class Trainer:
         bool,
         torch.optim.lr_scheduler.LRScheduler,
         Callable[[int], float],
+        float | None,
+        int,
     ]:
-        ckpt, model = self.setup_model(self.data.nc, input_channels=4, scale="n", device=device)
+        ckpt, model = self.setup_model(
+            self.data.nc,
+            input_channels=self.model_config.nc,
+            scale=self.model_config.scale,
+            device=device,
+        )
         model = model.to(device)
         # self.set_model_attributes(model)
 
@@ -232,7 +270,7 @@ class Trainer:
         # Scheduler
         scheduler, lf = self._setup_scheduler(optimizer)
         stop = False
-        # self.resume_training(ckpt)
+        best_fitness, start_epoch = self.resume_training(ckpt, optimizer, ema)
         scheduler.last_epoch = start_epoch - 1
         return (
             model,
@@ -251,6 +289,8 @@ class Trainer:
             stop,
             scheduler,
             lf,
+            best_fitness,
+            start_epoch,
         )
 
     def train(self) -> None:
@@ -274,6 +314,8 @@ class Trainer:
             stop,
             scheduler,
             lf,
+            best_fitness,
+            start_epoch,
         ) = self._setup_train(
             world_size=world_size,
             device=self.device,
@@ -296,6 +338,8 @@ class Trainer:
             amp_device_type="cuda",
             ema=ema,
             accumulate=accumulate,
+            best_fitness=best_fitness,
+            start_epoch=start_epoch,
         )
 
     def _train_loop(
@@ -314,6 +358,8 @@ class Trainer:
         ema: ModelEMA,
         accumulate: int,
         # world_size=1,
+        best_fitness: float | None,
+        start_epoch: int,
     ) -> None:
         stop = False
         num_batches = len(train_loader)
@@ -324,8 +370,7 @@ class Trainer:
         epoch_time = None
         epoch_time_start = time.time()
         train_time_start = time.time()
-        epoch = 0
-        best_fitness: float | None = None
+        epoch = start_epoch
         optimizer.zero_grad()
         while True:
             # epoch_ = epoch
@@ -636,10 +681,10 @@ class Trainer:
         ckpt: ModelCheckpoint | None,
         optimizer: torch.optim.Optimizer,
         ema: ModelEMA,
-        best_fitness: float | None,
-    ) -> float | None:
+        best_fitness: float | None = None,
+    ) -> tuple[float | None, int]:
         if ckpt is None:  # or not self.resume:
-            return best_fitness
+            return best_fitness, 0
         # best_fitness = 0.0
         start_epoch = ckpt["epoch"] + 1
         if ckpt["optimizer"] is not None:
@@ -663,7 +708,7 @@ class Trainer:
                 self.epochs,
             )
         # self.best_fitness = best_fitness
-        return best_fitness
+        return best_fitness, start_epoch
 
     # def auto_batch(self):
     #     train_dataset = self.build_dataset(trainset, mode="train", batch=16)
