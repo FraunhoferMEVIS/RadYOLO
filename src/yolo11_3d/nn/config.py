@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Self, TypedDict, assert_never
 
 import annotated_types
-import torch  # noqa: TC002
+import torch
 import yaml
 from pydantic import (
     AliasChoices,
