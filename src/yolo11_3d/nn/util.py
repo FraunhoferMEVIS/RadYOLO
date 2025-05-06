@@ -16,7 +16,20 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
 
-from yolo11_3d.nn.layers import C2PSA, C3, SPPF, Bottleneck, C2f, C3k2, Concat, Conv, Detect, DWConv
+from yolo11_3d.nn.layers import (
+    C2PSA,
+    C3,
+    SPPF,
+    Bottleneck,
+    C2f,
+    C2f_3D,
+    C3k2,
+    Concat,
+    Conv,
+    Detect,
+    Detect_3D,
+    DWConv,
+)
 
 PYTHON_VERSION = platform.python_version()
 NUM_THREADS = min(8, max(1, (os.cpu_count() or 1) - 1))
@@ -196,24 +209,28 @@ def model_to_dict(model: nn.Module) -> dict:
     }
 
 
-def export_model(model: nn.Module, name: str) -> Path:
-    inputs = torch.randn((1, 3, 320, 320)).to("cpu")
+def export_model(
+    model: nn.Module, input_shape: tuple[int, ...], dest: Path | str, copy: bool = False
+) -> Path:
+    inputs = torch.randn((1, *input_shape)).to("cpu")
+    if copy:
+        model = deepcopy(model)
     model.to("cpu")
     for p in model.parameters():
         p.requires_grad = False
     model.eval()
     model.float()
 
-    model(inputs)
-    model(inputs)
+    for _ in range(2):
+        model(inputs)
 
     for m in model.modules():
-        if isinstance(m, Detect):
+        if isinstance(m, Detect | Detect_3D):
             m.export = True
-        if isinstance(m, C2f):
+        if isinstance(m, C2f | C2f_3D):
             m.forward = m.forward_split
 
-    onnx_path = Path(name).with_suffix(".onnx")
+    onnx_path = Path(dest).with_suffix(".onnx")
 
     torch.onnx.export(
         model,

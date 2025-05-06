@@ -68,9 +68,28 @@ def train(config: Path) -> int:
     ),
 )
 def export(model_path: Path) -> int:
-    """Not implemented!"""
-    LOGGER.error("This command is not implemented yet.")
-    return 1
+    """Export a ModelCheckpoint to ONNX-Format.
+
+    This command expects a PATH to a ModelCheckpoint loadable by `torch.load()`, usually
+    a file ending with `.pt`.
+
+    It exports the containing model to ONNX next to it.
+    """
+    try:
+        # TODO(muellergroh) load model checkpoint
+        checkpoint = model_checkpoint_from_torch(model_path)
+
+        model = checkpoint["ema"]
+        train_args = checkpoint["train_args"]
+        num_classes = getattr(model, "num_classes", 3)
+        input_shape = (num_classes, *train_args.imgsz)
+
+        export_model(model, input_shape, model_path, copy=False)
+    except Exception as e:
+        LOGGER.exception("An unexpected error occurred", exc_info=e)
+        return 1
+    else:
+        return 0
 
 
 @main.command("onnx-compare")

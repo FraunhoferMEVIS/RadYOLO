@@ -200,6 +200,24 @@ class DFL(nn.Module):
         return self.conv(x.view(b, 4, self.in_channels, a).transpose(2, 1).softmax(1)).view(b, 4, a)
 
 
+class DFL_3D(nn.Module):
+    """Integral module of Distribution Focal Loss (DFL).
+
+    Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
+    """
+
+    def __init__(self, in_channels: int = 16) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, 1, 1, bias=False).requires_grad_(False)
+        x = torch.arange(in_channels, dtype=torch.float)
+        self.conv.weight.data[:] = nn.Parameter(x.view(1, in_channels, 1, 1))
+        self.in_channels = in_channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, _, a = x.shape
+        return self.conv(x.view(b, 6, self.in_channels, a).transpose(2, 1).softmax(1)).view(b, 6, a)
+
+
 class Bottleneck(nn.Module):
     def __init__(  # noqa: PLR0913
         self,
@@ -897,7 +915,7 @@ class Detect_3D(nn.Module):
             )
             for x in ch
         )
-        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+        self.dfl = DFL_3D(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     def forward(
         self, x: list[torch.Tensor]
@@ -918,7 +936,7 @@ class Detect_3D(nn.Module):
             self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
         # TODO(muellergroh): check if self.reg_max * 4 is still valid here or we should use *6
-        box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
+        box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
         dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
 
         return torch.cat((dbox, cls.sigmoid()), 1)
