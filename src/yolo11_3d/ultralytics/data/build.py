@@ -74,6 +74,7 @@ def build_dataloader(
     workers: int,
     shuffle: bool = True,
     rank: int = -1,
+    device: torch.device | str = "cpu",
 ) -> InfiniteDataLoader:
     """Return an InfiniteDataLoader or DataLoader for training or validation set."""
     batch = min(batch, len(dataset))
@@ -88,7 +89,7 @@ def build_dataloader(
         shuffle=shuffle and sampler is None,
         num_workers=nw,
         sampler=sampler,
-        pin_memory=True,
+        pin_memory=(device.type if isinstance(device, torch.device) else device) != "cpu",
         collate_fn=getattr(dataset, "collate_fn", None),
         worker_init_fn=seed_worker,
         generator=generator,

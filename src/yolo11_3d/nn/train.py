@@ -339,7 +339,7 @@ class Trainer:
             scheduler=scheduler,
             scaler=scaler,
             lf=lf,
-            amp_device_type="cuda",
+            amp_device_type=self.device.type,
             ema=ema,
             accumulate=accumulate,
             best_fitness=best_fitness,
@@ -358,7 +358,7 @@ class Trainer:
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         scaler: torch.amp.grad_scaler.GradScaler,
         lf: Callable[[int], float],
-        amp_device_type: Literal["cuda", "cpu"],
+        amp_device_type: str,
         ema: ModelEMA,
         accumulate: int,
         # world_size=1,
@@ -589,7 +589,7 @@ class Trainer:
             )
             shuffle = False
         workers = self.args.workers if mode == "train" else self.args.workers * 2
-        return build_dataloader(dataset, batch_size, workers, shuffle, rank)
+        return build_dataloader(dataset, batch_size, workers, shuffle, rank, device)
 
     def build_dataset(
         self,
