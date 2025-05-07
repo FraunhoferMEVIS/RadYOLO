@@ -39,7 +39,7 @@ class Trainer:
     def __init__(self, cfg: str | Path) -> None:
         self.args = get_cfg(cfg, {})
         self.model_config = get_model_cfg(self.args.model)
-        run_dir = Path() / "runs"
+        run_dir = Path() / (self.args.project or "runs")
         if not run_dir.is_dir():
             msg = f"{run_dir} does not exist or is not a directory!"
             raise RuntimeError(msg)
