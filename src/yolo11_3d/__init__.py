@@ -81,8 +81,8 @@ def export(model_path: Path) -> int:
 
         model = checkpoint["ema"]
         train_args = checkpoint["train_args"]
-        num_classes = getattr(model, "num_classes", 3)
-        input_shape = (num_classes, *train_args.imgsz)
+        input_channels = getattr(model, "input_channels", 3)
+        input_shape = (input_channels, *train_args.imgsz)
 
         export_model(model, input_shape, model_path, copy=False)
     except Exception as e:

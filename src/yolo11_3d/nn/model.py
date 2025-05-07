@@ -191,6 +191,8 @@ class HardcodedModel(nn.Module):
         device: torch.device,
     ) -> None:
         super().__init__()
+        self.input_channels = input_channels
+        self.num_classes = num_classes
 
         scales = {
             "n": (0.50, 0.25, 1024),
@@ -414,6 +416,8 @@ class Hardcoded3DModel(nn.Module):
         device: torch.device,
     ) -> None:
         super().__init__()
+        self.input_channels = input_channels
+        self.num_classes = num_classes
 
         scales: dict[str, tuple[float, float, int]] = {
             "n": (0.50, 0.25, 1024),
