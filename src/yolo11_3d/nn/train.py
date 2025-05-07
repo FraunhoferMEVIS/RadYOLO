@@ -76,6 +76,7 @@ class Trainer:
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
         self.save_period = self.args.save_period
+        self.train_loss_csv_path = self.wdir / "train_loss.csv"
 
     def check_resume(self, run_dir: Path) -> None:
         resume = self.args.resume
@@ -374,6 +375,8 @@ class Trainer:
         epoch_time_start = time.time()
         train_time_start = time.time()
         epoch = start_epoch
+        with self.train_loss_csv_path.open("w", encoding="utf-8") as f:
+            f.write(",".join(self.loss_names) + "\n")
         optimizer.zero_grad()
         while True:
             # epoch_ = epoch
@@ -393,7 +396,7 @@ class Trainer:
                 # "Instances",
                 "Size",
             )
-            tloss = None
+            tloss: torch.Tensor | None = None
             loss: torch.Tensor | None = None
             for i, batch in pbar:
                 # Warmup
@@ -466,6 +469,10 @@ class Trainer:
                         batch["img"].shape[-1],  # imgsz
                     )
                 )
+
+            if tloss is not None:
+                with self.train_loss_csv_path.open("a", encoding="utf-8") as f:
+                    f.write(",".join(map(str, tloss.tolist())) + "\n")
 
             if loss is None:
                 raise RuntimeError
