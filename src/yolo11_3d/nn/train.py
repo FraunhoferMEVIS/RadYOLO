@@ -68,8 +68,11 @@ class Trainer:
         # self.loss_names = ["Loss"]
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
 
-        self.wdir = run_dir / datetime.datetime.now(tz=datetime.UTC).strftime("%Y_%m_%d-%H_%M_%S")
-        self.wdir.mkdir()
+        self.wdir = run_dir / (
+            str(self.args.name)
+            or datetime.datetime.now(tz=datetime.UTC).strftime("%Y_%m_%d-%H_%M_%S")
+        )
+        self.wdir.mkdir(exist_ok=self.args.exist_ok)
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
         self.save_period = self.args.save_period
