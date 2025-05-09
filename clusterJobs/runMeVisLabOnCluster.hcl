@@ -125,15 +125,15 @@ job "breastmarc-MeVisLab_muellergroh" {
         #   }
         # }
 
-        # volumes = [
+        volumes = [
         #   "/ssd/docker/volumes/deep_learning_${NOMAD_ALLOC_ID}/_data/input:/input",
         #   "/ssd/docker/volumes/deep_learning_${NOMAD_ALLOC_ID}/_data/output:/output",
-        #   "/ssd/docker/volumes/deep_learning_${NOMAD_ALLOC_ID}/_data/model_repository:/model_repository:ro"
-        # ]
+          "/ssd/docker/volumes/deep_learning_${NOMAD_ALLOC_ID}/_data/model_repository:/model_repository:ro"
+        ]
       }
 
       env {
-        # MLAB_FMEProjects_BreastMARC_ModelRepo = "/model_repository"
+        MLAB_FMEProjects_BreastMARC_ModelRepo = "/model_repository"
         START_VNC = "true"
         SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt"
         REQUESTS_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
