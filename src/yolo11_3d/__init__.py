@@ -5,7 +5,9 @@ from pathlib import Path
 
 import click
 
+from yolo11_3d.nn.config import model_checkpoint_from_torch
 from yolo11_3d.nn.train import Trainer
+from yolo11_3d.nn.util import export_model
 
 LOGGER = logging.getLogger(__name__)
 
