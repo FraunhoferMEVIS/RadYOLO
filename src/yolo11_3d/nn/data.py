@@ -265,7 +265,7 @@ class MIPDataset(BaseDataset):
                 LazyLabel(
                     im_file=img_path,
                     shape=img.shape,
-                    classes=torch.as_tensor(labels[:, 0]),
+                    classes=torch.as_tensor(labels[:, 0:1]),
                     bboxes=torch.as_tensor(labels[:, 1:]),
                     normalized=True,
                     bbox_format="xywh",
@@ -314,7 +314,7 @@ class NIfTIDataset(BaseDataset):
                 LazyLabel(
                     im_file=img_path,
                     shape=img.shape[:-1],
-                    classes=torch.as_tensor(labels[:, 0]),
+                    classes=torch.as_tensor(labels[:, 0:1]),
                     bboxes=torch.as_tensor(labels[:, 1:]),
                     normalized=True,
                     bbox_format="xywh",
