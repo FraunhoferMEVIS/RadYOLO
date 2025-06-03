@@ -142,72 +142,170 @@ class TaskAlignedAssigner(nn.Module):
         target_labels, target_bboxes, target_scores = self.get_targets(
             gt_labels, gt_bboxes, target_gt_idx, fg_mask
         )
+        # Note: At this point, target_scores consists of values from the set (0, 1).
 
         # Normalize
-        align_metric *= mask_pos
-        pos_align_metrics = align_metric.amax(dim=-1, keepdim=True)  # b, max_num_obj
-        pos_overlaps = (overlaps * mask_pos).amax(dim=-1, keepdim=True)  # b, max_num_obj
+
+        # align_metric is filtered using mask_pos
+        align_metric *= mask_pos  # b, max_num_obj, num_anchors
+
+        # for each object in max_num_obj the largest align_metric over all anchor points is selected
+        pos_align_metrics = align_metric.amax(dim=-1, keepdim=True)  # b, max_num_obj, 1
+
+        # for each object in max_num_obj the largest overlap (filtered using mask_pos) over all
+        # anchor points is selected
+        pos_overlaps = (overlaps * mask_pos).amax(dim=-1, keepdim=True)  # b, max_num_obj, 1
+
+        # Reminder: align_metric consists of weighted product of pred_score and overlaps.
+        #
+        # For each object in max_num_obj, the align_metric (b, max_num_obj, num_anchors) of all
+        # anchors is scaled by fraction (b, max_num_obj, 1) of largest overlap and largest align
+        # metric.
+        #
+        # This line is somewhat obscure and does several semantic operations.
+        #
+        # The first operation is `align_metric / pos_align_metrics` (ignoring the self.eps).
+        # Since `pos_align_metrics` contains maxima from `align_metric`, this results in a
+        # normalization of all values along axis -1 to range (0, 1).
+        #
+        # As second operation, these normalized values are then scaled by the largest overlap,
+        # resulting in an effective rescale to the range of overlaps.
+        #
+        # For each individual value the calculation can be summarized to
+        # $ (pred_score * overlap / max(pred_score * overlap)) * overlap $
+        # This results in a score which is weighted based on pred_score and the corresponding
+        # weights, but still retains the value range of overlap.
+        #
+        # For each anchor the largest align_metric is selected and a dimension appended resulting in
+        # a shape of (b, num_anchors, 1).
         norm_align_metric = (
             (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         )
-        target_scores = target_scores * norm_align_metric
+
+        # For each anchor the class-wise target scores are scaled respectively by the largest
+        # normalized align_metric.
+        # Since target_scores are effectively a boolean mask, this means that that the normalized
+        # align metrics are selected according to the target_scores mask
+        target_scores = (
+            target_scores * norm_align_metric
+        )  # (b, num_anchors, num_classes) * (b, num_anchors, 1)
 
         return target_labels, target_bboxes, target_scores, fg_mask.bool(), target_gt_idx
 
     def get_pos_mask(
         self,
-        pd_scores: torch.Tensor,
-        pd_bboxes: torch.Tensor,
-        gt_labels: torch.Tensor,
-        gt_bboxes: torch.Tensor,
-        anc_points: torch.Tensor,
-        mask_gt: torch.Tensor,
+        pred_scores: torch.Tensor,
+        pred_bboxes: torch.Tensor,
+        ground_truth_labels: torch.Tensor,
+        ground_truth_bboxes: torch.Tensor,
+        anchor_points: torch.Tensor,
+        ground_truth__mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Get in_gts mask, (b, max_num_obj, h*w)."""
-        mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes)
-        # Get anchor_align metric, (b, max_num_obj, h*w)
+        """Get anchors_in_gts mask, (b, max_num_obj, num_anchors)."""
+        # Create mask which contains for each ground truth bounding box all anchor points that are
+        # included in respective bbox area. (b, max_num_obj, num_anchors)
+        anchors_in_gts__mask = self.select_candidates_in_gts(anchor_points, ground_truth_bboxes)
+
+        # Get anchor align_metric, (b, max_num_obj, num_anchors)
         align_metric, overlaps = self.get_box_metrics(
-            pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt
+            pred_scores,
+            pred_bboxes,
+            ground_truth_labels,
+            ground_truth_bboxes,
+            anchors_in_gts__mask * ground_truth__mask,
         )
-        # Get topk_metric mask, (b, max_num_obj, h*w)
+
+        # Get topk_metric mask, (b, max_num_obj, num_anchors)
         mask_topk = self.select_topk_candidates(
-            align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool()
+            align_metric, topk_mask=ground_truth__mask.expand(-1, -1, self.topk).bool()
         )
-        # Merge all mask to a final mask, (b, max_num_obj, h*w)
-        mask_pos = mask_topk * mask_in_gts * mask_gt
+
+        # Merge all mask to a final mask, (b, max_num_obj, num_anchors)
+        mask_pos = mask_topk * anchors_in_gts__mask * ground_truth__mask
 
         return mask_pos, align_metric, overlaps
 
     def get_box_metrics(
         self,
-        pd_scores: torch.Tensor,
-        pd_bboxes: torch.Tensor,
-        gt_labels: torch.Tensor,
-        gt_bboxes: torch.Tensor,
-        mask_gt: torch.Tensor,
+        pred_scores: torch.Tensor,
+        pred_bboxes: torch.Tensor,
+        ground_truth_labels: torch.Tensor,
+        ground_truth_bboxes: torch.Tensor,
+        ground_truth__mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute alignment metric given predicted and ground truth bounding boxes."""
-        na = pd_bboxes.shape[-2]
-        mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+        """Compute alignment metric given predicted and ground truth bounding boxes.
+
+        The metric is the product of 'predicted score' and 'IoU with ground truth bboxes'.
+
+        The predicted score is weighted using 0 < `self.alpha` < 1. Larger means smaller.
+
+        The IoU is weighted using 1 <= `self.beta`. Larger means smaller.
+        """
+        num_anchors = pred_bboxes.shape[-2]
+        ground_truth__mask = ground_truth__mask.bool()  # b, max_num_obj, num_anchors
+
+        # init results
         overlaps = torch.zeros(
-            [self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device
+            [self.bs, self.n_max_boxes, num_anchors],
+            dtype=pred_bboxes.dtype,
+            device=pred_bboxes.device,
         )
         bbox_scores = torch.zeros(
-            [self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device
+            [self.bs, self.n_max_boxes, num_anchors],
+            dtype=pred_scores.dtype,
+            device=pred_scores.device,
         )
 
         ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
         ind[0] = (
             torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)
         )  # b, max_num_obj
-        ind[1] = gt_labels.squeeze(-1)  # b, max_num_obj
-        # Get the scores of each grid for each gt cls
-        bbox_scores[mask_gt] = pd_scores[ind[0], :, ind[1]][mask_gt]  # b, max_num_obj, h*w
+        ind[1] = ground_truth_labels.squeeze(-1)  # b, max_num_obj
 
-        # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
-        pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
-        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
-        overlaps[mask_gt] = self.iou_calculation(gt_boxes, pd_boxes)
+        # Get the scores of each grid for each gt cls
+        #
+        # Indexing here: ind[0] and ind[1] are iterated together, so
+        # the value at x[i, j, :] == pred_scores[ind[0, i, j], :, ind[1, i, j]],
+        # e.g. x[1, 2, :] == pred_scores[ind[0, 1, 2], :, ind[1, 1, 2]]
+        # this is the special case of 'advanced indexing combined with simple indexing'.
+        # It results in the arrays broadcasted together (the shapes are already identical)
+        # and their shape prepended to the result. Then all simple indexing operations' shapes
+        # are appended, if pred_scores (2, 2352, 2), the result would be (2, 2, 2352).
+        #
+        # So this is essentially a more sophisticated reshape to make it compatible with
+        # `ground_truth__mask` and `bbox_scores`.
+        #
+        # As a result, `pred_scores`` is expanded to associate the class scores for each anchor
+        # point with ground truth bounding boxes (which are padded). The `ground_truth__mask` is
+        # used to filter for all anchor points that were matched with ground truth bounding boxes.
+        #
+        # `bbox_scores` finally contains all scores for all anchor points that were matched with
+        # ground truth bounding boxes.
+        bbox_scores[ground_truth__mask] = pred_scores[ind[0], :, ind[1]][
+            ground_truth__mask
+        ]  # b, max_num_obj, num_anchors
+
+        # Here we want to calculate the overlaps between predicted bounding boxes and ground truth
+        # bounding boxes. To do this we need to align the shapes of predicted bounding boxes which
+        # are made for all anchor points with ground truth bounding boxes which are padded to
+        # `max_num_obj`. The goal is to expand both tensor to shape (b, max_num_obj, num_anchors, 4)
+        # `pred_bboxes` has shape (b, num_anchors, 4). Using `unsqueeze`, we insert an axis
+        # resulting in shape (b, 1, num_anchors, 4). Using `expand`, receive shape
+        # (b, max_num_obj, num_anchors, 4)
+        # `ground_truth_bboxes` based on shape (b, max_num_obj, 4) is expanded analogous.
+        #
+        # Both tensors are indexed using `ground_truth__mask` to reduce to all anchor points that
+        # were matched with ground truth bounding boxes.
+        #
+        # (b, max_num_obj, 1, 4), (b, 1, num_anchors, 4)
+        pred_boxes = pred_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[
+            ground_truth__mask
+        ]
+        ground_truth_boxes = ground_truth_bboxes.unsqueeze(2).expand(-1, -1, num_anchors, -1)[
+            ground_truth__mask
+        ]
+
+        overlaps[ground_truth__mask] = self.iou_calculation(ground_truth_boxes, pred_boxes)
 
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
         return align_metric, overlaps
