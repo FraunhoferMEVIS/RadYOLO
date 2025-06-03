@@ -21,6 +21,8 @@ from pydantic import (
     model_validator,
 )
 
+from . import DATASETS, MODELS, VALIDATORS
+
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS_DIR = Path("datasets")  # Path(SETTINGS["datasets_dir"])
 # WEIGHTS_DIR = Path(SETTINGS["weights_dir"])
@@ -44,7 +46,9 @@ class DefaultConfig(BaseModel):
 
     # Train settings
     model: FilePath | NewPath  # path to model file
+    model_type: str
     data: FilePath  # path to data file
+    dataset_type: str
     epochs: int = 100  # number of epochs to train for
     time: float | None = None  # number of hours to train for, overrides epochs if supplied
     patience: int = (
@@ -94,6 +98,7 @@ class DefaultConfig(BaseModel):
     # Val/Test Settings
     val: bool = True  # validate/test during training
     split: str = "val"  # dataset split to use for validation, i.e. 'val', 'test' or 'train'
+    validator_type: str | None = None  # validator type, i.e. '2d', '3d'
     save_json: bool = False  # save results to JSON file
     save_hybrid: bool = False  # save hybrid version of labels (labels+additional predictions)
     conf: float | None = (
@@ -184,6 +189,52 @@ class DefaultConfig(BaseModel):
     cfg: FilePath | None = None  # for overriding defaults.yaml
 
     save_dir: Path | None = None
+
+    @model_validator(mode="after")
+    def validate_dataset_type(self) -> Self:
+        if self.dataset_type not in DATASETS:
+            msg = f"got dataset_type {self.dataset_type}. registered dataset types are {DATASETS.keys()}."
+            raise ValueError(msg)
+        _, ndim = DATASETS[self.dataset_type]
+
+        if len(self.imgsz) != ndim:
+            msg = f"got {len(self.imgsz)} image dimensions, but dataset_type {self.dataset_type} provides {ndim} dimensions."
+            raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_model_type(self) -> Self:
+        if self.model_type not in MODELS:
+            msg = f"got model_type {self.model_type}. registered model types are {MODELS.keys()}"
+            raise ValueError(msg)
+
+        _, ndim = MODELS[self.model_type]
+
+        if len(self.imgsz) != ndim:
+            msg = f"got {len(self.imgsz)} image dimensions, but model_type {self.model_type} expects {ndim} dimensions."
+            raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_validator_type(self) -> Self:
+        if self.val is True:
+            if self.validator_type is None:
+                msg = "validator_type must be set if val == True"
+                raise ValueError(msg)
+
+            if self.validator_type not in VALIDATORS:
+                msg = f"got validator_type {self.validator_type}. registered validator types are {VALIDATORS.keys()}"
+                raise ValueError(msg)
+
+            _, ndim = VALIDATORS[self.validator_type]
+
+            if len(self.imgsz) != ndim:
+                msg = f"got {len(self.imgsz)} image dimensions, but validator_type {self.validator_type} expects {ndim} dimensions."
+                raise ValueError(msg)
+
+        return self
 
 
 class DatasetConfig(BaseModel):
