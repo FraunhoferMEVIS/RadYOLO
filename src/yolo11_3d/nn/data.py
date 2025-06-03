@@ -43,6 +43,25 @@ class Label(LazyLabel):
     )
 
 
+class Batch(TypedDict):
+    img: torch.Tensor
+    ori_shape: tuple[tuple[int, int] | tuple[int, int, int], ...]
+    ratio_pad: tuple[
+        tuple[
+            tuple[float, float] | tuple[float, float, float], tuple[int, int] | tuple[int, int, int]
+        ]
+        | None,
+        ...,
+    ]
+    im_file: tuple[Path, ...]
+    shape: tuple[tuple[int, int] | tuple[int, int, int], ...]
+    cls: torch.Tensor
+    bboxes: torch.Tensor
+    normalized: tuple[bool, ...]
+    bbox_format: tuple[Literal["xywh"], ...]
+    batch_idx: torch.Tensor
+
+
 class BaseDataset(Dataset[Label], Sized, ABC):
     img_formats: ClassVar[set[str]]
 
@@ -141,22 +160,23 @@ class BaseDataset(Dataset[Label], Sized, ABC):
     ]: ...
 
     @staticmethod
-    def collate_fn(batch: list[Label]) -> dict:
-        new_batch = {}
-
+    def collate_fn(batch: list[Label]) -> Batch:
         with torch.no_grad():
-            new_batch["img"] = torch.stack([item["img"] for item in batch])
-            new_batch["im_file"] = tuple(item["im_file"] for item in batch)
-            new_batch["shape"] = tuple(item["shape"] for item in batch)
-            new_batch["cls"] = torch.cat([item["classes"] for item in batch], 0)
-            new_batch["bboxes"] = torch.cat([item["bboxes"] for item in batch], 0)
-            new_batch["normalized"] = tuple(item["normalized"] for item in batch)
-            new_batch["bbox_format"] = tuple(item["bbox_format"] for item in batch)
-            new_batch["batch_idx"] = torch.cat(
-                [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)], 0
-            )
-
-        return new_batch
+            return {
+                "img": torch.stack([item["img"] for item in batch]),
+                "ori_shape": tuple(item["ori_shape"] for item in batch),
+                "ratio_pad": tuple(item["ratio_pad"] for item in batch),
+                "im_file": tuple(item["im_file"] for item in batch),
+                "shape": tuple(item["shape"] for item in batch),
+                "cls": torch.cat([item["classes"] for item in batch], 0),
+                "bboxes": torch.cat([item["bboxes"] for item in batch], 0),
+                "normalized": tuple(item["normalized"] for item in batch),
+                "bbox_format": tuple(item["bbox_format"] for item in batch),
+                "batch_idx": torch.cat(
+                    [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)],
+                    0,
+                ),
+            }
 
 
 class MIPDataset(BaseDataset):
