@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, overload
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import torch
 from torch import nn
 
+from yolo11_3d.nn.data import Batch
 from yolo11_3d.nn.layers import (
     C2PSA,
     C2PSA_3D,
@@ -346,22 +348,35 @@ class HardcodedModel(nn.Module):
         self.criterion = v8DetectionLoss(self, box, cls, dfl, self.l23, device)
 
     @overload
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor: ...
+    def forward(
+        self, x: torch.Tensor, *args, **kwargs
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
 
     @overload
-    def forward(self, x: dict, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
+    def forward(self, x: Batch, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     def forward(
-        self, x: torch.Tensor | dict, *args, **kwargs
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        self, x: torch.Tensor | Batch, *args, **kwargs
+    ) -> (
+        list[torch.Tensor]
+        | torch.Tensor
+        | tuple[torch.Tensor, list[torch.Tensor]]
+        | tuple[torch.Tensor, torch.Tensor]
+    ):
         if isinstance(x, dict):
             return self.loss(x, *args, **kwargs)
         return self.predict(x, *args, **kwargs)
 
     def loss(
-        self, batch: dict, preds: list[torch.Tensor] | None = None
+        self,
+        batch: Batch,
+        preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        preds = self.forward(batch["img"]) if preds is None else preds
+        if preds is None:
+            prediction = self.forward(batch["img"])
+            if isinstance(prediction, torch.Tensor):
+                raise TypeError(prediction)
+            preds = prediction
         return self.criterion(preds, batch)
 
     def load(self, weights: ModelCheckpoint | nn.Module) -> None:
@@ -370,7 +385,9 @@ class HardcodedModel(nn.Module):
         csd = intersect_dicts(csd, self.state_dict())
         self.load_state_dict(csd, strict=False)
 
-    def predict(self, x: torch.Tensor, augment: bool = False) -> torch.Tensor:
+    def predict(
+        self, x: torch.Tensor, augment: bool = False
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         # BACKBONE
         x = self.l0(x)
         x = self.l1(x)
@@ -572,22 +589,35 @@ class Hardcoded3DModel(nn.Module):
         self.criterion = v8DetectionLoss_3D(self, box, cls, dfl, self.l23, device)
 
     @overload
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor: ...
+    def forward(
+        self, x: torch.Tensor, *args, **kwargs
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
 
     @overload
     def forward(self, x: dict, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     def forward(
         self, x: torch.Tensor | dict, *args, **kwargs
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> (
+        list[torch.Tensor]
+        | torch.Tensor
+        | tuple[torch.Tensor, list[torch.Tensor]]
+        | tuple[torch.Tensor, torch.Tensor]
+    ):
         if isinstance(x, dict):
             return self.loss(x, *args, **kwargs)
         return self.predict(x, *args, **kwargs)
 
     def loss(
-        self, batch: dict, preds: list[torch.Tensor] | None = None
+        self,
+        batch: Batch,
+        preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        preds = self.forward(batch["img"]) if preds is None else preds
+        if preds is None:
+            prediction = self.forward(batch["img"])
+            if isinstance(prediction, torch.Tensor):
+                raise TypeError(prediction)
+            preds = prediction
         return self.criterion(preds, batch)
 
     def load(self, weights: ModelCheckpoint | nn.Module) -> None:
@@ -596,7 +626,9 @@ class Hardcoded3DModel(nn.Module):
         csd = intersect_dicts(csd, self.state_dict())
         self.load_state_dict(csd, strict=False)
 
-    def predict(self, x: torch.Tensor, augment: bool = False) -> torch.Tensor:
+    def predict(
+        self, x: torch.Tensor, augment: bool = False
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         # BACKBONE
         x = self.l0(x)
         x = self.l1(x)
