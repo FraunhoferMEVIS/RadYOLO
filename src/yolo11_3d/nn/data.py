@@ -157,7 +157,7 @@ class MIPDataset(BaseDataset):
             raise ValueError
         im_t = torch.as_tensor(im, dtype=torch.float32).movedim(-1, 0).contiguous() / 255.0
         im_t.clamp_(0.0, 1.0)
-        im_t_scaled = F.interpolate(im_t[None, ...], size=(256, 448), mode="bilinear")[0]
+        im_t_scaled = F.interpolate(im_t[None, ...], size=self.imgsz, mode="bilinear")[0]
 
         h0: int
         w0: int
