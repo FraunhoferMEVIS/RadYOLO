@@ -571,7 +571,7 @@ def ap_per_class(
     pred_cls: npt.NDArray[np.integer],
     target_cls: npt.NDArray[np.integer],
     plot: Literal[False] = False,
-    on_plot: Callable | None = None,
+    # on_plot: Callable[[Path, Any], None] | None = None,
     save_dir: Path = Path(),
     names: dict = {},
     eps: float = 1e-16,
@@ -606,12 +606,12 @@ def ap_per_class(
         prec_values (np.ndarray): Precision values at mAP@0.5 for each class. Shape: (nc, 1000).
     """
     # Sort by objectness
-    i = np.argsort(-conf)
+    i: npt.NDArray[np.intp] = np.argsort(-conf)
     tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
 
     # Find unique classes
     unique_classes, nt = np.unique(target_cls, return_counts=True)
-    nc = unique_classes.shape[0]  # number of classes, number of detections
+    nc: int = unique_classes.shape[0]  # number of classes, number of detections
 
     # Create Precision-Recall curve and compute AP for each class
     x, prec_values = np.linspace(0, 1, 1000), []
@@ -654,27 +654,46 @@ def ap_per_class(
     ]  # list: only classes that have data
     names = dict(enumerate(names_))  # to dict
     if plot:
-        raise NotImplementedError
-        # plot_pr_curve(
-        #     x, prec_values, ap, save_dir / f"{prefix}PR_curve.png", names, on_plot=on_plot
-        # )
-        # plot_mc_curve(
-        #     x, f1_curve, save_dir / f"{prefix}F1_curve.png", names, ylabel="F1", on_plot=on_plot
-        # )
-        # plot_mc_curve(
-        #     x,
-        #     p_curve,
-        #     save_dir / f"{prefix}P_curve.png",
-        #     names,
-        #     ylabel="Precision",
-        #     on_plot=on_plot,
-        # )
-        # plot_mc_curve(
-        #     x, r_curve, save_dir / f"{prefix}R_curve.png", names, ylabel="Recall", on_plot=on_plot
-        # )
+        # raise NotImplementedError
+        plot_pr_curve(
+            x,
+            prec_values,
+            ap,
+            save_dir / f"{prefix}PR_curve.png",
+            names,
+            # on_plot=on_plot,
+        )
+        plot_mc_curve(
+            x,
+            f1_curve,
+            save_dir / f"{prefix}F1_curve.png",
+            names,
+            ylabel="F1",
+            # on_plot=on_plot,
+        )
+        plot_mc_curve(
+            x,
+            p_curve,
+            save_dir / f"{prefix}P_curve.png",
+            names,
+            ylabel="Precision",
+            # on_plot=on_plot,
+        )
+        plot_mc_curve(
+            x,
+            r_curve,
+            save_dir / f"{prefix}R_curve.png",
+            names,
+            ylabel="Recall",
+            # on_plot=on_plot,
+        )
 
-    i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
-    p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
+    max_i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
+    p, r, f1 = (
+        p_curve[:, max_i],
+        r_curve[:, max_i],
+        f1_curve[:, max_i],
+    )  # max-F1 precision, recall, F1 values
     tp = (r * nt).round()  # true positives
     fp = (tp / (p + eps) - tp).round()  # false positives
     return (
