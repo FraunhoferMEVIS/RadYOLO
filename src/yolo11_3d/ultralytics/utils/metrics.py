@@ -712,7 +712,6 @@ def ap_per_class(
     )
 
 
-@dataclass
 class Metric:
     """Class for computing evaluation metrics for YOLOv8 model.
 
@@ -739,85 +738,79 @@ class Metric:
         update(results): Update metric attributes with new evaluation results.
     """
 
-    # def __init__(self) -> None:
-    #     """Initializes a Metric instance for computing evaluation metrics for the YOLOv8 model."""
-    #     self.p = []  # (nc, )
-    #     self.r = []  # (nc, )
-    #     self.f1 = []  # (nc, )
-    #     self.all_ap = []  # (nc, 10)
-    #     self.ap_class_index = []  # (nc, )
-    #     self.nc = 0
-    p: npt.NDArray
-    r: npt.NDArray
-    f1: npt.NDArray
-    all_ap: npt.NDArray
-    ap_class_index: list[int]
-    nc: int = 0
+    def __init__(self) -> None:
+        """Initializes a Metric instance for computing evaluation metrics for the YOLOv8 model."""
+        self.p: npt.NDArray | list = []  # (nc, )
+        self.r: npt.NDArray | list = []  # (nc, )
+        self.f1: npt.NDArray | list = []  # (nc, )
+        self.all_ap: npt.NDArray | list = []  # (nc, 10)
+        self.ap_class_index: npt.NDArray | list[int] = []  # (nc, )
+        self.nc: int = 0
 
     @property
-    def ap50(self):
+    def ap50(self) -> npt.NDArray | list:
         """Returns the Average Precision (AP) at an IoU threshold of 0.5 for all classes.
 
         Returns:
             (np.ndarray, list): Array of shape (nc,) with AP50 values per class, or an empty list if not available.
         """
-        return self.all_ap[:, 0] if len(self.all_ap) else []
+        return self.all_ap[:, 0] if isinstance(self.all_ap, np.ndarray) else []
 
     @property
-    def ap(self):
+    def ap(self) -> npt.NDArray | list:
         """Returns the Average Precision (AP) at an IoU threshold of 0.5-0.95 for all classes.
 
         Returns:
             (np.ndarray, list): Array of shape (nc,) with AP50-95 values per class, or an empty list if not available.
         """
-        return self.all_ap.mean(1) if len(self.all_ap) else []
+        return self.all_ap.mean(1) if isinstance(self.all_ap, np.ndarray) else []
 
     @property
-    def mp(self):
+    def mp(self) -> float:
         """Returns the Mean Precision of all classes.
 
         Returns:
             (float): The mean precision of all classes.
         """
-        return self.p.mean() if len(self.p) else 0.0
+        return self.p.mean() if isinstance(self.p, np.ndarray) else 0.0
 
     @property
-    def mr(self):
+    def mr(self) -> float:
         """Returns the Mean Recall of all classes.
 
         Returns:
             (float): The mean recall of all classes.
         """
-        return self.r.mean() if len(self.r) else 0.0
+        return self.r.mean() if isinstance(self.r, np.ndarray) else 0.0
 
     @property
-    def map50(self):
+    def map50(self) -> float:
         """Returns the mean Average Precision (mAP) at an IoU threshold of 0.5.
 
         Returns:
             (float): The mAP at an IoU threshold of 0.5.
         """
-        return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
+        return self.all_ap[:, 0].mean() if isinstance(self.all_ap, np.ndarray) else 0.0
 
     @property
-    def map75(self):
+    def map75(self) -> float:
         """Returns the mean Average Precision (mAP) at an IoU threshold of 0.75.
 
         Returns:
             (float): The mAP at an IoU threshold of 0.75.
         """
-        return self.all_ap[:, 5].mean() if len(self.all_ap) else 0.0
+        return self.all_ap[:, 5].mean() if isinstance(self.all_ap, np.ndarray) else 0.0
 
     @property
-    def map(self):
+    def map(self) -> float:
         """Returns the mean Average Precision (mAP) over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
 
         Returns:
             (float): The mAP over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
         """
-        return self.all_ap.mean() if len(self.all_ap) else 0.0
+        return self.all_ap.mean() if isinstance(self.all_ap, np.ndarray) else 0.0
 
-    def mean_results(self):
+    def mean_results(self) -> list[float]:
         """Mean of results, return mp, mr, map50, map."""
         return [self.mp, self.mr, self.map50, self.map]
 
@@ -826,7 +819,7 @@ class Metric:
         return self.p[i], self.r[i], self.ap50[i], self.ap[i]
 
     @property
-    def maps(self):
+    def maps(self) -> npt.NDArray:
         """MAP of each class."""
         maps = np.zeros(self.nc) + self.map
         for i, c in enumerate(self.ap_class_index):
@@ -838,7 +831,21 @@ class Metric:
         w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
         return (np.array(self.mean_results()) * w).sum()
 
-    def update(self, results):
+    def update(
+        self,
+        results: tuple[
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            npt.NDArray,
+            list,
+        ],
+    ):
         """Updates the evaluation metrics of the model with a new set of results.
 
         Args:
@@ -867,12 +874,12 @@ class Metric:
         ) = results
 
     @property
-    def curves(self):
+    def curves(self) -> list:
         """Returns a list of curves for accessing specific metrics curves."""
         return []
 
     @property
-    def curves_results(self):
+    def curves_results(self) -> list[list[Any | str]]:
         """Returns a list of curves for accessing specific metrics curves."""
         return [
             [self.px, self.prec_values, "Recall", "Precision"],
