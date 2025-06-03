@@ -375,19 +375,6 @@ class DummyDataset(Dataset, Sized):
     @staticmethod
     def collate_fn(batch: list[Label]) -> dict:
         new_batch = {}
-        # keys = Label.model_fields.keys()
-        # values = list(zip(*[tuple(dict(b).values()) for b in batch], strict=True))
-        # for i, k in enumerate(keys):
-        #     value = values[i]
-        #     if k == "img":
-        #         value = torch.stack(value, 0)
-        #     if k in {"bboxes", "cls"}:
-        #         value = torch.cat(value, 0)
-        #     new_batch[k] = value
-        # new_batch["batch_idx"] = list(new_batch["batch_idx"])
-        # for i in range(len(new_batch["batch_idx"])):
-        #     new_batch["batch_idx"][i] += i
-        # new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
 
         new_batch["img"] = torch.stack([item["img"] for item in batch]).contiguous()
         new_batch["im_file"] = tuple(item["im_file"] for item in batch)
