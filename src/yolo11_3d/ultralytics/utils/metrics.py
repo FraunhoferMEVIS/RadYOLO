@@ -222,10 +222,7 @@ def _get_covariance_matrix(boxes: torch.Tensor) -> tuple[torch.Tensor, torch.Ten
     """
     # Gaussian bounding boxes, ignore the center points (the first two columns) because they are not needed here.
     gbbs = torch.cat((boxes[:, 2:4].pow(2) / 12, boxes[:, 4:]), dim=-1)
-    a, b, c = gbbs.split(1, dim=-1)
-    a = cast(torch.Tensor, a)
-    b = cast(torch.Tensor, b)
-    c = cast(torch.Tensor, c)
+    a, b, c = cast("tuple[torch.Tensor, torch.Tensor, torch.Tensor]", gbbs.split(1, dim=-1))
     cos: torch.Tensor = c.cos()
     sin: torch.Tensor = c.sin()
     cos2: torch.Tensor = cos.pow(2)
