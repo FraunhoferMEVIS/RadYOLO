@@ -891,8 +891,9 @@ class Metric:
 
 # @dataclass
 class DetMetrics:
-    """Utility class for computing detection metrics such as precision, recall, and mean average precision (mAP) of an
-    object detection model.
+    """Utility class for computing detection metrics of an object detection model.
+
+    Provides metrics `such as precision, recall, and mean average precision (mAP).
 
     Args:
         save_dir (Path): A path to the directory where the output plots will be saved. Defaults to current directory.
