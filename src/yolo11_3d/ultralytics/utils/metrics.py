@@ -889,7 +889,6 @@ class Metric:
         ]
 
 
-# @dataclass
 class DetMetrics:
     """Utility class for computing detection metrics of an object detection model.
 
@@ -924,29 +923,32 @@ class DetMetrics:
 
     def __init__(
         self,
-        save_dir: Path = Path("."),
-        plot: bool = False,
-        on_plot: Callable | None = None,
+        save_dir: Path = Path(),
+        plot: Literal[False] = False,
+        on_plot: Callable[[Path, Any], None] | None = None,
         names: dict[int, str] = {},
     ) -> None:
         """Initialize a DetMetrics instance with a save directory, plot flag, callback function, and class names."""
-        self.save_dir = save_dir
-        self.plot = plot
-        self.on_plot = on_plot
-        self.names = names
+        self.save_dir: Path = save_dir
+        self.plot: Literal[False] = plot
+        self.on_plot: Callable[[Path, Any], None] | None = on_plot
+        self.names: dict[int, str] = names
         self.box = Metric()
-        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self.speed: dict[str, float] = {
+            "preprocess": 0.0,
+            "inference": 0.0,
+            "loss": 0.0,
+            "postprocess": 0.0,
+        }
         self.task = "detect"
 
-    # save_dir: Path = Path(".")
-    # plot: bool = False
-    # on_plot: Callable | None = None
-    # names: dict[str, str] = {}
-    # box: Metric = Metric()
-    # speed: dict = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
-    # task: Literal["detect"] = "detect"
-
-    def process(self, tp, conf, pred_cls, target_cls):
+    def process(
+        self,
+        tp: npt.NDArray[np.floating],
+        conf: npt.NDArray[np.floating],
+        pred_cls: npt.NDArray[np.integer],
+        target_cls: npt.NDArray[np.integer],
+    ) -> None:
         """Process predicted results for object detection and update metrics."""
         results = ap_per_class(
             tp,
@@ -956,13 +958,13 @@ class DetMetrics:
             plot=self.plot,
             save_dir=self.save_dir,
             names=self.names,
-            on_plot=self.on_plot,
+            # on_plot=self.on_plot,
         )[2:]
         self.box.nc = len(self.names)
         self.box.update(results)
 
     @property
-    def keys(self):
+    def keys(self) -> list[str]:
         """Returns a list of keys for accessing specific metrics."""
         return [
             "metrics/precision(B)",
@@ -971,16 +973,16 @@ class DetMetrics:
             "metrics/mAP50-95(B)",
         ]
 
-    def mean_results(self):
+    def mean_results(self) -> list[float]:
         """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
         return self.box.mean_results()
 
-    def class_result(self, i):
+    def class_result(self, i) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
         """Return the result of evaluating the performance of an object detection model on a specific class."""
         return self.box.class_result(i)
 
     @property
-    def maps(self):
+    def maps(self) -> npt.NDArray:
         """Returns mean Average Precision (mAP) scores per class."""
         return self.box.maps
 
@@ -990,17 +992,17 @@ class DetMetrics:
         return self.box.fitness()
 
     @property
-    def ap_class_index(self):
+    def ap_class_index(self) -> npt.NDArray | list[int]:
         """Returns the average precision index per class."""
         return self.box.ap_class_index
 
     @property
-    def results_dict(self):
+    def results_dict(self) -> dict[str, float]:
         """Returns dictionary of computed performance metrics and statistics."""
-        return dict(zip(self.keys + ["fitness"], self.mean_results() + [self.fitness]))
+        return dict(zip([*self.keys, "fitness"], [*self.mean_results(), self.fitness], strict=True))
 
     @property
-    def curves(self):
+    def curves(self) -> list[str]:
         """Returns a list of curves for accessing specific metrics curves."""
         return [
             "Precision-Recall(B)",
@@ -1010,6 +1012,6 @@ class DetMetrics:
         ]
 
     @property
-    def curves_results(self):
+    def curves_results(self) -> list[list[Any | str]]:
         """Returns dictionary of computed performance metrics and statistics."""
         return self.box.curves_results
