@@ -20,6 +20,7 @@ from yolo11_3d.ultralytics.utils.tal import (
 )
 
 if TYPE_CHECKING:
+    from yolo11_3d.nn.data import Batch
     from yolo11_3d.nn.layers import Detect, Detect_3D
     from yolo11_3d.nn.model import Hardcoded3DModel, HardcodedModel
 
@@ -169,19 +170,19 @@ class v8DetectionLoss:  # noqa: N801
         self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor
     ) -> torch.Tensor:
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
-        nl, ne = targets.shape
-        if nl == 0:
+        num_labels, ne = targets.shape
+        if num_labels == 0:
             out: torch.Tensor = torch.zeros(batch_size, 0, ne - 1, device=self.device)
         else:
-            i = targets[:, 0]  # image index
-            _, counts = cast(torch.Tensor, i.unique(return_counts=True))
+            image_index = targets[:, 0]
+            _, counts = cast("torch.Tensor", image_index.unique(return_counts=True))
             counts = counts.to(dtype=torch.int32)
             out = torch.zeros(batch_size, int(counts.max()), ne - 1, device=self.device)
-            for j in range(batch_size):
-                matches = i == j
-                n = matches.sum()
-                if n:
-                    out[j, :n] = targets[matches, 1:]
+            for batch_index in range(batch_size):
+                matches = image_index == batch_index
+                num_matches = matches.sum()
+                if num_matches:
+                    out[batch_index, :num_matches] = targets[matches, 1:]
             out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
         return out
 
@@ -197,15 +198,21 @@ class v8DetectionLoss:  # noqa: N801
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(
-        self, preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]], batch: dict
-    ):
+        self, preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]], batch: Batch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
         feats = preds[1] if isinstance(preds, tuple) else preds
-        pred_distri, pred_scores = torch.cat(
-            [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2
-        ).split((self.reg_max * 4, self.num_classes), 1)
+        pred_distri, pred_scores = cast(
+            "tuple[torch.Tensor, torch.Tensor]",
+            torch.cat(
+                [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2
+            ).split(  # for all heads (xi) in detect layer, view (b, reg_max * 4 + num_classes, -1)
+                (self.reg_max * 4, self.num_classes), 1
+            ),
+        )  # (b, reg_max * 4, num_anchors (sum of all heads)), (b, num_classes, num_anchors (sum of all heads))
 
+        # permute: reoder the shape of tensor
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
 
@@ -215,6 +222,10 @@ class v8DetectionLoss:  # noqa: N801
             torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
         )  # image size (h,w)
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+        # anchor_points * stride_tensor: anchor_points in image coords
+        #
+        # anchor points form a grid with respective stride over the image, centered through
+        # grid_cell_offset=0.5
 
         # Targets
         targets = torch.cat(
@@ -222,9 +233,11 @@ class v8DetectionLoss:  # noqa: N801
         )
         targets = self.preprocess(
             targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]]
-        )
+        )  # targets are scaled to the image size and converted to xyxy, batch_idx is removed,
+        # shape is (batch_size, max(num_targets[b]), 5) and therefore padded to max(num_targets[b])
         gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+        # bboxes whose coordinates are > 0 are valid, used to filter padded bbox values
 
         # Pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
@@ -335,8 +348,8 @@ class v8DetectionLoss_3D:  # noqa: N801
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(
-        self, preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]], batch: dict
-    ):
+        self, preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]], batch: Batch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
         feats = preds[1] if isinstance(preds, tuple) else preds
