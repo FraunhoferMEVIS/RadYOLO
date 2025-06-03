@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable
-from dataclasses import dataclass
+import warnings
 from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import torch
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -288,25 +291,31 @@ class ConfusionMatrix:
     ):
         """Initialize attributes for the YOLO model."""
         self.task = task
-        self.matrix_ = np.zeros((nc + 1, nc + 1)) if self.task == "detect" else np.zeros((nc, nc))
+        self.matrix_: npt.NDArray[np.float32] = (
+            np.zeros((nc + 1, nc + 1), dtype=np.float32)
+            if self.task == "detect"
+            else np.zeros((nc, nc), dtype=np.float32)
+        )
         self.nc = nc  # number of classes
         self.conf = (
             0.25 if conf in {None, 0.001} else conf
         )  # apply 0.25 if default val conf is passed
         self.iou_thres = iou_thres
 
-    def process_cls_preds(self, preds: torch.Tensor, targets: torch.Tensor):
-        """Update confusion matrix for classification task.
+    # def process_cls_preds(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
+    #     """Update confusion matrix for classification task.
 
-        Args:
-            preds (Array[N, min(nc,5)]): Predicted class labels.
-            targets (Array[N, 1]): Ground truth class labels.
-        """
-        preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
-        for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy(), strict=True):
-            self.matrix_[p][t] += 1
+    #     Args:
+    #         preds (Array[N, min(nc,5)]): Predicted class labels.
+    #         targets (Array[N, 1]): Ground truth class labels.
+    #     """
+    #     preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
+    #     for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy(), strict=True):
+    #         self.matrix_[p][t] += 1
 
-    def process_batch(self, detections, gt_bboxes, gt_cls):
+    def process_batch(
+        self, detections: torch.Tensor | None, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor
+    ) -> None:
         """Update confusion matrix for object detection task.
 
         Args:
@@ -366,11 +375,11 @@ class ConfusionMatrix:
                 if not any(m1 == i):
                     self.matrix_[dc, self.nc] += 1  # predicted background
 
-    def matrix(self):
+    def matrix(self) -> npt.NDArray[np.float32]:
         """Returns the confusion matrix."""
         return self.matrix_
 
-    def tp_fp(self):
+    def tp_fp(self) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
         """Returns true positives and false positives."""
         tp = self.matrix_.diagonal()  # true positives
         fp = self.matrix_.sum(1) - tp  # false positives
@@ -381,53 +390,58 @@ class ConfusionMatrix:
 
     # @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
     # @plt_settings()
-    # def plot(self, normalize=True, save_dir="", names=(), on_plot=None):
-    #     """
-    #     Plot the confusion matrix using seaborn and save it to a file.
+    def plot(
+        self,
+        normalize: bool = True,
+        save_dir: Path | str = "",
+        names: tuple[str, ...] = (),
+        # on_plot=None,
+    ) -> None:
+        """Plot the confusion matrix using seaborn and save it to a file.
 
-    #     Args:
-    #         normalize (bool): Whether to normalize the confusion matrix.
-    #         save_dir (str): Directory where the plot will be saved.
-    #         names (tuple): Names of classes, used as labels on the plot.
-    #         on_plot (func): An optional callback to pass plots path and data when they are rendered.
-    #     """
-    #     import seaborn  # scope for faster 'import ultralytics'
+        Args:
+            normalize (bool): Whether to normalize the confusion matrix.
+            save_dir (str): Directory where the plot will be saved.
+            names (tuple): Names of classes, used as labels on the plot.
+            on_plot (func): An optional callback to pass plots path and data when they are rendered.
+        """
+        import seaborn  # scope for faster 'import ultralytics'
 
-    #     array = self.matrix / (
-    #         (self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1
-    #     )  # normalize columns
-    #     array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
+        array = self.matrix_ / (
+            (self.matrix_.sum(0).reshape(1, -1) + 1e-9) if normalize else 1
+        )  # normalize columns
+        array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
 
-    #     fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
-    #     nc, nn = self.nc, len(names)  # number of classes, names
-    #     seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
-    #     labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
-    #     ticklabels = (list(names) + ["background"]) if labels else "auto"
-    #     with warnings.catch_warnings():
-    #         warnings.simplefilter(
-    #             "ignore"
-    #         )  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
-    #         seaborn.heatmap(
-    #             array,
-    #             ax=ax,
-    #             annot=nc < 30,
-    #             annot_kws={"size": 8},
-    #             cmap="Blues",
-    #             fmt=".2f" if normalize else ".0f",
-    #             square=True,
-    #             vmin=0.0,
-    #             xticklabels=ticklabels,
-    #             yticklabels=ticklabels,
-    #         ).set_facecolor((1, 1, 1))
-    #     title = "Confusion Matrix" + " Normalized" * normalize
-    #     ax.set_xlabel("True")
-    #     ax.set_ylabel("Predicted")
-    #     ax.set_title(title)
-    #     plot_fname = Path(save_dir) / f'{title.lower().replace(" ", "_")}.png'
-    #     fig.savefig(plot_fname, dpi=250)
-    #     plt.close(fig)
-    #     if on_plot:
-    #         on_plot(plot_fname)
+        fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
+        nc, nn = self.nc, len(names)  # number of classes, names
+        seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
+        labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
+        ticklabels = ([*list(names), "background"]) if labels else "auto"
+        with warnings.catch_warnings():
+            warnings.simplefilter(
+                "ignore"
+            )  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
+            seaborn.heatmap(
+                array,
+                ax=ax,
+                annot=nc < 30,
+                annot_kws={"size": 8},
+                cmap="Blues",
+                fmt=".2f" if normalize else ".0f",
+                square=True,
+                vmin=0.0,
+                xticklabels=ticklabels,
+                yticklabels=ticklabels,
+            ).set_facecolor((1, 1, 1))
+        title = "Confusion Matrix" + " Normalized" * normalize
+        ax.set_xlabel("True")
+        ax.set_ylabel("Predicted")
+        ax.set_title(title)
+        plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
+        fig.savefig(plot_fname, dpi=250)
+        plt.close(fig)
+        # if on_plot:
+        #     on_plot(plot_fname)
 
     def print(self):
         """Print the confusion matrix to the console."""
