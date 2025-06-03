@@ -18,8 +18,11 @@ dependencies = [
   "onnx>=1.17.0",
   "onnxscript>=0.1.0.dev20250114",
   "opencv-python-headless>=4.11.0.86",
+  "pandas>=2.2.3",
+  "pillow>=9.2.0",
   "pydantic>=2.10.6",
   "pyyaml>=6.0.2",
+  "seaborn>=0.13.2",
   "torch>=2.5.1",
   "torchvision>=0.20.1",
   "tqdm>=4.67.1",
@@ -41,7 +44,8 @@ torchvision = [{ index = "pytorch" }]
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu128"
+# url = "https://download.pytorch.org/whl/cu128"
+url = "https://download.pytorch.org/whl/cu118"
 explicit = true
 
 [tool.hatch.metadata]
