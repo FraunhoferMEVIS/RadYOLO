@@ -181,7 +181,42 @@ if TYPE_CHECKING:
 #         return torch.cat(y, -1)  # TODO(muellergroh): check indexing
 
 
-class HardcodedModel(nn.Module):
+class BaseModel(nn.Module, ABC):
+    @overload
+    def forward(
+        self, x: torch.Tensor, *args, **kwargs
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
+
+    @overload
+    def forward(self, x: dict[str, Any], *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
+
+    @abstractmethod
+    def forward(
+        self, x: torch.Tensor | dict[str, Any], *args, **kwargs
+    ) -> (
+        list[torch.Tensor]
+        | torch.Tensor
+        | tuple[torch.Tensor, list[torch.Tensor]]
+        | tuple[torch.Tensor, torch.Tensor]
+    ): ...
+
+    @abstractmethod
+    def loss(
+        self,
+        batch: Batch,
+        preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]: ...
+
+    @abstractmethod
+    def load(self, weights: ModelCheckpoint | nn.Module) -> None: ...
+
+    @abstractmethod
+    def predict(
+        self, x: torch.Tensor, augment: bool = False
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
+
+
+class HardcodedModel(BaseModel):
     def __init__(
         self,
         input_channels: int,
@@ -421,7 +456,7 @@ class HardcodedModel(nn.Module):
         return self.l23([o16, o19, o22])
 
 
-class Hardcoded3DModel(nn.Module):
+class Hardcoded3DModel(BaseModel):
     def __init__(
         self,
         input_channels: int,
