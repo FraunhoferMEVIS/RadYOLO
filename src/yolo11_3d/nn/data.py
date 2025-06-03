@@ -34,6 +34,13 @@ class LazyLabel(TypedDict):
 
 class Label(LazyLabel):
     img: torch.Tensor
+    ori_shape: tuple[int, int] | tuple[int, int, int]
+    ratio_pad: (
+        tuple[
+            tuple[float, float] | tuple[float, float, float], tuple[int, int] | tuple[int, int, int]
+        ]
+        | None
+    )
 
 
 class BaseDataset(Dataset[Label], Sized, ABC):
@@ -97,9 +104,23 @@ class BaseDataset(Dataset[Label], Sized, ABC):
     def load_image_and_label(self, index: int) -> Label:
         label = self.samples[index]
         img, original_shape, resized_shape = self.load_image(label["im_file"])
+        if len(original_shape) == 2 and len(resized_shape) == 2:
+            ratio = (resized_shape[0] / original_shape[0], resized_shape[1] / original_shape[1])
+            pad = (0, 0)
+        elif len(original_shape) == 3 and len(resized_shape) == 3:
+            ratio = (
+                resized_shape[0] / original_shape[0],
+                resized_shape[1] / original_shape[1],
+                resized_shape[2] / original_shape[2],
+            )
+            pad = (0, 0, 0)
+        else:
+            raise ValueError
         return Label(
             im_file=label["im_file"],
             shape=resized_shape,
+            ori_shape=original_shape,
+            ratio_pad=(ratio, pad),
             classes=label["classes"],
             bboxes=label["bboxes"],
             normalized=label["normalized"],
@@ -376,6 +397,8 @@ class DummyDataset(Dataset, Sized):
                 Label(
                     im_file=Path(),
                     img=torch.rand(self._shape, dtype=torch.float32, device="cuda"),
+                    ori_shape=self._shape,
+                    ratio_pad=((1.0,) * len(self._shape), (0,) * len(self._shape)),
                     shape=self._shape,
                     classes=torch.as_tensor(cls),
                     bboxes=torch.stack(bboxes, 0) if bboxes else torch.tensor(()),
