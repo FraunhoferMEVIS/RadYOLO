@@ -935,7 +935,6 @@ class Detect_3D(nn.Module):
             )
             self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
-        # TODO(muellergroh): check if self.reg_max * 4 is still valid here or we should use *6
         box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
         dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
 
