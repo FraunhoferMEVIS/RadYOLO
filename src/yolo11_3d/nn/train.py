@@ -5,16 +5,21 @@ import gc
 import logging
 import math
 import time
-from copy import copy, deepcopy
+from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
 import torch
 import yaml
 from tqdm import tqdm
 
-from yolo11_3d.nn.config import (
+from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
+from yolo11_3d.ultralytics.utils.plotting import plot_images, plot_labels, plot_results
+from yolo11_3d.ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
+
+from . import DATASETS, MODELS, VALIDATORS
+from .config import (
     DatasetConfig,
     DefaultConfig,
     ModelCheckpoint,
@@ -22,15 +27,16 @@ from yolo11_3d.nn.config import (
     get_model_cfg,
     model_checkpoint_from_torch,
 )
-from yolo11_3d.nn.data import BaseDataset, DummyDataset, MIPDataset, NIfTIDataset
-from yolo11_3d.nn.model import Hardcoded3DModel, HardcodedModel
-from yolo11_3d.nn.util import ModelEMA, init_seeds, select_device
-from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
-from yolo11_3d.ultralytics.utils.checks import check_imgsz
-from yolo11_3d.ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
+from .model import BaseModel
+
+# from yolo11_3d.ultralytics.utils.checks import check_imgsz
+from .util import ModelEMA, init_seeds, select_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from .data import BaseDataset, Batch
+    from .validate import BaseValidator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,22 +67,29 @@ class Trainer:
         self.lf: Callable[[int], float] | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
 
-        self.best_fitness = None
-        self.fitness = None
+        # self.best_fitness = None
+        # self.fitness = None
         self.loss = None
         self.tloss = None
-        # self.loss_names = ["Loss"]
-        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+        self.loss_names = ["Loss"]
+        self.loss_items = torch.ones((0,))
+        # self.loss_names = "box_loss", "cls_loss", "dfl_loss"
 
-        self.wdir = run_dir / (
+        self.save_dir = run_dir / (
             str(self.args.name)
             or datetime.datetime.now(tz=datetime.UTC).strftime("%Y_%m_%d-%H_%M_%S")
         )
+        self.wdir = self.save_dir / "weights"
+
+        self.save_dir.mkdir(exist_ok=self.args.exist_ok)
         self.wdir.mkdir(exist_ok=self.args.exist_ok)
+
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
         self.save_period = self.args.save_period
-        self.train_loss_csv_path = self.wdir / "train_loss.csv"
+        self.csv_path = self.save_dir / "results.csv"
+
+        self.plot_idx = [0, 1, 2]
 
     def check_resume(self, run_dir: Path) -> None:
         resume = self.args.resume
@@ -108,8 +121,8 @@ class Trainer:
         device: torch.device,
         input_channels: int = 3,
         scale: Literal["n", "s", "m", "l", "x"] = "n",
-    ) -> tuple[ModelCheckpoint | None, torch.nn.Module]:
-        if isinstance(self.model, torch.nn.Module):
+    ) -> tuple[ModelCheckpoint | None, BaseModel]:
+        if isinstance(self.model, BaseModel):
             return None, self.model
 
         checkpoint_path = self.model_path
@@ -123,17 +136,9 @@ class Trainer:
             raise NotImplementedError
             weights_ema = torch.load(self.args.pretrained)
 
-        # model = HardcodedModel(
-        #     input_channels=input_channels,
-        #     num_classes=num_classes,
-        #     scale=scale,
-        #     box=self.args.box,
-        #     cls=self.args.cls,
-        #     dfl=self.args.dfl,
-        #     device=device,
-        # )
+        model_cls, _ = MODELS[self.args.model_type]
 
-        model = Hardcoded3DModel(
+        model = model_cls(
             input_channels=input_channels,
             num_classes=num_classes,
             scale=scale,
@@ -168,15 +173,14 @@ class Trainer:
         epochs: int,
         start_epoch: int = 0,
     ) -> tuple[
-        torch.nn.Module,
+        BaseModel,
         bool,
         torch.GradScaler,
         DefaultConfig,
         int,
         int,
         torch.utils.data.DataLoader,
-        torch.utils.data.DataLoader | None,
-        None,
+        BaseValidator | None,
         dict[str, int],
         ModelEMA,
         int,
@@ -245,18 +249,30 @@ class Trainer:
         train_loader = self.get_dataloader(
             self.trainset, model, batch_size=batch_size, rank=-1, mode="train", device=device
         )
-        if self.testset is not None:
+        if self.args.val and self.testset is not None:
+            if self.args.validator_type is None:
+                msg = "Validator type must be specified if validation is enabled."
+                raise ValueError(msg)
             test_loader = self.get_dataloader(
                 self.testset, model, batch_size=batch_size * 2, rank=-1, mode="val", device=device
             )
+            validator = self.get_validator(
+                test_loader,
+                self.save_dir,
+                # tqdm,
+                self.data.names,
+                self.args.validator_type,
+            )
+            metric_keys = validator.metrics.keys + self.label_loss_items(prefix="val")
+            metrics: dict[str, int] = dict(zip(metric_keys, [0] * len(metric_keys), strict=True))
         else:
             test_loader = None
-        validator = None  # self.get_validator()
-        # metric_keys = validator.metrics.keys + self.label_loss_items(prefix="val")
-        metrics: dict[str, int] = {}  # dict(zip(metric_keys, [0] * len(metric_keys), strict=True))
+            validator = None
+            metrics = {}
         ema = ModelEMA(model)
-        if args.plots:
-            raise NotImplementedError
+        # ema.enabled = False
+        if args.plots and self.dataset_num_dimensions == 2:
+            self.plot_training_labels(train_loader)
 
         # Optimizer
         accumulate = max(round(args.nbs / batch_size), 1)
@@ -284,7 +300,6 @@ class Trainer:
             stride,
             batch_size,
             train_loader,
-            test_loader,
             validator,
             metrics,
             ema,
@@ -309,7 +324,6 @@ class Trainer:
             stride,
             batch_size,
             train_loader,
-            test_loader,
             validator,
             metrics,
             ema,
@@ -334,7 +348,7 @@ class Trainer:
             args=self.args,
             model=model,
             train_loader=train_loader,
-            test_loader=test_loader,
+            validator=validator,
             optimizer=optimizer,
             scheduler=scheduler,
             scaler=scaler,
@@ -351,9 +365,9 @@ class Trainer:
         epochs: int,
         batch_size: int,
         args: DefaultConfig,
-        model: torch.nn.Module,
+        model: BaseModel,
         train_loader: torch.utils.data.DataLoader,
-        test_loader: torch.utils.data.DataLoader | None,
+        validator: BaseValidator | None,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         scaler: torch.amp.grad_scaler.GradScaler,
@@ -374,17 +388,12 @@ class Trainer:
         epoch_time = None
         epoch_time_start = time.time()
         train_time_start = time.time()
-        epoch = start_epoch
-        with self.train_loss_csv_path.open("w", encoding="utf-8") as f:
-            f.write(",".join(self.loss_names) + "\n")
+        self.epoch = start_epoch
         optimizer.zero_grad()
         while True:
             # epoch_ = epoch
             scheduler.step()
             model.train()
-            pbar = tqdm(
-                enumerate(train_loader), total=num_batches, bar_format="{l_bar}{bar:10}{r_bar}"
-            )
             # if epoch == (epochs - args.close_mosaic):
             #     raise NotImplementedError
 
@@ -396,11 +405,14 @@ class Trainer:
                 # "Instances",
                 "Size",
             )
+            pbar = tqdm(
+                enumerate(train_loader), total=num_batches, bar_format="{l_bar}{bar:10}{r_bar}"
+            )
             tloss: torch.Tensor | None = None
             loss: torch.Tensor | None = None
             for i, batch in pbar:
                 # Warmup
-                num_iterations = i + num_batches * epoch
+                num_iterations = i + num_batches * self.epoch
                 if num_iterations <= num_warmup_iterations:
                     warmup_iteration_range = [0, num_warmup_iterations]
                     accumulate = max(
@@ -419,7 +431,7 @@ class Trainer:
                             warmup_iteration_range,
                             [
                                 args.warmup_bias_lr if j == 0 else 0.0,
-                                x["initial_lr"] * lf(epoch),
+                                x["initial_lr"] * lf(self.epoch),
                             ],
                         )
                         if "momentum" in x:
@@ -433,10 +445,13 @@ class Trainer:
                 with torch.autocast(amp_device_type):
                     # batch = self.preprocess_batch(batch)
                     batch["img"] = batch["img"].to(self.device, non_blocking=True)
-                    loss_items: torch.Tensor
-                    loss, loss_items = cast("tuple[torch.Tensor, torch.Tensor]", model(batch))
+                    loss, self.loss_items = cast("tuple[torch.Tensor, torch.Tensor]", model(batch))
 
-                    tloss = (tloss * i + loss_items) / (i + 1) if tloss is not None else loss_items
+                    tloss = (
+                        (tloss * i + self.loss_items) / (i + 1)
+                        if tloss is not None
+                        else self.loss_items
+                    )
 
                 # Backward
                 deterministic_restore = torch.are_deterministic_algorithms_enabled()
@@ -454,15 +469,15 @@ class Trainer:
                     if args.time:
                         raise NotImplementedError
 
-                if args.plots:
-                    raise NotImplementedError
+                # if args.plots:
+                #     raise NotImplementedError
 
                 # Log
                 loss_length = tloss.shape[0] if len(tloss.shape) else 1
                 pbar.set_description(
                     ("%11s" * 2 + "%11.4g" * (1 + loss_length))
                     % (
-                        f"{epoch + 1}/{epochs}",
+                        f"{self.epoch + 1}/{epochs}",
                         f"{self._get_memory():.3g}G",
                         *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
                         # batch["cls"].shape[0],  # batch size
@@ -470,23 +485,44 @@ class Trainer:
                     )
                 )
 
-            if tloss is not None:
-                with self.train_loss_csv_path.open("a", encoding="utf-8") as f:
-                    f.write(",".join(map(str, tloss.tolist())) + "\n")
+                if (
+                    self.args.plots
+                    and self.dataset_num_dimensions == 2
+                    and num_iterations in self.plot_idx
+                ):
+                    self.plot_training_samples(batch, num_iterations)
 
             if loss is None:
                 raise RuntimeError
 
-            final_epoch = epoch + 1 >= epochs
+            final_epoch = self.epoch + 1 >= epochs
             ema.update_attr(
                 model, include=["yaml", "nc", "args", "names", "stride", "class_weights"]
             )
 
-            # if self.args.val or final_epoch or stop:
-            #     metrics, fitness, best_fitness = self.validate(best_fitness=best_fitness, loss=loss)
-            if best_fitness is None:
-                best_fitness = loss.item()
-            best_fitness = min(loss.item(), best_fitness)
+            if validator is not None and (self.args.val or final_epoch or stop):
+                metrics, fitness, best_fitness = self.validate(
+                    validator=validator,
+                    ema=ema,
+                    best_fitness=best_fitness,
+                    loss=loss,
+                    amp=amp_device_type != "cpu",
+                )
+                self.save_metrics(
+                    metrics={
+                        **(self.label_loss_items(tloss) if tloss is not None else {}),
+                        **metrics,
+                    },
+                    train_time_start=train_time_start,
+                )
+                # with self.val_loss_csv_path.open("a", encoding="utf-8") as f:
+                #     f.write(",".join(map(str, metrics)) + "\n")
+            else:
+                metrics = {}
+                fitness = 0.0
+            # if best_fitness is None:
+            #     best_fitness = loss.item()
+            # best_fitness = min(loss.item(), best_fitness)
 
             stop |= final_epoch
             if args.time:
@@ -494,13 +530,13 @@ class Trainer:
 
             if args.save or final_epoch:
                 self.save_model(
-                    epoch=epoch,
-                    best_fitness=best_fitness,
+                    epoch=self.epoch,
+                    best_fitness=best_fitness or 0.0,
                     ema=ema,
                     optimizer=optimizer,
                     train_args=args,
-                    metrics={},
-                    fitness=0,
+                    metrics=metrics,
+                    fitness=fitness,
                 )
 
             t = time.time()
@@ -514,14 +550,14 @@ class Trainer:
             if stop:
                 break
 
-            epoch += 1
+            self.epoch += 1
 
         seconds = time.time() - train_time_start
-        msg = f"\n{epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
+        msg = f"\n{self.epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
         LOGGER.info(msg)
 
         if args.plots:
-            raise NotImplementedError
+            self.plot_metrics()
 
         self._clear_memory()
 
@@ -601,10 +637,8 @@ class Trainer:
         grid_size = max(
             int(model.stride.max() if model and isinstance(model.stride, torch.Tensor) else 0), 32
         )
-        # if not isinstance(self.args.imgsz, int):
-        #     raise TypeError
-        # return MIPDataset(
-        return NIfTIDataset(
+        dataset, self.dataset_num_dimensions = DATASETS[self.args.dataset_type]
+        return dataset(
             src_path=img_path,
             imgsz=tuple(self.args.imgsz),
             # augment=mode == "train",
@@ -614,7 +648,7 @@ class Trainer:
             pad=0.0 if mode == "train" else 0.5,
             fraction=self.args.fraction if mode == "train" else 1.0,
         )
-        return DummyDataset(256, self.data.nc, (3, 640, 640))
+        # return DummyDataset(256, self.data.nc, (3, 640, 640))
         # return YOLODataset(
         #     img_path=img_path,
         #     imgsz=self.args.imgsz,
@@ -663,28 +697,65 @@ class Trainer:
         serialized_checkpoint = buffer.getvalue()
 
         self.last_model_path.write_bytes(serialized_checkpoint)
-        if self.best_fitness == self.fitness:
+        if best_fitness == fitness:
             self.best_model_path.write_bytes(serialized_checkpoint)
         if (self.save_period > 0) and (epoch % self.save_period == 0):
             (self.wdir / f"epoch{epoch}.pt").write_bytes(serialized_checkpoint)
 
-    # def get_validator(self):
-    #     self.loss_names = "box_cls", "cls_loss", "dfl_loss"
-    #     return yolo.detect.DetectionValidator(
-    #         self.test_loader,
-    #         save_dir=self.save_dir,
-    #         args=copy(self.args),
-    #         _callbacks=self.callbacks,
-    #     )
+    def get_validator(
+        self,
+        test_loader: InfiniteDataLoader,
+        save_dir: Path,
+        # pbar: tqdm,
+        names: dict[int, str],
+        validator_type: str,
+    ) -> BaseValidator:
+        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+        # return yolo.detect.DetectionValidator(
+        #     self.test_loader,
+        #     save_dir=self.save_dir,
+        #     args=copy(self.args),
+        #     _callbacks=self.callbacks,
+        # )
+        validator, _ = VALIDATORS[validator_type]
+        return validator(
+            test_loader,
+            save_dir=save_dir,
+            # pbar=pbar,
+            args=self.args,
+            names=names,
+        )
 
-    # def validate(
-    #     self, best_fitness: float | None, loss: torch.Tensor
-    # ):  # -> tuple[Any, Any | float, Any | float]:
-    #     metrics = self.validator(self)
-    #     fitness: float = metrics.pop("fitness", -loss.detach().cpu().numpy())
-    #     if not best_fitness or best_fitness < fitness:
-    #         best_fitness = fitness
-    #     return metrics, fitness, best_fitness
+    def validate(
+        self,
+        validator: BaseValidator,
+        ema: ModelEMA,
+        best_fitness: float | None,
+        loss: torch.Tensor,
+        amp: bool,
+    ) -> tuple[dict[str, float], float, float]:
+        metrics = validator(self, ema=ema, amp=amp)
+        fitness: float = metrics.pop("fitness", -loss.detach().cpu().item())
+        if not best_fitness or best_fitness < fitness:
+            best_fitness = fitness
+        return metrics, fitness, best_fitness
+
+    @overload
+    def label_loss_items(
+        self, loss_items: torch.Tensor, prefix: str = "train"
+    ) -> dict[str, float]: ...
+
+    @overload
+    def label_loss_items(self, loss_items: None = None, prefix: str = "train") -> list[str]: ...
+
+    def label_loss_items(
+        self, loss_items: torch.Tensor | None = None, prefix: str = "train"
+    ) -> dict[str, float] | list[str]:
+        keys: list[str] = [f"{prefix}/{x}" for x in self.loss_names]
+        if loss_items is not None:
+            rounded_loss_items = [round(float(x), 5) for x in loss_items]
+            return dict(zip(keys, rounded_loss_items, strict=True))
+        return keys
 
     def resume_training(
         self,
@@ -719,6 +790,47 @@ class Trainer:
             )
         # self.best_fitness = best_fitness
         return best_fitness, start_epoch
+
+    def save_metrics(self, metrics: dict, train_time_start: float) -> None:
+        keys, vals = list(metrics.keys()), list(metrics.values())
+        n = len(metrics) + 2
+        header = (
+            ""
+            if self.csv_path.exists()
+            else (("%s," * n % ("epoch", "time", *keys)).rstrip(",") + "\n")
+        )
+        t = time.time() - train_time_start
+        with self.csv_path.open("a") as f:
+            line = ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",")
+            f.write(header + line + "\n")
+
+    def plot_metrics(self) -> None:
+        plot_results(self.csv_path)
+
+    def plot_training_samples(self, batch: Batch, num_iterations: int) -> None:
+        """Plots training samples with their annotations."""
+        plot_images(
+            images=batch["img"],
+            batch_idx=batch["batch_idx"],
+            cls=batch["cls"].squeeze(-1),
+            bboxes=batch["bboxes"],
+            paths=[str(path) for path in batch["im_file"]],
+            fname=str(self.save_dir / f"train_batch{num_iterations}.jpg"),
+            # on_plot=self.on_plot,
+        )
+
+    def plot_training_labels(self, train_loader: InfiniteDataLoader) -> None:
+        """Create a labeled training plot of the YOLO model."""
+        dataset = cast("BaseDataset", train_loader.dataset)
+        boxes = np.concatenate([lb["bboxes"] for lb in dataset.samples], 0)
+        cls = np.concatenate([lb["classes"] for lb in dataset.samples], 0)
+        plot_labels(
+            boxes,
+            cls.squeeze(),
+            names=self.data.names,
+            save_dir=self.save_dir,
+            # on_plot=self.on_plot,
+        )
 
     # def auto_batch(self):
     #     train_dataset = self.build_dataset(trainset, mode="train", batch=16)
