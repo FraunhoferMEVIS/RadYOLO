@@ -3,4 +3,4 @@
 
 # Parameters
 nc: 3 # number of channels
-scale: l
+scale: n
