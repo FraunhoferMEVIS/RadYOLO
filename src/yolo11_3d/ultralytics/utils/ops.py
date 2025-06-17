@@ -43,15 +43,16 @@ def scale_boxes(
         boxes (torch.Tensor): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
     """
     if ratio_pad is None:  # calculate from img0_shape
-        gain = min(
-            img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
-        )  # gain  = old / new
+        # gain = min(
+        #     img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
+        # )  # gain  = old / new
+        gain = (img1_shape[1] / img0_shape[1], img1_shape[0] / img0_shape[0])
         pad = (
-            round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1),
-            round((img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1),
+            round((img1_shape[1] - img0_shape[1] * gain[0]) / 2 - 0.1),
+            round((img1_shape[0] - img0_shape[0] * gain[1]) / 2 - 0.1),
         )  # wh padding
     else:
-        gain = ratio_pad[0][0]
+        gain = ratio_pad[0][::-1]
         pad = ratio_pad[1]
 
     if padding:
@@ -60,8 +61,8 @@ def scale_boxes(
         if not xywh:
             boxes[..., 2] -= pad[0]  # x padding
             boxes[..., 3] -= pad[1]  # y padding
-    boxes[..., :4] /= gain  # TODO(muellergroh): check indexing for 3D
-    return clip_boxes(boxes, img0_shape)  # TODO(muellergroh): check indexing for 3D
+    boxes[..., :4] /= torch.as_tensor(gain, device=boxes.device).tile(1, 2)
+    return clip_boxes(boxes, img0_shape)
 
 
 def scale_boxes_3d(
@@ -93,18 +94,23 @@ def scale_boxes_3d(
         boxes (torch.Tensor): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
     """
     if ratio_pad is None:  # calculate from img0_shape
-        gain = min(
-            img1_shape[0] / img0_shape[0],
-            img1_shape[1] / img0_shape[1],
+        # gain = min(
+        #     img1_shape[0] / img0_shape[0],
+        #     img1_shape[1] / img0_shape[1],
+        #     img1_shape[2] / img0_shape[2],
+        # )  # gain  = old / new
+        gain = (
             img1_shape[2] / img0_shape[2],
-        )  # gain  = old / new
+            img1_shape[1] / img0_shape[1],
+            img1_shape[0] / img0_shape[0],
+        )
         pad = (
-            round((img1_shape[2] - img0_shape[2] * gain) / 2 - 0.1),
-            round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1),
-            round((img1_shape[0] - img0_shape[0] * gain) / 2 - 0.1),
+            round((img1_shape[2] - img0_shape[2] * gain[0]) / 2 - 0.1),
+            round((img1_shape[1] - img0_shape[1] * gain[1]) / 2 - 0.1),
+            round((img1_shape[0] - img0_shape[0] * gain[2]) / 2 - 0.1),
         )  # whd padding
     else:
-        gain = ratio_pad[0][0]
+        gain = ratio_pad[0][::-1]
         pad = ratio_pad[1]
 
     if padding:
@@ -115,7 +121,9 @@ def scale_boxes_3d(
             boxes[..., 3] -= pad[0]  # x padding
             boxes[..., 4] -= pad[1]  # y padding
             boxes[..., 5] -= pad[2]  # z padding
-    boxes[..., :6] /= gain  # TODO(muellergroh): check indexing for 3D
+    boxes[..., :6] /= torch.as_tensor(gain, device=boxes.device).tile(
+        1, 2
+    )  # TODO(muellergroh): check indexing for 3D
     return clip_boxes_3d(boxes, img0_shape)  # TODO(muellergroh): check indexing for 3D
 
 
