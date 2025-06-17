@@ -561,7 +561,7 @@ def clip_boxes_3d(boxes: torch.Tensor, shape: tuple[int, ...]) -> torch.Tensor:
         boxes[..., 1] = boxes[..., 1].clamp(0, shape[1])  # y1
         boxes[..., 2] = boxes[..., 2].clamp(0, shape[0])  # z1
         boxes[..., 3] = boxes[..., 3].clamp(0, shape[2])  # x2
-        boxes[..., 4] = boxes[..., 4].clamp(0, shape[2])  # y2
+        boxes[..., 4] = boxes[..., 4].clamp(0, shape[1])  # y2
         boxes[..., 5] = boxes[..., 5].clamp(0, shape[0])  # z2
     else:  # np.array (faster grouped)
         boxes[..., [0, 3]] = boxes[..., [0, 3]].clip(0, shape[2])  # x1, x2
