@@ -550,7 +550,7 @@ class TaskAlignedAssigner_3D(TaskAlignedAssigner):
         """Select positive anchor centers within ground truth bounding boxes.
 
         Args:
-            xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w*d, 2).
+            xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w*d, 3).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes, shape (b, n_boxes, 6).
             eps (float, optional): Small value for numerical stability. Defaults to 1e-9.
 
