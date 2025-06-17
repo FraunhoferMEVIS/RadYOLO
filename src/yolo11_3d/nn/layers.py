@@ -208,9 +208,9 @@ class DFL_3D(nn.Module):
 
     def __init__(self, in_channels: int = 16) -> None:
         super().__init__()
-        self.conv = nn.Conv3d(in_channels, 1, 1, bias=False).requires_grad_(False)
+        self.conv = nn.Conv2d(in_channels, 1, 1, bias=False).requires_grad_(False)
         x = torch.arange(in_channels, dtype=torch.float)
-        self.conv.weight.data[:] = nn.Parameter(x.view(1, in_channels, 1, 1, 1))
+        self.conv.weight.data[:] = nn.Parameter(x.view(1, in_channels, 1, 1))
         self.in_channels = in_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
