@@ -350,7 +350,7 @@ def nms_3d(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> t
         if iter_count > num_indices:
             break
 
-        iou = bbox_iou_3d(boxes[idx], boxes[order], xyzwhd=False)
+        iou = bbox_iou_3d(boxes[idx], boxes[order], xyzwhd=False).squeeze(-1)
 
         mask = iou <= iou_threshold
         order = order[mask]
