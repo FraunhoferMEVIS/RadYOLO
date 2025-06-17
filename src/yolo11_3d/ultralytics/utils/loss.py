@@ -368,7 +368,7 @@ class v8DetectionLoss_3D:  # noqa: N801
         batch_size = pred_scores.shape[0]
         imgsz = (
             torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
-        )  # image size (h,w,d)
+        )  # image size (d,h,w)
         anchor_points, stride_tensor = make_anchors_3d(feats, self.stride, 0.5)
 
         # Targets
