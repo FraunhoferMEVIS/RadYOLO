@@ -11,10 +11,13 @@ import numpy.typing as npt
 import torch
 import tqdm
 
-from yolo11_3d.nn.data import Batch
 from yolo11_3d.ultralytics.utils import ops
-from yolo11_3d.ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
-from yolo11_3d.ultralytics.utils.plotting import output_to_target, plot_images
+from yolo11_3d.ultralytics.utils.metrics import (
+    ConfusionMatrix,
+    ConfusionMatrix3D,
+    DetMetrics,
+    box_iou,
+)
 
 if TYPE_CHECKING:
     from yolo11_3d.ultralytics.data.build import InfiniteDataLoader
@@ -607,6 +610,28 @@ class Validator2D(BaseValidator):
 
 
 class Validator3D(BaseValidator):
+    def __init__(
+        self,
+        dataloader: InfiniteDataLoader,
+        save_dir: Path,
+        args: DefaultConfig,
+        names: dict[int, str],
+        _callbacks: dict | None = None,
+    ) -> None:
+        super().__init__(dataloader, save_dir, args, names, _callbacks)
+        if self.args.conf is None:
+            msg = "self.args.conf should have been specified in BaseValidator."
+            raise ValueError(msg)
+        self.confusion_matrix = ConfusionMatrix3D(self.nc, self.args.conf)
+
+    def init_metrics(self, model) -> None:
+        """Initialize evaluation metrics for YOLO."""
+        self.metrics.names = self.names
+        self.confusion_matrix = ConfusionMatrix3D(nc=self.nc, conf=self.args.conf)
+        self.seen = 0
+        self.jdict = []
+        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+
     def postprocess(
         self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
     ) -> list[torch.Tensor]:
@@ -630,9 +655,9 @@ class Validator3D(BaseValidator):
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
         if len(classes):
-            # TODO(muellergroh): check for 3D
             bboxes = (
-                ops.xyzwhd2xyzxyz(bboxes) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]
+                ops.xyzwhd2xyzxyz(bboxes)
+                * torch.tensor(imgsz, device=self.device)[[2, 1, 0, 2, 1, 0]]
             )  # target boxes
             # TODO(muellergroh): check for 3D
             ops.scale_boxes_3d(imgsz, bboxes, ori_shape, ratio_pad=ratio_pad)  # native-space labels
@@ -682,10 +707,10 @@ class Validator3D(BaseValidator):
 
             # Predictions
             if self.args.single_cls:
-                pred[:, 7] = 0  # TODO(muellergroh): check indexing for 3D
+                pred[:, 7] = 0
             predn = self._prepare_pred(pred, prepared_batch)
-            stat["conf"] = predn[:, 6]  # TODO(muellergroh): check indexing for 3D
-            stat["pred_cls"] = predn[:, 7]  # TODO(muellergroh): check indexing for 3D
+            stat["conf"] = predn[:, 6]
+            stat["pred_cls"] = predn[:, 7]
 
             # Evaluate
             if num_labels:
@@ -727,10 +752,8 @@ class Validator3D(BaseValidator):
             The function does not return any value directly usable for metrics calculation. Instead, it provides an
             intermediate representation used for evaluating predictions against ground truth.
         """
-        iou = box_iou(gt_bboxes, detections[:, :6])  # TODO(muellergroh): check indexing for 3D
-        return self.match_predictions(
-            detections[:, 7], gt_cls, iou
-        )  # TODO(muellergroh): check indexing for 3D
+        iou = box_iou(gt_bboxes, detections[:, :6])
+        return self.match_predictions(detections[:, 7], gt_cls, iou)
 
     def plot_val_samples(self, batch: Batch, ni: int) -> None:
         return
