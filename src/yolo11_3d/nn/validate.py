@@ -603,7 +603,7 @@ class Validator2D(BaseValidator):
         plot_images(
             batch["img"],
             *output_to_target(preds, max_det=self.args.max_det),
-            paths=[str(path) for path in batch["im_file"]],
+            paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_pred.jpg"),
             names=self.names,
             # on_plot=self.on_plot,
