@@ -629,10 +629,10 @@ class Hardcoded3DModel(BaseModel):
     ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
 
     @overload
-    def forward(self, x: dict, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
+    def forward(self, x: Batch, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     def forward(
-        self, x: torch.Tensor | dict, *args, **kwargs
+        self, x: torch.Tensor | Batch, *args, **kwargs
     ) -> (
         list[torch.Tensor]
         | torch.Tensor
