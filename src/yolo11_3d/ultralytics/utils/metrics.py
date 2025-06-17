@@ -875,7 +875,9 @@ class Metric:
         """Mean of results, return mp, mr, map50, map."""
         return [self.mp, self.mr, self.map50, self.map]
 
-    def class_result(self, i):
+    def class_result(
+        self, i: int
+    ) -> tuple[npt.NDArray | Any, npt.NDArray | Any, npt.NDArray | Any, npt.NDArray | Any]:
         """Class-aware result, return p[i], r[i], ap50[i], ap[i]."""
         return self.p[i], self.r[i], self.ap50[i], self.ap[i]
 
@@ -887,7 +889,7 @@ class Metric:
             maps[c] = self.ap[i]
         return maps
 
-    def fitness(self):
+    def fitness(self) -> float:
         """Model fitness as a weighted combination of metrics."""
         w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
         return (np.array(self.mean_results()) * w).sum()
@@ -906,7 +908,7 @@ class Metric:
             npt.NDArray,
             list,
         ],
-    ):
+    ) -> None:
         """Updates the evaluation metrics of the model with a new set of results.
 
         Args:
@@ -1002,6 +1004,7 @@ class DetMetrics:
             "postprocess": 0.0,
         }
         self.task = "detect"
+        self.confusion_matrix: ConfusionMatrix | None = None
 
     def process(
         self,
