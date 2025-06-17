@@ -18,6 +18,7 @@ from yolo11_3d.ultralytics.utils.metrics import (
     DetMetrics,
     box_iou,
 )
+from yolo11_3d.ultralytics.utils.plotting import output_to_target, output_to_target_3d, plot_images
 
 if TYPE_CHECKING:
     from yolo11_3d.ultralytics.data.build import InfiniteDataLoader
@@ -756,7 +757,55 @@ class Validator3D(BaseValidator):
         return self.match_predictions(detections[:, 7], gt_cls, iou)
 
     def plot_val_samples(self, batch: Batch, ni: int) -> None:
-        return
+        """Plot validation image samples."""
+        plot_images(
+            project_nifti_images(batch["img"], -3),
+            batch["batch_idx"],
+            batch["cls"].squeeze(-1),
+            batch["bboxes"][:, [0, 1, 3, 4]],
+            paths=batch["im_file"],
+            fname=str(self.save_dir / f"val_batch{ni}_xy_labels.jpg"),
+            names=self.names,
+            # on_plot=self.on_plot,
+        )
+        plot_images(
+            project_nifti_images(batch["img"], dim=-2),
+            batch["batch_idx"],
+            batch["cls"].squeeze(-1),
+            batch["bboxes"][:, [0, 2, 3, 5]],
+            paths=batch["im_file"],
+            fname=str(self.save_dir / f"val_batch{ni}_xz_labels.jpg"),
+            names=self.names,
+            # on_plot=self.on_plot
+        )
 
     def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
-        return
+        plot_images(
+            project_nifti_images(batch["img"], -3),
+            *output_to_target_3d(preds, max_det=self.args.max_det, axis=2),
+            paths=batch["im_file"],
+            fname=str(self.save_dir / f"val_batch{ni}_xy_pred.jpg"),
+            names=self.names,
+            # on_plot=self.on_plot,
+        )  # pred
+        plot_images(
+            project_nifti_images(batch["img"], -2),
+            *output_to_target_3d(preds, max_det=self.args.max_det, axis=1),
+            paths=batch["im_file"],
+            fname=str(self.save_dir / f"val_batch{ni}_xz_pred.jpg"),
+            names=self.names,
+            # on_plot=self.on_plot,
+        )  # pred
+
+
+def project_nifti_images(
+    image: torch.Tensor, dim: int, upper_quantile: float = 0.995
+) -> torch.Tensor:
+    time_diff_img = (image[:, [1]] - image[:, [0]]).amax(dim)
+    percentiles = (
+        time_diff_img.reshape((time_diff_img.shape[0], -1))
+        .to(torch.float)
+        .quantile(upper_quantile, 1, keepdim=True)
+        .to(time_diff_img.dtype)
+    )
+    return time_diff_img.div(percentiles[..., None, None]).clamp(0, 1)

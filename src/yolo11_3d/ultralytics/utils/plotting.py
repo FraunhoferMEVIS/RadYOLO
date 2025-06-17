@@ -1023,3 +1023,20 @@ def output_to_target(
         targets.append(torch.cat((j, cls, ops.xyxy2xywh(box), conf), 1))
     targets_ = torch.cat(targets, 0).numpy()
     return targets_[:, 0], targets_[:, 1], targets_[:, 2:-1], targets_[:, -1]
+
+
+def output_to_target_3d(
+    output: list[torch.Tensor], max_det: int = 300, axis: int = 2
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
+    """Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting.
+
+    Results are flattened to 2d for easier visualization.
+    """
+    idx = [i for i in range(6) if i % 3 != axis]
+    targets: list[torch.Tensor] = []
+    for i, o in enumerate(output):
+        box, conf, cls = o[:max_det, :8].cpu().split((6, 1, 1), 1)
+        j = torch.full((conf.shape[0], 1), i)
+        targets.append(torch.cat((j, cls, ops.xyxy2xywh(box[:, idx]), conf), 1))
+    targets_ = torch.cat(targets, 0).numpy()
+    return targets_[:, 0], targets_[:, 1], targets_[:, 2:-1], targets_[:, -1]
