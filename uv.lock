@@ -2169,7 +2169,7 @@ wheels = [
 
 [[package]]
 name = "yolo11-3d"
-version = "0.1.0.dev20250503"
+version = "0.1.0.dev20250617"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
