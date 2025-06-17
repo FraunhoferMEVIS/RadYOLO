@@ -133,6 +133,11 @@ class TaskAlignedAssigner(nn.Module):
         mask_pos, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
         )
+        if mask_gt.sum(2).gt(mask_pos.sum(2)).any().item():
+            pass
+            # LOGGER.warning(
+            #     "Did not find anchor points for all ground-truth bounding boxes. Your bounding boxes could be too small for the configured heads."
+            # )
 
         target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(
             mask_pos, overlaps, self.n_max_boxes
