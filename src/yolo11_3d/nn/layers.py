@@ -963,6 +963,7 @@ class Detect_3D(nn.Module):
             b_bias = b_last.bias
             if b_bias is None:
                 raise ValueError
+            # TODO(muellergroh): check for validity in 3D
             b_bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
 
     def decode_bboxes(
