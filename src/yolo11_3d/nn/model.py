@@ -380,7 +380,7 @@ class HardcodedModel(BaseModel):
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-        self.criterion = v8DetectionLoss(self, box, cls, dfl, self.l23, device)
+        self.criterion = v8DetectionLoss(self, box, cls, dfl, self.l23, device, tal_beta=3.0)
 
     @overload
     def forward(
@@ -621,7 +621,7 @@ class Hardcoded3DModel(BaseModel):
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-        self.criterion = v8DetectionLoss_3D(self, box, cls, dfl, self.l23, device)
+        self.criterion = v8DetectionLoss_3D(self, box, cls, dfl, self.l23, device, tal_beta=1.0)
 
     @overload
     def forward(
