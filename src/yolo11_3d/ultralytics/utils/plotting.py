@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 from . import ops
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -754,7 +754,7 @@ def plot_images(
     confs: torch.Tensor | np.ndarray | None = None,
     masks: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.uint8),
     kpts: torch.Tensor | np.ndarray = np.zeros((0, 51), dtype=np.float32),
-    paths: list[str] | None = None,
+    paths: Sequence[str | Path] | None = None,
     fname: str = "images.jpg",
     names: dict[int, str] | None = None,
     # on_plot: Callable = None,
