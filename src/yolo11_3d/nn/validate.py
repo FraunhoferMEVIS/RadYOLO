@@ -16,6 +16,7 @@ from yolo11_3d.ultralytics.utils.metrics import (
     ConfusionMatrix,
     ConfusionMatrix3D,
     DetMetrics,
+    DetMetrics3D,
     box_iou,
 )
 from yolo11_3d.ultralytics.utils.plotting import output_to_target, output_to_target_3d, plot_images
@@ -623,6 +624,14 @@ class Validator3D(BaseValidator):
         if self.args.conf is None:
             msg = "self.args.conf should have been specified in BaseValidator."
             raise ValueError(msg)
+        self.metrics = DetMetrics3D(
+            save_dir=self.save_dir,
+            # on_plot=self.on_plot,
+            names=self.names,
+            plot=self.args.plots,
+        )
+        self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
+        self.niou: int = self.iouv.numel()
         self.confusion_matrix = ConfusionMatrix3D(self.nc, self.args.conf)
 
     def init_metrics(self, model) -> None:
@@ -632,6 +641,18 @@ class Validator3D(BaseValidator):
         self.seen = 0
         self.jdict = []
         self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+
+    def get_desc(self) -> str:
+        """Return a formatted string summarizing class metrics of YOLO model."""
+        return ("%22s" + "%11s" * 6) % (
+            "Class",
+            "Images",
+            "Instances",
+            "Box(P",
+            "R",
+            "mAP10",
+            "mAP10-95)",
+        )
 
     def postprocess(
         self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
