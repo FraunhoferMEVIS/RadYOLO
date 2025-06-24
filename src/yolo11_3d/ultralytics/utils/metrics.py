@@ -631,7 +631,7 @@ def ap_per_class(
     conf: npt.NDArray[np.floating],
     pred_cls: npt.NDArray[np.integer],
     target_cls: npt.NDArray[np.integer],
-    plot: Literal[False] = False,
+    plot: bool = False,
     # on_plot: Callable[[Path, Any], None] | None = None,
     save_dir: Path = Path(),
     names: dict = {},
@@ -715,7 +715,6 @@ def ap_per_class(
     ]  # list: only classes that have data
     names = dict(enumerate(names_))  # to dict
     if plot:
-        # raise NotImplementedError
         plot_pr_curve(
             x,
             prec_values,
@@ -987,13 +986,13 @@ class DetMetrics:
     def __init__(
         self,
         save_dir: Path = Path(),
-        plot: Literal[False] = False,
+        plot: bool = False,
         on_plot: Callable[[Path, Any], None] | None = None,
         names: dict[int, str] = {},
     ) -> None:
         """Initialize a DetMetrics instance with a save directory, plot flag, callback function, and class names."""
         self.save_dir: Path = save_dir
-        self.plot: Literal[False] = plot
+        self.plot: bool = plot
         self.on_plot: Callable[[Path, Any], None] | None = on_plot
         self.names: dict[int, str] = names
         self.box = Metric()
