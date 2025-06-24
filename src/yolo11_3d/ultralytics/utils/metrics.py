@@ -1079,3 +1079,15 @@ class DetMetrics:
     def curves_results(self) -> list[list[Any | str]]:
         """Returns dictionary of computed performance metrics and statistics."""
         return self.box.curves_results
+
+
+class DetMetrics3D(DetMetrics):
+    @property
+    def keys(self) -> list[str]:
+        """Returns a list of keys for accessing specific metrics."""
+        return [
+            "metrics/precision(B)",
+            "metrics/recall(B)",
+            "metrics/mAP10(B)",
+            "metrics/mAP10-95(B)",
+        ]
