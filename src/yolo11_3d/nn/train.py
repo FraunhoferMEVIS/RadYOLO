@@ -16,7 +16,10 @@ from tqdm import tqdm
 
 from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_images, plot_labels, plot_results
-from yolo11_3d.ultralytics.utils.torch_utils import convert_optimizer_state_dict_to_fp16
+from yolo11_3d.ultralytics.utils.torch_utils import (
+    EarlyStopping,
+    convert_optimizer_state_dict_to_fp16,
+)
 
 from . import DATASETS, MODELS, VALIDATORS
 from .config import (
@@ -188,6 +191,7 @@ class Trainer:
         bool,
         torch.optim.lr_scheduler.LRScheduler,
         Callable[[int], float],
+        EarlyStopping,
         float | None,
         int,
     ]:
@@ -289,7 +293,7 @@ class Trainer:
 
         # Scheduler
         scheduler, lf = self._setup_scheduler(optimizer)
-        stop = False
+        stopper, stop = EarlyStopping(patience=self.args.patience), False
         best_fitness, start_epoch = self.resume_training(ckpt, optimizer, ema)
         scheduler.last_epoch = start_epoch - 1
         return (
@@ -308,6 +312,7 @@ class Trainer:
             stop,
             scheduler,
             lf,
+            stopper,
             best_fitness,
             start_epoch,
         )
@@ -332,6 +337,7 @@ class Trainer:
             stop,
             scheduler,
             lf,
+            stopper,
             best_fitness,
             start_epoch,
         ) = self._setup_train(
@@ -356,6 +362,8 @@ class Trainer:
             amp_device_type=self.device.type,
             ema=ema,
             accumulate=accumulate,
+            stopper=stopper,
+            stop=stop,
             best_fitness=best_fitness,
             start_epoch=start_epoch,
         )
@@ -376,10 +384,11 @@ class Trainer:
         ema: ModelEMA,
         accumulate: int,
         # world_size=1,
+        stopper: EarlyStopping,
+        stop: bool,
         best_fitness: float | None,
         start_epoch: int,
     ) -> None:
-        stop = False
         num_batches = len(train_loader)
         num_warmup_iterations = (
             max(round(args.warmup_epochs * num_batches), 100) if args.warmup_epochs > 0 else -1
@@ -525,7 +534,7 @@ class Trainer:
             #     best_fitness = loss.item()
             # best_fitness = min(loss.item(), best_fitness)
 
-            stop |= final_epoch
+            stop |= stopper(self.epoch + 1, fitness) or final_epoch
             if args.time:
                 raise NotImplementedError
 
