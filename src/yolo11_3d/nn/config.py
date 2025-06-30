@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import datetime
 import logging
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self, TypedDict, assert_never
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict, assert_never
 
 import annotated_types
 import torch
@@ -17,11 +16,13 @@ from pydantic import (
     FilePath,
     NewPath,
     NonNegativeInt,
-    field_serializer,
     model_validator,
 )
 
 from . import DATASETS, MODELS, VALIDATORS
+
+if TYPE_CHECKING:
+    import datetime
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS_DIR = Path("datasets")  # Path(SETTINGS["datasets_dir"])

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 import torch
 from torch import nn
 
-from yolo11_3d.nn.data import Batch
 from yolo11_3d.nn.layers import (
     C2PSA,
     C2PSA_3D,
@@ -25,6 +24,7 @@ from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss, v8DetectionLoss_3D
 
 if TYPE_CHECKING:
     from yolo11_3d.nn.config import ModelCheckpoint
+    from yolo11_3d.nn.data import Batch
 
 # class BaseModel(nn.Module, ABC):
 #     @property

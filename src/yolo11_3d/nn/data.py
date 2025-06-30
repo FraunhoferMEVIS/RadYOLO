@@ -198,9 +198,7 @@ class MIPDataset(BaseDataset):
             raise ValueError
         im_t = torch.as_tensor(im, dtype=torch.float32).movedim(-1, 0).contiguous() / 255.0
         im_t.clamp_(0.0, 1.0)
-        im_t_scaled = F.interpolate(im_t.unsqueeze(0), size=self.imgsz, mode="bilinear").squeeze_(
-            0
-        )
+        im_t_scaled = F.interpolate(im_t.unsqueeze(0), size=self.imgsz, mode="bilinear").squeeze_(0)
 
         h0: int
         w0: int
@@ -316,8 +314,8 @@ class NIfTIDataset(BaseDataset):
                 LazyLabel(
                     im_file=img_path,
                     shape=img.shape[:-1],
-                    classes=torch.as_tensor(labels[:, 0:1]),
-                    bboxes=torch.as_tensor(labels[:, 1:]),
+                    classes=torch.from_numpy(labels[:, 0:1]),
+                    bboxes=torch.from_numpy(labels[:, 1:]),
                     normalized=True,
                     bbox_format="xywh",
                 )
