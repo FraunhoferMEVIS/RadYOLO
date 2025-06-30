@@ -652,11 +652,21 @@ class Trainer:
             src_path=img_path,
             imgsz=tuple(self.args.imgsz),
             # augment=mode == "train",
-            augment=False,
+            augment=self.args.augment and mode == "train",
             batch_size=batch,
             stride=grid_size,
             pad=0.0 if mode == "train" else 0.5,
             fraction=self.args.fraction if mode == "train" else 1.0,
+            max_zoom=self.args.max_zoom,
+            min_zoom=self.args.min_zoom,
+            out_zoom_padding=self.args.out_zoom_padding,
+            prob_zoom=self.args.prob_zoom,
+            prob_cutout=self.args.prob_cutout,
+            cutout_params=self.args.cutout_params,
+            prob_mirroring=self.args.prob_mirroring,
+            mirror_axes=self.args.mirror_axes,
+            do_batchgenerators_intensity_augmentation=self.args.do_batchgenerators_intensity_augmentation,
+            do_intensity_augmentations_per_channel=self.args.do_intensity_augmentations_per_channel,
         )
         # return DummyDataset(256, self.data.nc, (3, 640, 640))
         # return YOLODataset(

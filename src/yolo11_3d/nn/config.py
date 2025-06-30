@@ -169,23 +169,43 @@ class DefaultConfig(BaseModel):
     translate: float = 0.1  # image translation
     scale: float = 0.5  # image scale
     shear: float = 0.0  # image shear
-    perspective: float = Field(0.0, ge=0, le=0.001)  # image perspective
-    flipud: float = Field(0.0, ge=0, le=1)  # image flip up/down
-    fliplr: float = Field(0.5, ge=0, le=1)  # image flip left/right
+    # perspective: float = Field(0.0, ge=0, le=0.001)  # image perspective
+    # flipud: float = Field(0.0, ge=0, le=1)  # image flip up/down
+    # fliplr: float = Field(0.5, ge=0, le=1)  # image flip left/right
     # bgr: float = Field(0.0, ge=0, le=1)  # image channel bgr
-    mosaic: float = Field(1.0, ge=0, le=1)  # image mosaic
-    mixup: float = Field(0.0, ge=0, le=1)  # image mixup
+    # mosaic: float = Field(1.0, ge=0, le=1)  # image mosaic
+    # mixup: float = Field(0.0, ge=0, le=1)  # image mixup
     # copy_paste: float = Field(0.0, ge=0, le=1)  # segment copu-paste
     # copy_paste_mode: Literal["flip", "mixup"] = "flip"  # the method to do copy_paste augmentation
     # auto_augment: Literal["randaugment", "autoaugment", "augmix"] = (
     #     "randaugment"  # auto augmentation policy for classification
     # )
-    erasing: float = Field(
-        0.4, ge=0, le=0.9
-    )  # probability of random erasing during classification training, 0 means no erasing.
-    crop_fraction: float = Field(
-        1.0, ge=0.1, le=1
-    )  # image crop fraction for classification, 1.0 means no crop.
+    # erasing: float = Field(
+    #     0.4, ge=0, le=0.9
+    # )  # probability of random erasing during classification training, 0 means no erasing.
+    # crop_fraction: float = Field(
+    #     1.0, ge=0.1, le=1
+    # )  # image crop fraction for classification, 1.0 means no crop.
+
+    # Augmentation
+    max_zoom: float = Field(1.5, ge=0)
+    min_zoom: float = Field(0.7, ge=0)
+    out_zoom_padding: Literal["constant", "random"] = "constant"
+    prob_zoom: float = Field(0.5, ge=0, le=1.0)
+    prob_cutout: float = Field(0.5, ge=0, le=1.0)
+    cutout_params: list[tuple[float, int]] = Field(
+        default_factory=lambda: [
+            (0.5, 1),
+            (0.25, 2),
+            (0.125, 4),
+            (0.0625, 8),
+            (0.03125, 16),
+        ]
+    )
+    prob_mirroring: float = Field(0.5, ge=0, le=1.0)
+    mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
+    do_batchgenerators_intensity_augmentation: bool = True
+    do_intensity_augmentations_per_channel: bool = False
 
     cfg: FilePath | None = None  # for overriding defaults.yaml
 

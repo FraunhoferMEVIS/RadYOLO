@@ -6,7 +6,7 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import Sized
 from pathlib import Path
-from typing import ClassVar, Literal, TypedDict, cast
+from typing import Any, ClassVar, Literal, TypedDict, cast
 
 import cv2
 import nibabel as nib
@@ -17,7 +17,13 @@ import torch.nn.functional as F  # noqa: N812
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from yolo11_3d.ultralytics.utils.ops import xyxy2xywh
+from yolo11_3d.nn.augmentations import (
+    batch_generators_intensity_augmentations,
+    random_mirroring,
+    random_zoom,
+    tensor_cutout,
+)
+from yolo11_3d.ultralytics.utils.ops import xyxy2xywh, xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 LOGGER = logging.getLogger(__name__)
 # IMG_FORMATS = {"jpg", "jpeg", "png"}
@@ -75,6 +81,7 @@ class BaseDataset(Dataset[Label], Sized, ABC):
         pad: float = 0.5,
         prefix: str = "",
         fraction: float = 1.0,
+        **hyp: Any,
     ) -> None:
         super().__init__()
         self.src_path = src_path
@@ -85,6 +92,7 @@ class BaseDataset(Dataset[Label], Sized, ABC):
         self.pad = pad
         self.prefix = prefix
         self.fraction = fraction
+        self.hyp = hyp
 
         self.img_paths: list[Path] = self.get_img_files(self.src_path)
         self.samples = self.get_samples()
@@ -94,7 +102,10 @@ class BaseDataset(Dataset[Label], Sized, ABC):
 
     def __getitem__(self, index: int) -> Label:
         with torch.no_grad():
-            return self.load_image_and_label(index)
+            return self.augmentation(self.load_image_and_label(index))
+
+    def augmentation(self, label: Label) -> Label:
+        return label
 
     def get_img_files(self, src_path: Path | list[Path]) -> list[Path]:
         try:
@@ -343,6 +354,58 @@ class NIfTIDataset(BaseDataset):
         im_t_scaled = im_t_scaled.clamp_(0.0, 1.0)
 
         return im_t_scaled, im_t.shape[1:], im_t_scaled.shape[1:]
+
+    def augmentation(self, label: Label) -> Label:
+        if not self.augment:
+            return label
+
+        scale_tensor = torch.as_tensor(self.imgsz)[[2, 1, 0, 2, 1, 0]]
+
+        img = label["img"]
+        classes = label["classes"]
+
+        if label["bbox_format"] == "xywh":
+            bboxes = xyzwhd2xyzxyz(label["bboxes"])
+        elif label["bbox_format"] == "xyxy":
+            bboxes = label["bboxes"]
+        else:
+            msg = f"bbox format {label['bbox_format']} is not supported."
+            raise NotImplementedError(msg)
+        bboxes = bboxes * scale_tensor
+
+        labels = torch.cat((classes, bboxes), dim=1)
+
+        img, labels = random_zoom(
+            img,
+            labels,
+            self.hyp["max_zoom"],
+            self.hyp["min_zoom"],
+            self.hyp["prob_zoom"],
+            self.hyp["out_zoom_padding"],
+        )
+
+        img, labels = tensor_cutout(img, labels, self.hyp["cutout_params"], self.hyp["prob_cutout"])
+        nl = len(labels)
+        if nl:
+            labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:] / scale_tensor)
+
+        img, labels = random_mirroring(
+            img, labels, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
+        )
+
+        if self.hyp["do_batchgenerators_intensity_augmentation"]:
+            img = batch_generators_intensity_augmentations(
+                img, self.hyp["do_intensity_augmentations_per_channel"]
+            )
+
+        label["img"] = img
+        label["classes"] = labels[:, 0:1]
+        if label["bbox_format"] == "xywh":
+            label["bboxes"] = labels[:, 1:]
+        elif label["bbox_format"] == "xyxy":
+            label["bboxes"] = xyzwhd2xyzxyz(labels[:, 1:])
+
+        return label
 
 
 class DummyDataset(Dataset, Sized):
