@@ -608,9 +608,9 @@ def xyzxyz2xyzwhd[T: torch.Tensor | npt.NDArray](x: T) -> T:
     """
     assert x.shape[-1] == 6, f"input shape last dimension expected 6 but input shape is {x.shape}"
     y = empty_like(x)  # faster than clone/copy
-    y[..., 0] = (x[..., 0] + x[..., 2]) / 2  # x center
-    y[..., 1] = (x[..., 1] + x[..., 3]) / 2  # y center
-    y[..., 2] = (x[..., 2] + x[..., 4]) / 2  # z center
+    y[..., 0] = (x[..., 0] + x[..., 3]) / 2  # x center
+    y[..., 1] = (x[..., 1] + x[..., 4]) / 2  # y center
+    y[..., 2] = (x[..., 2] + x[..., 5]) / 2  # z center
     y[..., 3] = x[..., 3] - x[..., 0]  # width
     y[..., 4] = x[..., 4] - x[..., 1]  # height
     y[..., 5] = x[..., 5] - x[..., 2]  # depth
