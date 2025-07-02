@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch.utils.data import Dataset
-from tqdm import tqdm
+from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.nn.augmentations import (
     batch_generators_intensity_augmentations,

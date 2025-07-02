@@ -2263,6 +2263,18 @@ wheels = [
 ]
 
 [[package]]
+name = "tqdm-loggable"
+version = "0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/96/d924c326727dbdcac6043065dba08b1455aaaca4f7ef1e79d4fea889b34d/tqdm_loggable-0.2.tar.gz", hash = "sha256:175abec3e1f63bbd2eac192fa5da075e80c7bb715d7ccf3cd1a29b7ab5af0617", size = 7442 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/1f/1acb36a85797beba22934f124be6b51a7c18a4f408ce31443bec073181c7/tqdm_loggable-0.2-py3-none-any.whl", hash = "sha256:9703046302b93a667166487759e6f3f49597e86c89eb132ba1f31caa07bf0941", size = 9264 },
+]
+
+[[package]]
 name = "traceback2"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2432,6 +2444,7 @@ dependencies = [
     { name = "torch" },
     { name = "torchvision" },
     { name = "tqdm" },
+    { name = "tqdm-loggable" },
 ]
 
 [package.dev-dependencies]
@@ -2458,6 +2471,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.5.1", index = "https://download.pytorch.org/whl/cu118" },
     { name = "torchvision", specifier = ">=0.20.1", index = "https://download.pytorch.org/whl/cu118" },
     { name = "tqdm", specifier = ">=4.67.1" },
+    { name = "tqdm-loggable", specifier = ">=0.2" },
 ]
 
 [package.metadata.requires-dev]

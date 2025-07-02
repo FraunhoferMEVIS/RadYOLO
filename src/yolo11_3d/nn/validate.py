@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import numpy.typing as npt
 import torch
-import tqdm
+from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.ultralytics.utils import ops
 from yolo11_3d.ultralytics.utils.metrics import (
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from .util import ModelEMA
 
 LOGGER = logging.getLogger(__name__)
+LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 
 
 class BaseValidator(ABC):
@@ -163,7 +164,7 @@ class BaseValidator(ABC):
             # model.warmup(imgsz=(1 if pt else self.args.batch, 3, imgsz, imgsz))  # warmup
 
         # self.run_callbacks("on_val_start")
-        bar = tqdm.tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
+        bar = tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
         self.init_metrics(model)
         self.jdict = []  # empty before each val
         for batch_i, raw_batch in enumerate(bar):
@@ -374,8 +375,9 @@ class BaseValidator(ABC):
 
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
+        LOGGER.warning(self.get_desc())
         pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
-        LOGGER.info(pf, "all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results())
+        LOGGER.warning(pf, "all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results())
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(
                 "WARNING ⚠️ no labels found in %s set, can not compute metrics without labels",

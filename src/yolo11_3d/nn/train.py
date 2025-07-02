@@ -5,14 +5,18 @@ import gc
 import logging
 import math
 import time
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
 import torch
+import tqdm_loggable
+import tqdm_loggable.utils
 import yaml
-from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
+from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_images, plot_labels, plot_results
@@ -42,6 +46,12 @@ if TYPE_CHECKING:
     from .validate import BaseValidator
 
 LOGGER = logging.getLogger(__name__)
+LOGGER_YOLO = logging.getLogger("yolo." + __name__)
+
+
+class YoloFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith("yolo.")
 
 
 class Trainer:
@@ -78,14 +88,27 @@ class Trainer:
         self.loss_items = torch.ones((0,))
         # self.loss_names = "box_loss", "cls_loss", "dfl_loss"
 
-        self.save_dir = run_dir / (
-            str(self.args.name)
-            or datetime.datetime.now(tz=datetime.UTC).strftime("%Y_%m_%d-%H_%M_%S")
-        )
+        time_now = datetime.datetime.now(tz=datetime.UTC)
+
+        self.save_dir = run_dir / (str(self.args.name) or time_now.strftime("%Y_%m_%d-%H_%M_%S"))
+
         self.wdir = self.save_dir / "weights"
 
         self.save_dir.mkdir(exist_ok=self.args.exist_ok)
         self.wdir.mkdir(exist_ok=self.args.exist_ok)
+
+        file_handler = logging.FileHandler(
+            str(self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(".log")),
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(
+            logging.Formatter(
+                fmt="%(asctime)s %(levelname)- 9s %(module)30.30s:%(funcName)-14.14s:%(lineno)- 4d: %(message)s",
+                datefmt="[%H:%M:%S%z]",
+            )
+        )
+        file_handler.addFilter(YoloFilter())
+        logging.root.addHandler(file_handler)
 
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
@@ -406,8 +429,8 @@ class Trainer:
             # if epoch == (epochs - args.close_mosaic):
             #     raise NotImplementedError
 
-            LOGGER.info(
-                "\n" + "%11s" * (3 + len(self.loss_names)),
+            LOGGER_YOLO.info(
+                "%11s" * (3 + len(self.loss_names)),
                 "Epoch",
                 "GPU_mem",
                 *self.loss_names,
@@ -418,91 +441,115 @@ class Trainer:
                 enumerate(train_loader), total=num_batches, bar_format="{l_bar}{bar:10}{r_bar}"
             )
             tloss: torch.Tensor | None = None
+            loss_length: int = 1
             loss: torch.Tensor | None = None
-            for i, batch in pbar:
-                # Warmup
-                num_iterations = i + num_batches * self.epoch
-                if num_iterations <= num_warmup_iterations:
-                    warmup_iteration_range = [0, num_warmup_iterations]
-                    accumulate = max(
-                        1,
-                        int(
-                            np.interp(
-                                num_iterations,
-                                warmup_iteration_range,
-                                [1, args.nbs / batch_size],
-                            ).round()
-                        ),
-                    )
-                    for j, x in enumerate(optimizer.param_groups):
-                        x["lr"] = np.interp(
-                            num_iterations,
-                            warmup_iteration_range,
-                            [
-                                args.warmup_bias_lr if j == 0 else 0.0,
-                                x["initial_lr"] * lf(self.epoch),
-                            ],
+            with (
+                logging_redirect_tqdm()
+                if tqdm_loggable.utils.is_interactive_session()
+                else nullcontext()
+            ):
+                for i, batch in pbar:
+                    # Warmup
+                    num_iterations = i + num_batches * self.epoch
+                    if num_iterations <= num_warmup_iterations:
+                        warmup_iteration_range = [0, num_warmup_iterations]
+                        accumulate = max(
+                            1,
+                            int(
+                                np.interp(
+                                    num_iterations,
+                                    warmup_iteration_range,
+                                    [1, args.nbs / batch_size],
+                                ).round()
+                            ),
                         )
-                        if "momentum" in x:
-                            x["momentum"] = np.interp(
+                        for j, x in enumerate(optimizer.param_groups):
+                            x["lr"] = np.interp(
                                 num_iterations,
                                 warmup_iteration_range,
-                                [args.warmup_momentum, args.momentum],
+                                [
+                                    args.warmup_bias_lr if j == 0 else 0.0,
+                                    x["initial_lr"] * lf(self.epoch),
+                                ],
                             )
+                            if "momentum" in x:
+                                x["momentum"] = np.interp(
+                                    num_iterations,
+                                    warmup_iteration_range,
+                                    [args.warmup_momentum, args.momentum],
+                                )
 
-                # Forward
-                with torch.autocast(amp_device_type):
-                    # batch = self.preprocess_batch(batch)
-                    batch["img"] = batch["img"].to(self.device, non_blocking=True)
-                    loss, self.loss_items = cast("tuple[torch.Tensor, torch.Tensor]", model(batch))
+                    # Forward
+                    with torch.autocast(amp_device_type):
+                        # batch = self.preprocess_batch(batch)
+                        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+                        loss, self.loss_items = cast(
+                            "tuple[torch.Tensor, torch.Tensor]", model(batch)
+                        )
 
-                    tloss = (
-                        (tloss * i + self.loss_items) / (i + 1)
-                        if tloss is not None
-                        else self.loss_items
+                        tloss = (
+                            (tloss * i + self.loss_items) / (i + 1)
+                            if tloss is not None
+                            else self.loss_items
+                        )
+
+                    # Backward
+                    deterministic_restore = torch.are_deterministic_algorithms_enabled()
+                    try:
+                        torch.use_deterministic_algorithms(False)
+                        scaler.scale(loss).backward()
+                    finally:
+                        torch.use_deterministic_algorithms(deterministic_restore)
+
+                    # Optimize
+                    if num_iterations - last_opt_step >= accumulate:
+                        self.optimizer_step(scaler, optimizer, model, ema)
+                        last_opt_step = num_iterations
+
+                        if args.time:
+                            raise NotImplementedError
+
+                    # if args.plots:
+                    #     raise NotImplementedError
+
+                    # Log
+                    loss_length = tloss.shape[0] if len(tloss.shape) else 1
+                    pbar.set_description(
+                        ("%11s" * 2 + "%11.4g" * (1 + loss_length))
+                        % (
+                            f"{self.epoch + 1}/{epochs}",
+                            f"{self._get_memory():.3g}G",
+                            *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
+                            # batch["cls"].shape[0],  # batch size
+                            batch["img"].shape[-1],  # imgsz
+                        )
                     )
 
-                # Backward
-                deterministic_restore = torch.are_deterministic_algorithms_enabled()
-                try:
-                    torch.use_deterministic_algorithms(False)
-                    scaler.scale(loss).backward()
-                finally:
-                    torch.use_deterministic_algorithms(deterministic_restore)
-
-                # Optimize
-                if num_iterations - last_opt_step >= accumulate:
-                    self.optimizer_step(scaler, optimizer, model, ema)
-                    last_opt_step = num_iterations
-
-                    if args.time:
-                        raise NotImplementedError
-
-                # if args.plots:
-                #     raise NotImplementedError
-
-                # Log
-                loss_length = tloss.shape[0] if len(tloss.shape) else 1
-                pbar.set_description(
-                    ("%11s" * 2 + "%11.4g" * (1 + loss_length))
-                    % (
-                        f"{self.epoch + 1}/{epochs}",
-                        f"{self._get_memory():.3g}G",
-                        *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
-                        # batch["cls"].shape[0],  # batch size
-                        batch["img"].shape[-1],  # imgsz
-                    )
-                )
-
-                if (
-                    self.args.plots
-                    and self.dataset_num_dimensions == 2
-                    and num_iterations in self.plot_idx
-                ):
-                    self.plot_training_samples(batch, num_iterations)
+                    if (
+                        self.args.plots
+                        and self.dataset_num_dimensions == 2
+                        and num_iterations in self.plot_idx
+                    ):
+                        self.plot_training_samples(batch, num_iterations)
 
             if loss is None:
                 raise RuntimeError
+
+            if tloss is not None:
+                LOGGER.warning(
+                    "%15s" * 1 + "%11s" * (2 + len(self.loss_names)),
+                    "Completed Epoch",
+                    "GPU_mem",
+                    *self.loss_names,
+                    "Loss",
+                )
+                LOGGER.warning(
+                    "%15s%11s" + "%11.4g" * (loss_length + 1),
+                    f"{self.epoch + 1}/{epochs}",
+                    f"{self._get_memory():.3g}G",
+                    *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
+                    loss,
+                )
 
             final_epoch = self.epoch + 1 >= epochs
             ema.update_attr(

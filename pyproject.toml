@@ -27,6 +27,7 @@ dependencies = [
   "torch>=2.5.1",
   "torchvision>=0.20.1",
   "tqdm>=4.67.1",
+  "tqdm-loggable>=0.2",
 ]
 
 [project.scripts]
