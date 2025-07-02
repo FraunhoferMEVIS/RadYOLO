@@ -10,26 +10,33 @@ from yolo11_3d.ultralytics.utils.ops import xyzxyz2xyzwhd
 from yolo11_3d.ultralytics.utils.plotting import plot_images
 
 if __name__ == "__main__":
+    # create empty test image
     orig_img = torch.zeros((3, 300, 300, 300), dtype=torch.float32)
 
+    # slice volume along each axis and set one channel to 1. This makes every 1/8 cube have a unique
+    # color enabling fast visual identification during transformations.
     orig_img[0, 150:, :, :] = 1
     orig_img[1, :, 150:, :] = 1
     orig_img[2, :, :, 150:] = 1
 
-    imgsz = torch.as_tensor(orig_img.shape[1:])
+    # make image size a tensor once for later use
+    imgsz = torch.as_tensor(orig_img.shape[1:])[[2, 1, 0, 2, 1, 0]]
 
-    lt = [[random.uniform(0.1, 0.9) for _ in range(3)] for _ in range(6)]
-    rb = [[random.uniform(lt_, 0.9) for lt_ in lt_s] for lt_s in lt]
+    n_boxes = 6
+    n_dims = orig_img.ndim - 1  # subtract channel dim
 
-    # orig_labels = torch.cat(
-    #     (
-    #         torch.arange(len(lt))[:, None],
-    #         torch.as_tensor(lt) * imgsz[[2, 1, 0]],
-    #         torch.as_tensor(rb) * imgsz[[2, 1, 0]],
-    #     ),
-    #     dim=1,
-    # )
+    # randomly sample left-top and right-bottom coordinates (normalized) for n_boxes of bounding
+    # boxes
+    lt: list[list[float]] = [
+        [random.uniform(0.1, 0.9) for _ in range(n_dims)] for _ in range(n_boxes)
+    ]
+    rb: list[list[float]] = [
+        [random.uniform(lt_coord, 0.9) for lt_coord in lt_coords] for lt_coords in lt
+    ]
+
+    # assign a unique class id to every generated bounding box
     orig_cls = torch.arange(len(lt)).unsqueeze_(-1)
+    # concatenate left-top and right-bottom coordinates to form xyzxyz (normalized) bounding box
     orig_labels = torch.cat(
         (
             torch.as_tensor(lt),
@@ -38,72 +45,64 @@ if __name__ == "__main__":
         dim=1,
     )
 
+    # collect corresponding images, labels and 'paths' for easy plotting later on
+    # note that 'paths' is actually used to plot a heading label for each image in the plot
     images: list[torch.Tensor] = [orig_img]
-    labels: list[torch.Tensor] = [
-        # torch.cat((orig_labels[:, 0:1], xyzxyz2xyzwhd(orig_labels.clone()[:, 1:7])), dim=1)
-        torch.cat((orig_cls, xyzxyz2xyzwhd(orig_labels)), dim=1)
-    ]
+    labels: list[torch.Tensor] = [torch.cat((orig_cls, xyzxyz2xyzwhd(orig_labels)), dim=1)]
     paths: list[str] = ["original"]
 
+    # loop to evaluate all methods that require labels to be in format xyzxyz (not normalized)
     for op, kwargs in (
         (tensor_cutout, {"cutout_params": [(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)]}),
         (tensor_cutout, {"cutout_params": [(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)]}),
         (tensor_cutout, {"cutout_params": [(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)]}),
-        # (tensor_cutout, {"cutout_params": [(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)]}),
-        # (tensor_cutout, {"cutout_params": [(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)]}),
-        # (tensor_cutout, {"cutout_params": [(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)]}),
         (random_zoom, {"out_zoom_padding": "constant"}),
         (random_zoom, {"out_zoom_padding": "constant"}),
         (random_zoom, {"out_zoom_padding": "constant"}),
     ):
         kwargs: dict[str, Any]
 
+        # clone image tensor so that modifications do not affect original image and thus also
+        # subsequent loop evaluations
         op_img = orig_img.clone()
-        op_labels = torch.cat((orig_cls, orig_labels * imgsz[[2, 1, 0, 2, 1, 0]]), dim=1)
 
+        # scale labels with image size to denormalize
+        # torch.cat already creates a new tensor so no cloning necessary
+        op_labels = torch.cat((orig_cls, orig_labels * imgsz), dim=1)
+
+        # apply operation
         op_img, op_labels = op(op_img, op_labels, p=1.0, **kwargs)
 
-        op_labels[:, 1:7] = xyzxyz2xyzwhd(
-            op_labels[:, 1:7] / torch.as_tensor(op_img.shape[1:])[[2, 1, 0, 2, 1, 0]]
-        )
+        # convert bounding box to xyzwhd and normalize representation for plotting
+        op_labels[:, 1:7] = xyzxyz2xyzwhd(op_labels[:, 1:7] / imgsz)
 
         images.append(op_img)
         labels.append(op_labels)
         paths.append(op.__name__)
 
+    # loop to evaluate all functions that require labels to be in format xyzwhd (normalized)
     for op, kwargs in (
         (random_mirroring, {}),
         (random_mirroring, {}),
     ):
         kwargs: dict[str, Any]
 
+        # clone image tensor so that modifications do not affect original image and thus also
+        # subsequent loop evaluations
         op_img = orig_img.clone()
+
+        # convert labels to xyzwhd (values are already normalized)
+        # torch.cat already creates a new tensor so no cloning necessary
         op_labels = torch.cat((orig_cls, xyzxyz2xyzwhd(orig_labels)), dim=1)
 
+        # apply operation
         op_img, op_labels = op(op_img, op_labels, p=1.0, **kwargs)
 
+        # labels are already in format required for plotting
         images.append(op_img)
         labels.append(op_labels)
         paths.append(op.__name__)
 
-    # cutout_img, cutout_labels = tensor_cutout(
-    #     img.clone(),
-    #     labels.clone(),
-    #     cutout_params=[(0.5, 1), (0.25, 2), (0.125, 4), (0.0625, 8)],
-    #     p=1.0,
-    # )
-    # zoom_img, zoom_labels = random_zoom(img, labels.clone(), p=1.0, out_zoom_padding="constant")
-
-    # mirror_labels = labels.clone()
-    # mirror_labels[:, 1:7] = xyzxyz2xyzwhd(mirror_labels[:, 1:7])
-    # mirror_img, mirror_labels = random_mirroring(img, mirror_labels, p=1.0)
-
-    # labels[:, 1:7] = xyzxyz2xyzwhd(labels[:, 1:7])
-    # cutout_labels[:, 1:7] = xyzxyz2xyzwhd(cutout_labels[:, 1:7])
-    # zoom_labels[:, 1:7] = xyzxyz2xyzwhd(zoom_labels[:, 1:7])
-
-    # imgs = torch.stack((img, cutout_img, zoom_img, mirror_img), dim=0)
-    # labelss = torch.cat((labels, cutout_labels, zoom_labels, mirror_labels))
     imgs = torch.stack(images, dim=0)
     labelss = torch.cat(labels, dim=0)
 
