@@ -31,18 +31,18 @@ def bbox_iov(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch
     box2 = box2.T
 
     # Get the coordinates of bounding boxes
-    b1_z1, b1_x1, b1_y1, b1_z2, b1_x2, b1_y2 = box1[0], box1[1], box1[2], box1[3], box1[4], box1[5]
-    b2_z1, b2_x1, b2_y1, b2_z2, b2_x2, b2_y2 = box2[0], box2[1], box2[2], box2[3], box2[4], box2[5]
+    b1_x1, b1_y1, b1_z1, b1_x2, b1_y2, b1_z2 = box1[0], box1[1], box1[2], box1[3], box1[4], box1[5]
+    b2_x1, b2_y1, b2_z1, b2_x2, b2_y2, b2_z2 = box2[0], box2[1], box2[2], box2[3], box2[4], box2[5]
 
     # Intersection volume
     inter_vol = (
-        (torch.minimum(b1_z2, b2_z2) - torch.maximum(b1_z1, b2_z1)).clip(0)
-        * (torch.minimum(b1_x2, b2_x2) - torch.maximum(b1_x1, b2_x1)).clip(0)
+        (torch.minimum(b1_x2, b2_x2) - torch.maximum(b1_x1, b2_x1)).clip(0)
         * (torch.minimum(b1_y2, b2_y2) - torch.maximum(b1_y1, b2_y1)).clip(0)
+        * (torch.minimum(b1_z2, b2_z2) - torch.maximum(b1_z1, b2_z1)).clip(0)
     )
 
     # box2 vol
-    box2_vol = (b2_z2 - b2_z1) * (b2_x2 - b2_x1) * (b2_y2 - b2_y1) + eps
+    box2_vol = (b2_x2 - b2_x1) * (b2_y2 - b2_y1) * (b2_z2 - b2_z1) + eps
 
     # Intersection over box2 vol
     return inter_vol.div(box2_vol)
