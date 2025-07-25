@@ -444,7 +444,7 @@ class Trainer:
             loss_length: int = 1
             loss: torch.Tensor | None = None
             with (
-                logging_redirect_tqdm()
+                logging_redirect_tqdm(loggers=[logging.root, logging.getLogger("yolo11-3d")])
                 if tqdm_loggable.utils.is_interactive_session()
                 else nullcontext()
             ):
