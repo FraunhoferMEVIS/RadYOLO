@@ -13,6 +13,7 @@ from tqdm_loggable.tqdm_logging import tqdm_logging
 from yolo11_3d.nn.config import model_checkpoint_from_torch
 from yolo11_3d.nn.train import Trainer
 from yolo11_3d.nn.util import export_model
+from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
 
 LOGGER = logging.getLogger(__name__)
 
@@ -176,3 +177,29 @@ def onnx_compare(model_a: Path, model_b: Path) -> int:
     """Not implemented!"""
     LOGGER.error("This command is not implemented yet.")
     return 1
+
+
+@main.command("plot-results")
+@click.argument(
+    "result_path",
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+def plot_results(result_path: Path) -> int:
+    """Plot data from a results.csv path produced during training.
+
+    This command is intended for the use-case of plotting intermediate results of a running training.
+    """
+    try:
+        plot_results_(result_path)
+    except Exception as e:
+        LOGGER.exception("An unexpected error occurred", exc_info=e)
+        return 1
+    else:
+        return 0
