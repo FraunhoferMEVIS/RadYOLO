@@ -702,6 +702,9 @@ class Trainer:
             augment=self.args.augment and mode == "train",
             batch_size=batch,
             stride=grid_size,
+            min_stride=int(
+                model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
+            ),
             pad=0.0 if mode == "train" else 0.5,
             fraction=self.args.fraction if mode == "train" else 1.0,
             max_zoom=self.args.max_zoom,

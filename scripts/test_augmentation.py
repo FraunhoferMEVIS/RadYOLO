@@ -4,23 +4,28 @@ import random
 from typing import Any
 
 import torch
-
-from yolo11_3d.nn.augmentations import random_mirroring, random_zoom, tensor_cutout
+from yolo11_3d.nn.augmentations import (
+    enhance_bounding_boxes,
+    random_mirroring,
+    random_zoom,
+    tensor_cutout,
+)
 from yolo11_3d.ultralytics.utils.ops import xyzxyz2xyzwhd
 from yolo11_3d.ultralytics.utils.plotting import plot_images
 
 if __name__ == "__main__":
     # create empty test image
-    orig_img = torch.zeros((3, 300, 300, 300), dtype=torch.float32)
+    orig_img = torch.zeros((3, 256, 256, 256), dtype=torch.float32)
 
     # slice volume along each axis and set one channel to 1. This makes every 1/8 cube have a unique
     # color enabling fast visual identification during transformations.
-    orig_img[0, 150:, :, :] = 1
-    orig_img[1, :, 150:, :] = 1
-    orig_img[2, :, :, 150:] = 1
+    orig_img[0, 128:, :, :] = 1
+    orig_img[1, :, 128:, :] = 1
+    orig_img[2, :, :, 128:] = 1
 
     # make image size a tensor once for later use
-    imgsz = torch.as_tensor(orig_img.shape[1:])[[2, 1, 0, 2, 1, 0]]
+    imgsz = torch.as_tensor(orig_img.shape[1:])
+    scale_tensor = imgsz[[2, 1, 0, 2, 1, 0]]
 
     n_boxes = 6
     n_dims = orig_img.ndim - 1  # subtract channel dim
@@ -33,6 +38,11 @@ if __name__ == "__main__":
     rb: list[list[float]] = [
         [random.uniform(lt_coord, 0.9) for lt_coord in lt_coords] for lt_coords in lt
     ]
+
+    # add a single box with a width of <8 pixels to test the behavior of the
+    # enhance_bounding_boxes function
+    lt.append([0.1, 0.1, 0.1])
+    rb.append([0.1 + 0.02, 0.1 + 0.02, 0.1 + 0.02])
 
     # assign a unique class id to every generated bounding box
     orig_cls = torch.arange(len(lt)).unsqueeze_(-1)
@@ -68,13 +78,13 @@ if __name__ == "__main__":
 
         # scale labels with image size to denormalize
         # torch.cat already creates a new tensor so no cloning necessary
-        op_labels = torch.cat((orig_cls, orig_labels * imgsz), dim=1)
+        op_labels = torch.cat((orig_cls, orig_labels * scale_tensor), dim=1)
 
         # apply operation
         op_img, op_labels = op(op_img, op_labels, p=1.0, **kwargs)
 
         # convert bounding box to xyzwhd and normalize representation for plotting
-        op_labels[:, 1:7] = xyzxyz2xyzwhd(op_labels[:, 1:7] / imgsz)
+        op_labels[:, 1:7] = xyzxyz2xyzwhd(op_labels[:, 1:7] / scale_tensor)
 
         images.append(op_img)
         labels.append(op_labels)
@@ -97,6 +107,30 @@ if __name__ == "__main__":
 
         # apply operation
         op_img, op_labels = op(op_img, op_labels, p=1.0, **kwargs)
+
+        # labels are already in format required for plotting
+        images.append(op_img)
+        labels.append(op_labels)
+        paths.append(op.__name__)
+
+    # loop to evaluate all functions that require labels to be in format xyzwhd (not normalized)
+    for op, kwargs in (
+        (enhance_bounding_boxes, {"imgsz": imgsz, "stride": 8}),
+        (enhance_bounding_boxes, {"imgsz": imgsz, "stride": 8}),
+        (enhance_bounding_boxes, {"imgsz": imgsz, "stride": 8}),
+    ):
+        kwargs: dict[str, Any]
+
+        # clone image tensor so that modifications do not affect original image and thus also
+        # subsequent loop evaluations
+        op_img = orig_img.clone()
+
+        # convert labels to xyzwhd and scale them with image size to denormalize
+        # torch.cat already creates a new tensor so no cloning necessary
+        op_labels = torch.cat((orig_cls, xyzxyz2xyzwhd(orig_labels) * scale_tensor), dim=1)
+
+        # apply operation
+        op_img, op_labels = op(op_img, op_labels, **kwargs)
 
         # labels are already in format required for plotting
         images.append(op_img)

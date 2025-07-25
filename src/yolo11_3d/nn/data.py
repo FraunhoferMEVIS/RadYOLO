@@ -19,6 +19,7 @@ from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.nn.augmentations import (
     batch_generators_intensity_augmentations,
+    enhance_bounding_boxes,
     random_mirroring,
     random_zoom,
     tensor_cutout,
@@ -78,6 +79,7 @@ class BaseDataset(Dataset[Label], Sized, ABC):
         augment: bool = False,
         batch_size: int = 16,
         stride: int = 32,
+        min_stride: int = 8,
         pad: float = 0.5,
         prefix: str = "",
         fraction: float = 1.0,
@@ -89,6 +91,7 @@ class BaseDataset(Dataset[Label], Sized, ABC):
         self.augment = augment
         self.batch_size = batch_size
         self.stride = stride
+        self.min_stride = min_stride
         self.pad = pad
         self.prefix = prefix
         self.fraction = fraction
@@ -387,7 +390,12 @@ class NIfTIDataset(BaseDataset):
         img, labels = tensor_cutout(img, labels, self.hyp["cutout_params"], self.hyp["prob_cutout"])
         nl = len(labels)
         if nl:
-            labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:] / scale_tensor)
+            labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
+
+        img, labels = enhance_bounding_boxes(img, labels, self.imgsz, self.min_stride)
+
+        if nl:
+            labels[:, 1:] = labels[:, 1:] / scale_tensor
 
         img, labels = random_mirroring(
             img, labels, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
