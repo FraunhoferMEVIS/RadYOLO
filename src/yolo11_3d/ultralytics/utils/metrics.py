@@ -596,7 +596,7 @@ def plot_mc_curve(
 def compute_ap(
     recall: list[float], precision: list[float]
 ) -> tuple[float, npt.NDArray[np.floating], npt.NDArray[np.floating]]:
-    """Compute the average precision (AP) given the recall and precision curves.
+    """Compute the average precision (AP) given the recall and rpecision curves.
 
     Args:
         recall (list): The recall curve.
