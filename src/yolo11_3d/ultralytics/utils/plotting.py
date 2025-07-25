@@ -749,7 +749,7 @@ def plot_labels(
 def plot_images(
     images: torch.Tensor | np.ndarray,
     batch_idx: torch.Tensor | np.ndarray,
-    cls: torch.Tensor | np.ndarray,
+    cls: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.float32),
     bboxes: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.float32),
     confs: torch.Tensor | np.ndarray | None = None,
     masks: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.uint8),
