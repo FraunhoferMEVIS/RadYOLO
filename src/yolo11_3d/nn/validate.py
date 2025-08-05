@@ -95,11 +95,13 @@ class BaseValidator(ABC):
                 "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
             )
 
-    def __call__(self, trainer: Trainer, ema: ModelEMA, amp: bool = False) -> dict[str, float]:
+    def __call__(
+        self, trainer: Trainer | None, ema: ModelEMA, amp: bool = False
+    ) -> dict[str, float]:
         """Executes validation process, running inference on dataloader and computing performance metrics."""
         self.training = trainer is not None
         augment = self.args.augment and (not self.training)
-        if self.training:
+        if self.training and trainer is not None:
             self.device = trainer.device
             self.data = trainer.data
             # force FP16 val during training
@@ -124,20 +126,21 @@ class BaseValidator(ABC):
             #     fp16=self.args.half,
             # )
             # self.model = model
+            model = cast("BaseModel", ema.ema)
             self.device = model.device  # update device
-            self.args.half = model.fp16  # update half
-            stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine
+            # self.args.half = model.fp16  # update half
+            # stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine
             # imgsz = check_imgsz(self.args.imgsz, stride=stride)
-            if engine:
-                self.args.batch = model.batch_size
-            elif not pt and not jit:
-                raise NotImplementedError
-                self.args.batch = model.metadata.get(
-                    "batch", 1
-                )  # export.py models default to batch-size 1
-                LOGGER.info(
-                    f"Setting batch={self.args.batch} input of shape ({self.args.batch}, 3, {imgsz}, {imgsz})"
-                )
+            # if engine:
+            #     self.args.batch = model.batch_size
+            # elif not pt and not jit:
+            #     raise NotImplementedError
+            #     self.args.batch = model.metadata.get(
+            #         "batch", 1
+            #     )  # export.py models default to batch-size 1
+            #     LOGGER.info(
+            #         f"Setting batch={self.args.batch} input of shape ({self.args.batch}, 3, {imgsz}, {imgsz})"
+            #     )
 
             # if str(self.args.data).split(".")[-1] in {"yaml", "yml"}:
             #     self.data = check_det_dataset(self.args.data)
@@ -153,9 +156,9 @@ class BaseValidator(ABC):
                 self.args.workers = (
                     0  # faster CPU val as time dominated by inference, not dataloading
                 )
-            if not pt:
-                self.args.rect = False
-            self.stride = model.stride  # used in get_dataloader() for padding
+            # if not pt:
+            #     self.args.rect = False
+            # self.stride = model.stride  # used in get_dataloader() for padding
             # self.dataloader = self.dataloader or self.get_dataloader(
             #     self.data.get(self.args.split), self.args.batch
             # )
@@ -387,7 +390,7 @@ class BaseValidator(ABC):
         # Print results per class
         if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
-                LOGGER.info(
+                LOGGER.warning(
                     pf,
                     self.names[c],
                     self.nt_per_image[c],

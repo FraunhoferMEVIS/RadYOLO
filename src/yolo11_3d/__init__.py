@@ -6,13 +6,17 @@ import sys
 from pathlib import Path
 
 import click
+import torch
 import tqdm_loggable
 import tqdm_loggable.utils
+import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
-from yolo11_3d.nn.config import model_checkpoint_from_torch
+from yolo11_3d.nn import DATASETS, VALIDATORS
+from yolo11_3d.nn.config import DatasetConfig, model_checkpoint_from_torch
 from yolo11_3d.nn.train import Trainer
-from yolo11_3d.nn.util import export_model
+from yolo11_3d.nn.util import ModelEMA, export_model, select_device
+from yolo11_3d.ultralytics.data.build import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
 
 LOGGER = logging.getLogger(__name__)
@@ -106,6 +110,112 @@ def train(config: Path) -> int:
     try:
         trainer = Trainer(cfg=config)
         trainer.train()
+    except Exception as e:
+        LOGGER.exception("An unexpected error occurred", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("validate")
+@click.argument(
+    "model_path",
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.argument(
+    "validator_type",
+    type=click.Choice(tuple(VALIDATORS.keys()), case_sensitive=False),
+)
+@click.argument(
+    "dataset_type",
+    type=click.Choice(tuple(DATASETS.keys()), case_sensitive=False),
+)
+@click.argument(
+    "dataset_path",
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+    metavar="DATASET_CONFIG",
+)
+def validate(model_path: Path, validator_type: str, dataset_type: str, dataset_path: Path) -> int:
+    """Validate a yolo11-3d model.
+
+    MODEL specifies the path to a model checkpoint.
+    VALIDATOR_TYPE specifies the type of validator to use.
+    DATASET_TYPE specifies the type of dataset to use.
+    DATASET_CONFIG specifies the path to a dataset configuration.
+    """
+    try:
+        if not model_path.exists():
+            LOGGER.error(f"Model checkpoint {model_path} does not exist.")
+            return 1
+
+        if not dataset_path.exists():
+            LOGGER.error(f"Dataset configuration {dataset_path} does not exist.")
+            return 1
+
+        with dataset_path.open() as f:
+            yaml_config = yaml.safe_load(f)
+        dataset_config = DatasetConfig.model_validate(yaml_config)
+
+        dataset_test_path = dataset_config.test or dataset_config.val
+        if dataset_test_path is None:
+            LOGGER.error("No test or validation dataset path specified in the configuration.")
+            return 1
+
+        checkpoint = model_checkpoint_from_torch(model_path)
+        model = checkpoint["ema"]
+        train_args = checkpoint["train_args"]
+        device = select_device(train_args.device)
+        model.device = device
+        model.to(device)
+        ema = ModelEMA(model)
+
+        dataset_cls, _ = DATASETS[dataset_type]
+
+        dataset = dataset_cls(
+            src_path=dataset_test_path,
+            imgsz=tuple(train_args.imgsz),
+            augment=False,
+            batch_size=1,
+            stride=int(model.stride.max().item())
+            if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
+            else 32,
+            min_stride=int(model.stride.min().item())
+            if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
+            else 8,
+        )
+
+        dataloader = build_dataloader(
+            dataset=dataset,
+            batch=1,
+            workers=0,  # No workers for validation
+            shuffle=False,
+            device=device,
+        )
+
+        validator_cls, _ = VALIDATORS[validator_type]
+
+        validator = validator_cls(
+            dataloader=dataloader,
+            save_dir=model_path.parents[1] / "validation",
+            args=train_args,
+            names=dataset_config.names,
+        )
+
+        validator(trainer=None, ema=ema, amp=False)
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1
