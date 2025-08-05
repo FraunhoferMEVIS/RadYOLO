@@ -85,7 +85,7 @@ job "breastmarc-MeVisLab_muellergroh" {
               options {
                 type = "cifs"
                 device = "//gaia.intern.mevis.fraunhofer.de/industry/Siemens/BreastMARC/GJ2021/Projects/"
-                o = "file_mode=0775,dir_mode=0777,noperm,nopersistenthandles,addr=gaia.intern.mevis.fraunhofer.de,username=${MOUNT_USERNAME},password=${MOUNT_PASSWORD},domain=fme"
+                o = "file_mode=0775,dir_mode=0777,noperm,nopersistenthandles,addr=gaia.intern.mevis.fraunhofer.de,username=${MOUNT_USERNAME},password=${MOUNT_PASSWORD},domain=fme-intern"
               }
             }
           }
@@ -101,8 +101,8 @@ job "breastmarc-MeVisLab_muellergroh" {
               name = "local"
               options {
                 type = "cifs"
-                device = "//gaia.intern.mevis.fraunhofer.de/externalServices/satori-breastmarc/production_app/workspace"
-                o = "file_mode=0775,dir_mode=0777,noperm,nopersistenthandles,addr=gaia.intern.mevis.fraunhofer.de,username=${MOUNT_USERNAME},password=${MOUNT_PASSWORD},domain=fme"
+                device = "//gaia.intern.mevis.fraunhofer.de/externalServices/breastmarc-study/production_app/workspace"
+                o = "file_mode=0775,dir_mode=0777,noperm,nopersistenthandles,addr=gaia.intern.mevis.fraunhofer.de,username=${MOUNT_USERNAME},password=${MOUNT_PASSWORD},domain=fme-intern"
               }
             }
           }

@@ -53,7 +53,9 @@ job "breastmarc-MeVisLab_muellergroh" {
 
         image_pull_timeout = "20m"
 
-        args = []
+        args = [
+          "/Projects/MasterThesisYOLO3DEvaluation/evaluate_laurens_yolo3d.mlab"
+        ]
 
         ports = ["vnc"]
 
@@ -138,8 +140,8 @@ job "breastmarc-MeVisLab_muellergroh" {
         SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt"
         REQUESTS_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
         ML_CACHE_SIZE_IN_KB = 20000000
-        OUTPUT_CSV_PATH = "/Projects/MasterThesisYOLO3DEvaluation/results/02_test.csv"
-        CONFIG_FILE_PATH = "/Projects/MasterThesisYOLO3DEvaluation/configs/101_medyolo_BreastMARC_2025_04_07.json"
+        OUTPUT_CSV_PATH = "/Projects/MasterThesisYOLO3DEvaluation/results/02_test-e500.csv"
+        CONFIG_FILE_PATH = "/Projects/MasterThesisYOLO3DEvaluation/configs/02_test_BreastMARC_2025_05_09.json"
       }
 
       template {
