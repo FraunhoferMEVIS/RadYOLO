@@ -707,6 +707,7 @@ class Trainer:
             ),
             pad=0.0 if mode == "train" else 0.5,
             fraction=self.args.fraction if mode == "train" else 1.0,
+            normalization=self.args.normalization,
             max_zoom=self.args.max_zoom,
             min_zoom=self.args.min_zoom,
             out_zoom_padding=self.args.out_zoom_padding,

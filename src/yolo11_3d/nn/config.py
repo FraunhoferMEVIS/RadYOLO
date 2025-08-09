@@ -57,6 +57,7 @@ class DefaultConfig(BaseModel):
     )
     batch: int = 16  # number of images per batch (-1 for AutoBatch)
     imgsz: DimList  # input images size as int for train and val modes, or list[h,w] for predict and export modes
+    normalization: Literal["none", "zScore", "255_to_01"] = "255_to_01" # Normalization to be applied during image loading
     save: bool = True  # save train checkpoints and predict results
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     cache: bool = False  # True/ram, disk or False. use cache for data loading

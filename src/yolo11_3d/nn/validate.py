@@ -827,7 +827,10 @@ class Validator3D(BaseValidator):
 def project_nifti_images(
     image: torch.Tensor, dim: int, upper_quantile: float = 0.995
 ) -> torch.Tensor:
-    time_diff_img = (image[:, [1]] - image[:, [0]]).amax(dim)
+    if image.shape[1] > 1:
+        time_diff_img = (image[:, [1]] - image[:, [0]]).amax(dim)
+    else: 
+        time_diff_img = image.amax(dim)
     percentiles = (
         time_diff_img.reshape((time_diff_img.shape[0], -1))
         .to(torch.float)

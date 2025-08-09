@@ -83,6 +83,7 @@ class BaseDataset(Dataset[Label], Sized, ABC):
         pad: float = 0.5,
         prefix: str = "",
         fraction: float = 1.0,
+        normalization: Literal["none", "zScore", "255_to_01"] = "255_to_01",
         **hyp: Any,
     ) -> None:
         super().__init__()
@@ -95,6 +96,7 @@ class BaseDataset(Dataset[Label], Sized, ABC):
         self.pad = pad
         self.prefix = prefix
         self.fraction = fraction
+        self.normalization = normalization
         self.hyp = hyp
 
         self.img_paths: list[Path] = self.get_img_files(self.src_path)
@@ -295,7 +297,7 @@ class NIfTIDataset(BaseDataset):
     def get_samples(self) -> list[LazyLabel]:
         # find all images and corresponding labels
         self.label_paths = [
-            Path(*("labels" if part == "volumes" else part for part in path.parts)).with_suffix(
+            Path(*("labels" if part == "volumes" or part == "images" else part for part in path.parts)).with_suffix(
                 ".txt"
             )
             for path in self.img_paths
@@ -324,10 +326,12 @@ class NIfTIDataset(BaseDataset):
                 labels = np.array(string_labels, dtype=np.float32)
             else:
                 labels = np.zeros((0, 7))
+            image_shape = img.shape
+            spatial_shape = image_shape if len(image_shape) == 3 else image_shape[:-1]
             samples.append(
                 LazyLabel(
                     im_file=img_path,
-                    shape=img.shape[:-1],
+                    shape=spatial_shape,
                     classes=torch.from_numpy(labels[:, 0:1]),
                     bboxes=torch.from_numpy(labels[:, 1:]),
                     normalized=True,
@@ -350,11 +354,21 @@ class NIfTIDataset(BaseDataset):
         image = np.asanyarray(nifti_image.dataobj, dtype=np.float32)
         im_t = torch.from_numpy(image)
         im_t = im_t.permute(*reversed(range(im_t.ndim)))
+        if len(im_t.shape) == 3:
+            im_t = im_t.unsqueeze(0)
         im_t_scaled = cast(
             "torch.Tensor", F.interpolate(im_t.unsqueeze(0), self.imgsz, mode="trilinear")
         ).squeeze_(0)
-        im_t_scaled = im_t_scaled.div_(255)
-        im_t_scaled = im_t_scaled.clamp_(0.0, 1.0)
+
+        if self.normalization == "255_to_01":
+            im_t_scaled = im_t_scaled.div_(255)
+            im_t_scaled = im_t_scaled.clamp_(0.0, 1.0)
+        elif self.normalization == "zScore":
+            im_t_scaled = (im_t_scaled - im_t_scaled.mean()) / im_t_scaled.std()
+        elif self.normalization == "none":
+            pass
+        else:
+            raise NotImplementedError(f"Unknown normalization scheme {self.normalization}")
 
         return im_t_scaled, im_t.shape[1:], im_t_scaled.shape[1:]
 
