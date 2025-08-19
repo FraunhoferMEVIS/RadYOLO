@@ -12,9 +12,10 @@ import tqdm_loggable.utils
 import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
-from yolo11_3d.nn import DATASETS, VALIDATORS
+from yolo11_3d.nn import DATASETS
 from yolo11_3d.nn.config import DatasetConfig, model_checkpoint_from_torch
 from yolo11_3d.nn.train import Trainer
+from yolo11_3d.nn.validate import Validator3D
 from yolo11_3d.nn.util import ModelEMA, export_model, select_device
 from yolo11_3d.ultralytics.data.build import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
@@ -130,10 +131,6 @@ def train(config: Path) -> int:
     ),
 )
 @click.argument(
-    "validator_type",
-    type=click.Choice(tuple(VALIDATORS.keys()), case_sensitive=False),
-)
-@click.argument(
     "dataset_type",
     type=click.Choice(tuple(DATASETS.keys()), case_sensitive=False),
 )
@@ -149,11 +146,10 @@ def train(config: Path) -> int:
     ),
     metavar="DATASET_CONFIG",
 )
-def validate(model_path: Path, validator_type: str, dataset_type: str, dataset_path: Path) -> int:
+def validate(model_path: Path, dataset_type: str, dataset_path: Path) -> int:
     """Validate a yolo11-3d model.
 
     MODEL specifies the path to a model checkpoint.
-    VALIDATOR_TYPE specifies the type of validator to use.
     DATASET_TYPE specifies the type of dataset to use.
     DATASET_CONFIG specifies the path to a dataset configuration.
     """
@@ -207,9 +203,7 @@ def validate(model_path: Path, validator_type: str, dataset_type: str, dataset_p
             device=device,
         )
 
-        validator_cls, _ = VALIDATORS[validator_type]
-
-        validator = validator_cls(
+        validator = Validator3D(
             dataloader=dataloader,
             save_dir=model_path.parents[1] / "validation",
             args=train_args,

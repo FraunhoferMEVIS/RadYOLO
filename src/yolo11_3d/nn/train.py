@@ -25,7 +25,7 @@ from yolo11_3d.ultralytics.utils.torch_utils import (
     convert_optimizer_state_dict_to_fp16,
 )
 
-from . import DATASETS, MODELS, VALIDATORS
+from . import DATASETS, MODELS
 from .config import (
     DatasetConfig,
     DefaultConfig,
@@ -35,6 +35,7 @@ from .config import (
     model_checkpoint_from_torch,
 )
 from .model import BaseModel
+from .validate import Validator3D
 
 # from yolo11_3d.ultralytics.utils.checks import check_imgsz
 from .util import ModelEMA, init_seeds, select_device
@@ -252,6 +253,7 @@ class Trainer:
                 "Automatic Mixed Precision enabled. Please check if your system fully supports this."
             )
             # amp = check_amp(model) # TODO(lmg): implement check for stable amp support
+        # TODO: Make sure scaler is saved and restored when training is paused and resumed
         scaler = torch.GradScaler("cuda", enabled=amp)
         if world_size > 1:
             raise NotImplementedError
@@ -286,9 +288,7 @@ class Trainer:
             validator = self.get_validator(
                 test_loader,
                 self.save_dir,
-                # tqdm,
                 self.data.names,
-                self.args.validator_type,
             )
             metric_keys = validator.metrics.keys + self.label_loss_items(prefix="val")
             metrics: dict[str, int] = dict(zip(metric_keys, [0] * len(metric_keys), strict=True))
@@ -777,22 +777,12 @@ class Trainer:
         self,
         test_loader: InfiniteDataLoader,
         save_dir: Path,
-        # pbar: tqdm,
         names: dict[int, str],
-        validator_type: str,
-    ) -> BaseValidator:
+    ) -> Validator3D:
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
-        # return yolo.detect.DetectionValidator(
-        #     self.test_loader,
-        #     save_dir=self.save_dir,
-        #     args=copy(self.args),
-        #     _callbacks=self.callbacks,
-        # )
-        validator, _ = VALIDATORS[validator_type]
-        return validator(
+        return Validator3D(
             test_loader,
             save_dir=save_dir,
-            # pbar=pbar,
             args=self.args,
             names=names,
         )

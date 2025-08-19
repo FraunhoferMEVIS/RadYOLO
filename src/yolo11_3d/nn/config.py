@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from . import DATASETS, MODELS, VALIDATORS
+from . import DATASETS, MODELS
 
 if TYPE_CHECKING:
     import datetime
@@ -100,7 +100,6 @@ class DefaultConfig(BaseModel):
     # Val/Test Settings
     val: bool = True  # validate/test during training
     split: str = "val"  # dataset split to use for validation, i.e. 'val', 'test' or 'train'
-    validator_type: str | None = None  # validator type, i.e. '2d', '3d'
     save_json: bool = False  # save results to JSON file
     save_hybrid: bool = False  # save hybrid version of labels (labels+additional predictions)
     conf: float | None = (
@@ -236,25 +235,6 @@ class DefaultConfig(BaseModel):
         if len(self.imgsz) != ndim:
             msg = f"got {len(self.imgsz)} image dimensions, but model_type {self.model_type} expects {ndim} dimensions."
             raise ValueError(msg)
-
-        return self
-
-    @model_validator(mode="after")
-    def validate_validator_type(self) -> Self:
-        if self.val is True:
-            if self.validator_type is None:
-                msg = "validator_type must be set if val == True"
-                raise ValueError(msg)
-
-            if self.validator_type not in VALIDATORS:
-                msg = f"got validator_type {self.validator_type}. registered validator types are {VALIDATORS.keys()}"
-                raise ValueError(msg)
-
-            _, ndim = VALIDATORS[self.validator_type]
-
-            if len(self.imgsz) != ndim:
-                msg = f"got {len(self.imgsz)} image dimensions, but validator_type {self.validator_type} expects {ndim} dimensions."
-                raise ValueError(msg)
 
         return self
 

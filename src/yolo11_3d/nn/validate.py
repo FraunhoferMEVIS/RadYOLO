@@ -39,16 +39,11 @@ class BaseValidator(ABC):
         self,
         dataloader: InfiniteDataLoader,
         save_dir: Path,
-        # pbar: tqdm.tqdm,
         args: DefaultConfig,
         names: dict[int, str],
-        _callbacks: dict | None = None,
     ) -> None:
-        # super().__init__(dataloader, save_dir, pbar, args, _callbacks)
-        # Begin super init
         self.args = args
         self.dataloader = dataloader
-        # self.pbar = pbar
         self.stride = None  # TODO(muellergroh): determine type annotation
         self.data: DatasetConfig | None = None
         self.device: torch.device | None = None
@@ -72,17 +67,13 @@ class BaseValidator(ABC):
         self.save_dir: Path = save_dir
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.plots: dict[Path, Any] = {}
-        # End super init
 
         self.nt_per_class: npt.NDArray | None = None
         self.nt_per_image: npt.NDArray | None = None
-        # self.is_coco: bool = False
-        # self.is_lvis: bool = False
         self.class_map: list[int] = list(range(1, len(self.names)))
         self.args.task = "detect"
         self.metrics = DetMetrics(
             save_dir=self.save_dir,
-            # on_plot=self.on_plot,
             names=self.names,
             plot=self.args.plots,
         )
@@ -108,70 +99,24 @@ class BaseValidator(ABC):
             self.args.half = self.device.type != "cpu" and amp
             model = cast("BaseModel", ema.ema)
             model = model.half() if self.args.half else model.float()
-            # self.model = model
             self.loss = torch.zeros_like(trainer.loss_items, device=trainer.device)
-            # self.args.plots &= trainer.stopper.possible_stop or (
-            #     trainer.epoch == trainer.epochs - 1
-            # )
             model.eval()
         else:
-            # if str(self.args.model).endswith(".yaml") and model is None:
-            #     LOGGER.warning("WARNING ⚠️ validating an untrained model YAML will result in 0 mAP.")
-            # callbacks.add_integration_callbacks(self)
-            # model = AutoBackend(
-            #     weights=model or self.args.model,
-            #     device=select_device(self.args.device, self.args.batch),
-            #     dnn=self.args.dnn,
-            #     data=self.args.data,
-            #     fp16=self.args.half,
-            # )
-            # self.model = model
             model = cast("BaseModel", ema.ema)
             self.device = model.device  # update device
-            # self.args.half = model.fp16  # update half
-            # stride, pt, jit, engine = model.stride, model.pt, model.jit, model.engine
-            # imgsz = check_imgsz(self.args.imgsz, stride=stride)
-            # if engine:
-            #     self.args.batch = model.batch_size
-            # elif not pt and not jit:
-            #     raise NotImplementedError
-            #     self.args.batch = model.metadata.get(
-            #         "batch", 1
-            #     )  # export.py models default to batch-size 1
-            #     LOGGER.info(
-            #         f"Setting batch={self.args.batch} input of shape ({self.args.batch}, 3, {imgsz}, {imgsz})"
-            #     )
-
-            # if str(self.args.data).split(".")[-1] in {"yaml", "yml"}:
-            #     self.data = check_det_dataset(self.args.data)
-            # elif self.args.task == "classify":
             if self.args.task == "classify":
                 raise NotImplementedError
-                # self.data = check_cls_dataset(self.args.data, split=self.args.split)
-            # else:  # noqa: RET506
-            #     msg = f"Dataset '{self.args.data}' for task={self.args.task} not found ❌"
-            #     raise FileNotFoundError(msg)
-
             if self.device.type in {"cpu", "mps"}:
                 self.args.workers = (
                     0  # faster CPU val as time dominated by inference, not dataloading
                 )
-            # if not pt:
-            #     self.args.rect = False
-            # self.stride = model.stride  # used in get_dataloader() for padding
-            # self.dataloader = self.dataloader or self.get_dataloader(
-            #     self.data.get(self.args.split), self.args.batch
-            # )
-
             model.eval()
-            # model.warmup(imgsz=(1 if pt else self.args.batch, 3, imgsz, imgsz))  # warmup
 
-        # self.run_callbacks("on_val_start")
+
         bar = tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
         self.init_metrics(model)
         self.jdict = []  # empty before each val
         for batch_i, raw_batch in enumerate(bar):
-            # self.run_callbacks("on_val_batch_start")
             self.batch_i = batch_i
             # Preprocess
             batch: Batch = self.preprocess(raw_batch)
@@ -197,12 +142,9 @@ class BaseValidator(ABC):
                 self.plot_val_samples(batch, batch_i)
                 self.plot_predictions(batch, preds, batch_i)
 
-            # self.run_callbacks("on_val_batch_end")
         stats = self.get_stats()
-        # self.check_stats(stats)
         self.finalize_metrics()
         self.print_results()
-        # self.run_callbacks("on_val_end")
         if self.training:
             model.float()
             results = {
@@ -217,7 +159,6 @@ class BaseValidator(ABC):
             with self.save_dir.joinpath("predictions.json").open("w") as f:
                 LOGGER.info("Saving %s...", f.name)
                 json.dump(self.jdict, f)  # flatten and save
-            # stats = self.eval_json(stats)  # update stats
         if self.args.plots or self.args.save_json:
             LOGGER.info("Results saved to %s", self.save_dir)
         return stats
@@ -295,49 +236,15 @@ class BaseValidator(ABC):
 
         return batch
 
+    @abstractmethod
     def init_metrics(self, model) -> None:
         """Initialize evaluation metrics for YOLO."""
-        # val = self.data.get(self.args.split, "")  # validation path
-        # self.is_coco = (
-        #     isinstance(val, str)
-        #     and "coco" in val
-        #     and (val.endswith(f"{os.sep}val2017.txt") or val.endswith(f"{os.sep}test-dev2017.txt"))
-        # )  # is COCO
-        # self.is_lvis = isinstance(val, str) and "lvis" in val and not self.is_coco  # is LVIS
+        ...
 
-        # self.class_map = (
-        #     converter.coco80_to_coco91_class()
-        #     if self.is_coco
-        #     else list(range(1, len(model.names) + 1))
-        # )
-        # self.class_map = list(range(1, len(self.names)))
-
-        # The following is never true
-        #
-        # self.args.save_json |= (
-        #     self.args.val and (self.is_coco or self.is_lvis) and not self.training
-        # )  # run final val
-
-        # self.names = model.names
-        # self.nc = len(self.names)
-        self.metrics.names = self.names
-        # self.metrics.plot = self.args.plots
-        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
-        self.seen = 0
-        self.jdict = []
-        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
-
+    @abstractmethod
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % (
-            "Class",
-            "Images",
-            "Instances",
-            "Box(P",
-            "R",
-            "mAP50",
-            "mAP50-95)",
-        )
+        ...
 
     @abstractmethod
     def postprocess(
@@ -399,13 +306,11 @@ class BaseValidator(ABC):
                 )
 
         if self.args.plots:
-            # raise NotImplementedError
             for normalize in True, False:
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir,
                     names=self.names.values(),
                     normalize=normalize,
-                    # on_plot=self.on_plot,
                 )
 
     @abstractmethod
@@ -458,163 +363,6 @@ class BaseValidator(ABC):
     def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
         """Plots predicted bounding boxes on input images and saves the result."""
 
-    # def save_one_txt(self, predn, save_conf, shape, file):
-    #     """Save YOLO detections to a txt file in normalized coordinates in a specific format."""
-    #     from ultralytics.engine.results import Results
-
-    #     Results(
-    #         np.zeros((shape[0], shape[1]), dtype=np.uint8),
-    #         path=None,
-    #         names=self.names,
-    #         boxes=predn[:, :6],
-    #     ).save_txt(file, save_conf=save_conf)
-
-
-class Validator2D(BaseValidator):
-    def postprocess(
-        self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
-    ) -> list[torch.Tensor]:
-        """Apply Non-maximum suppression to prediction outputs."""
-        return ops.non_max_suppression(
-            preds,
-            self.args.conf,
-            self.args.iou,
-            labels=self.lb,
-            multi_label=False,
-            agnostic=self.args.single_cls or self.args.agnostic_nms,
-            max_det=self.args.max_det,
-        )
-
-    def _prepare_batch(self, si: int, batch: Batch) -> dict[str, Any]:
-        """Prepares a batch of images and annotations for validation."""
-        idx = batch["batch_idx"] == si
-        classes = batch["cls"][idx].squeeze(-1)
-        bboxes = batch["bboxes"][idx]
-        ori_shape = batch["ori_shape"][si]
-        imgsz = batch["img"].shape[2:]
-        ratio_pad = batch["ratio_pad"][si]
-        if len(classes):
-            bboxes = (
-                ops.xywh2xyxy(bboxes) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]
-            )  # target boxes
-            ops.scale_boxes(imgsz, bboxes, ori_shape, ratio_pad=ratio_pad)  # native-space labels
-        return {
-            "cls": classes,
-            "bboxes": bboxes,
-            "ori_shape": ori_shape,
-            "imgsz": imgsz,
-            "ratio_pad": ratio_pad,
-        }
-
-    def _prepare_pred(self, pred: torch.Tensor, pbatch: dict[str, Any]) -> torch.Tensor:
-        """Prepares a batch of images and annotations for validation."""
-        predn = pred.clone()
-        ops.scale_boxes(
-            pbatch["imgsz"], predn[:, :4], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
-        )  # native-space pred
-        return predn
-
-    def update_metrics(self, preds: list[torch.Tensor], batch: Batch) -> None:
-        """Metrics."""
-        for si, pred in enumerate(preds):
-            self.seen += 1
-            num_predictions = len(pred)
-            stat = {
-                "conf": torch.zeros(0, device=self.device),
-                "pred_cls": torch.zeros(0, device=self.device),
-                "tp": torch.zeros(num_predictions, self.niou, dtype=torch.bool, device=self.device),
-            }
-            prepared_batch = self._prepare_batch(si, batch)
-            classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
-            num_labels = len(classes)
-            stat["target_cls"] = classes
-            stat["target_img"] = (
-                classes.unique()
-            )  # TODO(muellergroh): this seems wrong, since classes don't contain a reference to the image
-            if num_predictions == 0:
-                if num_labels:
-                    for k in self.stats:
-                        self.stats[k].append(stat[k])
-                    if self.args.plots:
-                        self.confusion_matrix.process_batch(
-                            detections=None, gt_bboxes=bboxes, gt_cls=classes
-                        )
-                continue
-
-            # Predictions
-            if self.args.single_cls:
-                pred[:, 5] = 0
-            predn = self._prepare_pred(pred, prepared_batch)
-            stat["conf"] = predn[:, 4]
-            stat["pred_cls"] = predn[:, 5]
-
-            # Evaluate
-            if num_labels:
-                stat["tp"] = self._process_batch(predn, bboxes, classes)
-            if self.args.plots:
-                self.confusion_matrix.process_batch(predn, bboxes, classes)
-            for k in self.stats:
-                self.stats[k].append(stat[k])
-
-            # Save
-            if self.args.save_json:
-                raise NotImplementedError
-                self.pred_to_json(predn, batch["im_file"][si])
-            if self.args.save_txt:
-                raise NotImplementedError
-                self.save_one_txt(
-                    predn,
-                    self.args.save_conf,
-                    prepared_batch["ori_shape"],
-                    self.save_dir / "labels" / f"{Path(batch['im_file'][si]).stem}.txt",
-                )
-
-    def _process_batch(
-        self, detections: torch.Tensor, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor
-    ) -> torch.Tensor:
-        """Return correct prediction matrix.
-
-        Args:
-            detections (torch.Tensor): Tensor of shape (N, 6) representing detections where each detection is
-                (x1, y1, x2, y2, conf, class).
-            gt_bboxes (torch.Tensor): Tensor of shape (M, 4) representing ground-truth bounding box coordinates. Each
-                bounding box is of the format: (x1, y1, x2, y2).
-            gt_cls (torch.Tensor): Tensor of shape (M,) representing target class indices.
-
-        Returns:
-            (torch.Tensor): Correct prediction matrix of shape (N, 10) for 10 IoU levels.
-
-        Note:
-            The function does not return any value directly usable for metrics calculation. Instead, it provides an
-            intermediate representation used for evaluating predictions against ground truth.
-        """
-        iou = box_iou(gt_bboxes, detections[:, :4])
-        return self.match_predictions(detections[:, 5], gt_cls, iou)
-
-    def plot_val_samples(self, batch: Batch, ni: int) -> None:
-        """Plot validation image samples."""
-        plot_images(
-            batch["img"],
-            batch["batch_idx"],
-            batch["cls"].squeeze(-1),
-            batch["bboxes"],
-            paths=batch["im_file"],
-            fname=str(self.save_dir / f"val_batch{ni}_labels.jpg"),
-            names=self.names,
-            # on_plot=self.on_plot,
-        )
-
-    def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
-        """Plots predicted bounding boxes on input images and saves the result."""
-        plot_images(
-            batch["img"],
-            *output_to_target(preds, max_det=self.args.max_det),
-            paths=batch["im_file"],
-            fname=str(self.save_dir / f"val_batch{ni}_pred.jpg"),
-            names=self.names,
-            # on_plot=self.on_plot,
-        )  # pred
-
 
 class Validator3D(BaseValidator):
     def __init__(
@@ -623,15 +371,13 @@ class Validator3D(BaseValidator):
         save_dir: Path,
         args: DefaultConfig,
         names: dict[int, str],
-        _callbacks: dict | None = None,
     ) -> None:
-        super().__init__(dataloader, save_dir, args, names, _callbacks)
+        super().__init__(dataloader, save_dir, args, names)
         if self.args.conf is None:
             msg = "self.args.conf should have been specified in BaseValidator."
             raise ValueError(msg)
         self.metrics = DetMetrics3D(
             save_dir=self.save_dir,
-            # on_plot=self.on_plot,
             names=self.names,
             plot=self.args.plots,
         )
@@ -792,7 +538,6 @@ class Validator3D(BaseValidator):
             paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xy_labels.jpg"),
             names=self.names,
-            # on_plot=self.on_plot,
         )
         plot_images(
             project_nifti_images(batch["img"], dim=-2),
@@ -802,7 +547,6 @@ class Validator3D(BaseValidator):
             paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xz_labels.jpg"),
             names=self.names,
-            # on_plot=self.on_plot
         )
 
     def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
@@ -812,7 +556,6 @@ class Validator3D(BaseValidator):
             paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xy_pred.jpg"),
             names=self.names,
-            # on_plot=self.on_plot,
         )  # pred
         plot_images(
             project_nifti_images(batch["img"], -2),
@@ -820,7 +563,6 @@ class Validator3D(BaseValidator):
             paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xz_pred.jpg"),
             names=self.names,
-            # on_plot=self.on_plot,
         )  # pred
 
 
