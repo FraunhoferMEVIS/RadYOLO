@@ -279,9 +279,6 @@ class Trainer:
             self.trainset, model, batch_size=batch_size, rank=-1, mode="train", device=device
         )
         if self.args.val and self.testset is not None:
-            if self.args.validator_type is None:
-                msg = "Validator type must be specified if validation is enabled."
-                raise ValueError(msg)
             test_loader = self.get_dataloader(
                 self.testset, model, batch_size=batch_size * 2, rank=-1, mode="val", device=device
             )
@@ -424,7 +421,7 @@ class Trainer:
         optimizer.zero_grad()
         while True:
             # epoch_ = epoch
-            scheduler.step()
+            
             model.train()
             # if epoch == (epochs - args.close_mosaic):
             #     raise NotImplementedError
@@ -531,6 +528,8 @@ class Trainer:
                         and num_iterations in self.plot_idx
                     ):
                         self.plot_training_samples(batch, num_iterations)
+
+            scheduler.step()
 
             if loss is None:
                 raise RuntimeError
