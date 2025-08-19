@@ -142,6 +142,7 @@ class v8DetectionLoss:  # noqa: N801
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
         tal_beta: float = 6.0,
+        tal_fallback: bool = True,
     ) -> None:  # model must be de-paralleled
         """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
         # device: torch.device = next(model.parameters()).device  # get model device
@@ -163,7 +164,8 @@ class v8DetectionLoss:  # noqa: N801
         self.use_dfl: bool = m.reg_max > 1
 
         self.assigner = TaskAlignedAssigner(
-            topk=tal_topk, num_classes=self.num_classes, alpha=tal_alpha, beta=tal_beta
+            topk=tal_topk, num_classes=self.num_classes, alpha=tal_alpha, beta=tal_beta,
+            use_fallback_if_alignment_zero = tal_fallback
         )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
@@ -296,6 +298,7 @@ class v8DetectionLoss_3D:  # noqa: N801
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
         tal_beta: float = 6.0,
+        tal_fallback: bool = True,
     ) -> None:  # model must be de-paralleled
         """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
         # device: torch.device = next(model.parameters()).device  # get model device
@@ -317,7 +320,8 @@ class v8DetectionLoss_3D:  # noqa: N801
         self.use_dfl: bool = m.reg_max > 1
 
         self.assigner = TaskAlignedAssigner_3D(
-            topk=tal_topk, num_classes=self.num_classes, alpha=tal_alpha, beta=tal_beta
+            topk=tal_topk, num_classes=self.num_classes, alpha=tal_alpha, beta=tal_beta,
+            use_fallback_if_alignment_zero=tal_fallback
         )
         self.bbox_loss = BboxLoss_3D(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)

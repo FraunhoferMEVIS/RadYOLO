@@ -34,6 +34,7 @@ class TaskAlignedAssigner(nn.Module):
         alpha: float = 1.0,
         beta: float = 6.0,
         eps: float = 1e-9,
+        use_fallback_if_alignment_zero: bool = True,
     ) -> None:
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
@@ -43,6 +44,7 @@ class TaskAlignedAssigner(nn.Module):
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
+        self.use_fallback_if_alignment_zero = use_fallback_if_alignment_zero
 
     @torch.no_grad()
     def forward(
@@ -133,10 +135,6 @@ class TaskAlignedAssigner(nn.Module):
         mask_pos, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
         )
-        if mask_gt.sum(2).gt(mask_pos.sum(2)).any().item():
-            LOGGER.warning(
-                "Did not find anchor points for all ground-truth bounding boxes. Your bounding boxes could be too small for the configured heads."
-            )
 
         target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(
             mask_pos, overlaps, self.n_max_boxes
@@ -223,9 +221,53 @@ class TaskAlignedAssigner(nn.Module):
         mask_topk = self.select_topk_candidates(
             align_metric, topk_mask=ground_truth__mask.expand(-1, -1, self.topk).bool()
         )
+        
+        # Boolean mask: (B, M) True if all align_metric entries are zero for this GT box
+        zero_mask = (align_metric.sum(dim=2) == 0) & (ground_truth__mask.sum(dim=2) > 0)
+
+        if self.use_fallback_if_alignment_zero and zero_mask.any():
+            LOGGER.warning(
+                f"Using fall back mechanism to assign alignment metrics because alignment for all "
+                f"grid cells was zero for {zero_mask.sum().item()} objects."
+            )
+            B, M, A = align_metric.shape  # batch, max_num_obj, num_anchors
+
+            # Expand GT and predicted boxes for broadcasting
+            gt_boxes_exp = ground_truth_bboxes.unsqueeze(2).expand(-1, -1, A, -1)  # (B, M, A, 6)
+            pred_boxes_exp = pred_bboxes.unsqueeze(1).expand(-1, M, -1, -1)        # (B, M, A, 6)
+
+            # Compute Euclidean distance in 6D (between corners of GT and anchor boxes)
+            distances = torch.norm(gt_boxes_exp - pred_boxes_exp, dim=3)  # (B, M, A)
+            max_distance = distances.max()
+            distances = torch.where(anchors_in_gts__mask == 0, max_distance, distances)
+
+            # Loop over batch and GT boxes where zero_mask is True
+            for b in range(B):
+                for m in range(M):
+                    if zero_mask[b, m]:
+                        # Get indices of 10 closest anchors
+                        topk_vals, topk_idx = torch.topk(distances[b, m], k=10, largest=False)
+
+                        # Assign alignment metric based on inverse distance scaling
+                        # Closest gets 0.1, farthest of the 10 gets proportionally less
+                        norm_dist = (topk_vals - topk_vals.min()) / (topk_vals.max() - topk_vals.min())
+                        new_metrics = 0.1 * (1 - norm_dist)
+
+                        # Update align_metric, overlaps, mask_topk, anchors_in_gts__mask for these anchors
+                        # The resulting values are technically not correct, but allow the model to learn
+                        # some foreground anchors for the objects
+                        align_metric[b, m, topk_idx] = new_metrics
+                        overlaps[b, m, topk_idx] = new_metrics
+                        mask_topk[b, m, topk_idx] = 1
 
         # Merge all mask to a final mask, (b, max_num_obj, num_anchors)
         mask_pos = mask_topk * anchors_in_gts__mask * ground_truth__mask
+
+        boxes_without_anchor = ground_truth__mask.sum(2).gt(mask_pos.sum(2)).sum().item()
+        if boxes_without_anchor:
+            LOGGER.warning(
+                f"Did not find anchor points for {boxes_without_anchor} ground-truth bounding boxes. Your bounding boxes could be too small for the configured heads and input resolution."
+            )
 
         return mask_pos, align_metric, overlaps
 
@@ -497,6 +539,7 @@ class TaskAlignedAssigner_3D(TaskAlignedAssigner):
         alpha: float = 1.0,
         beta: float = 6.0,
         eps: float = 1e-9,
+        use_fallback_if_alignment_zero: bool = True,
     ) -> None:
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
@@ -506,6 +549,7 @@ class TaskAlignedAssigner_3D(TaskAlignedAssigner):
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
+        self.use_fallback_if_alignment_zero = use_fallback_if_alignment_zero
 
     def get_box_metrics(
         self,
@@ -549,14 +593,16 @@ class TaskAlignedAssigner_3D(TaskAlignedAssigner):
 
     @staticmethod
     def select_candidates_in_gts(
-        xy_centers: torch.Tensor, gt_bboxes: torch.Tensor, eps: float = 1e-9
+        xy_centers: torch.Tensor, gt_bboxes: torch.Tensor, anchor_inclusion_distance: float = -4
     ) -> torch.Tensor:
         """Select positive anchor centers within ground truth bounding boxes.
+           The anchor_inclusion_distance ensures that there are also anchor candidates
+           for ground truth bounding boxes that are very small and fall between anchor centers.
 
         Args:
             xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w*d, 3).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes, shape (b, n_boxes, 6).
-            eps (float, optional): Small value for numerical stability. Defaults to 1e-9.
+            anchor_inclusion_distance (float, optional): Value to indicate the per axis minimal anchor inclusion distance
 
         Returns:
             (torch.Tensor): Boolean mask of positive anchors, shape (b, n_boxes, h*w*d).
@@ -571,8 +617,8 @@ class TaskAlignedAssigner_3D(TaskAlignedAssigner):
         bbox_deltas = torch.cat((xy_centers[None] - lt, rb - xy_centers[None]), dim=2).view(
             bs, n_boxes, n_anchors, -1
         )
-        # return (bbox_deltas.min(3)[0] > eps).to(gt_bboxes.dtype)
-        return bbox_deltas.amin(3).gt_(eps)
+        pos_anchors = bbox_deltas.amin(3).gt_(anchor_inclusion_distance)
+        return pos_anchors
 
 
 def make_anchors(
