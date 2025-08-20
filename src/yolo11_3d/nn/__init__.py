@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from .data import BaseDataset, MIPDataset, NIfTIDataset
+from .data import BaseDataset, NIfTIDataset
 from .model import BaseModel, Hardcoded3DModel, HardcodedModel
 
 DATASETS: dict[str, tuple[type[BaseDataset], int]] = {
     "nifti": (NIfTIDataset, 3),
-    "mip": (MIPDataset, 2),
     # "2d-dummy": (DummyDataset, 2),
     # "3d-dummy": (DummyDataset, 3),
 }

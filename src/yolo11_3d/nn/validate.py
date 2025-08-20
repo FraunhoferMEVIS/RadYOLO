@@ -14,7 +14,6 @@ from tqdm_loggable.auto import tqdm
 from yolo11_3d.ultralytics.utils import ops
 from yolo11_3d.ultralytics.utils.metrics import (
     ConfusionMatrix,
-    ConfusionMatrix3D,
     DetMetrics,
     box_iou,
 )
@@ -382,12 +381,12 @@ class Validator3D(BaseValidator):
         )
         self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
         self.niou: int = self.iouv.numel()
-        self.confusion_matrix = ConfusionMatrix3D(self.nc, self.args.conf)
-
+        self.confusion_matrix = ConfusionMatrix(self.nc, self.args.conf)
+    
     def init_metrics(self, model) -> None:
         """Initialize evaluation metrics for YOLO."""
         self.metrics.names = self.names
-        self.confusion_matrix = ConfusionMatrix3D(nc=self.nc, conf=self.args.conf)
+        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.jdict = []
         self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
