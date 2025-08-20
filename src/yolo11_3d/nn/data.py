@@ -19,7 +19,6 @@ from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.nn.augmentations import (
     batch_generators_intensity_augmentations,
-    enhance_bounding_boxes,
     random_mirroring,
     random_zoom,
     tensor_cutout,
@@ -309,8 +308,6 @@ class NIfTIDataset(BaseDataset):
         nl = len(labels)
         if nl:
             labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
-
-        img, labels = enhance_bounding_boxes(img, labels, self.imgsz, self.min_stride)
 
         if nl:
             labels[:, 1:] = labels[:, 1:] / scale_tensor

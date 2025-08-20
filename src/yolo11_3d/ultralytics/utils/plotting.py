@@ -273,7 +273,6 @@ class Annotator:
         label: str = "",
         color: tuple[int, int, int] = (128, 128, 128),
         txt_color: tuple[int, int, int] = (255, 255, 255),
-        rotated: bool = False,
     ) -> None:
         """Draws a bounding box to image with label.
 
@@ -282,20 +281,13 @@ class Annotator:
             label (str): The text label to be displayed.
             color (tuple, optional): The background color of the rectangle (B, G, R).
             txt_color (tuple, optional): The color of the text (R, G, B).
-            rotated (bool, optional): Variable used to check if task is OBB
         """
         txt_color = self.get_txt_color(color, txt_color)
         if isinstance(box, torch.Tensor):
             box = box.tolist()
         if self.pil:  # or not is_ascii(label):
-            if rotated:
-                p1 = box[0]
-                self.draw.polygon(
-                    [tuple(b) for b in box], width=self.lw, outline=color
-                )  # PIL requires tuple box
-            else:
-                p1 = (box[0], box[1])
-                self.draw.rectangle(box, width=self.lw, outline=color)  # box
+            p1 = (box[0], box[1])
+            self.draw.rectangle(box, width=self.lw, outline=color)  # box
             if label:
                 w, h = self.getsize(label)  # text width, height
                 outside = p1[1] >= h  # label fits outside box
@@ -317,14 +309,8 @@ class Annotator:
                     (p1[0], p1[1] - h if outside else p1[1]), label, fill=txt_color, font=self.font
                 )
         else:  # cv2
-            if rotated:
-                p1 = [int(b) for b in box[0]]
-                cv2.polylines(
-                    self.im, [np.asarray(box, dtype=int)], True, color, self.lw
-                )  # cv2 requires nparray box
-            else:
-                p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
-                cv2.rectangle(self.im, p1, p2, color, thickness=self.lw, lineType=cv2.LINE_AA)
+            p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
+            cv2.rectangle(self.im, p1, p2, color, thickness=self.lw, lineType=cv2.LINE_AA)
             if label:
                 w, h = cv2.getTextSize(label, 0, fontScale=self.sf, thickness=self.tf)[
                     0
@@ -543,11 +529,9 @@ def plot_images(
     bboxes: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.float32),
     confs: torch.Tensor | np.ndarray | None = None,
     masks: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.uint8),
-    kpts: torch.Tensor | np.ndarray = np.zeros((0, 51), dtype=np.float32),
     paths: Sequence[str | Path] | None = None,
     fname: str = "images.jpg",
     names: dict[int, str] | None = None,
-    # on_plot: Callable = None,
     max_size: int = 1920,
     max_subplots: int = 16,
     save: bool = True,
@@ -559,10 +543,9 @@ def plot_images(
         images: Batch of images to plot. Shape: (batch_size, channels, height, width).
         batch_idx: Batch indices for each detection. Shape: (num_detections,).
         cls: Class labels for each detection. Shape: (num_detections,).
-        bboxes: Bounding boxes for each detection. Shape: (num_detections, 4) or (num_detections, 5) for rotated boxes.
+        bboxes: Bounding boxes for each detection. Shape: (num_detections, 4)
         confs: Confidence scores for each detection. Shape: (num_detections,).
         masks: Instance segmentation masks. Shape: (num_detections, height, width) or (1, height, width).
-        kpts: Keypoints for each detection. Shape: (num_detections, 51).
         paths: List of file paths for each image in the batch.
         fname: Output filename for the plotted image grid.
         names: Dictionary mapping class indices to class names.
@@ -587,8 +570,6 @@ def plot_images(
         bboxes = bboxes.cpu().numpy()
     if isinstance(masks, torch.Tensor):
         masks = masks.cpu().numpy().astype(int)
-    if isinstance(kpts, torch.Tensor):
-        kpts = kpts.cpu().numpy()
     if isinstance(batch_idx, torch.Tensor):
         batch_idx = batch_idx.cpu().numpy()
 
@@ -644,11 +625,6 @@ def plot_images(
                         boxes[..., :4] *= scale
                 boxes[..., 0] += x
                 boxes[..., 1] += y
-                is_obb = boxes.shape[-1] == 5  # xywhr
-                # boxes = ops.xywhr2xyxyxyxy(boxes) if is_obb else ops.xywh2xyxy(boxes)
-                if is_obb:
-                    msg = "Not implemented for OBB"
-                    raise NotImplementedError(msg)
                 boxes = ops.xywh2xyxy(boxes)
                 for j, box in enumerate(boxes.astype(np.int64).tolist()):
                     c = classes[j]
@@ -656,18 +632,13 @@ def plot_images(
                     c = names.get(c, c) if names else c
                     if labels or conf[j] > conf_thres:
                         label = f"{c}" if labels else f"{c} {conf[j]:.1f}"
-                        annotator.box_label(box, label, color=color, rotated=is_obb)
+                        annotator.box_label(box, label, color=color)
 
             elif len(classes):
                 for c in classes:
                     color = colors(c)
                     c = names.get(c, c) if names else c
                     annotator.text((x, y), f"{c}", txt_color=color, box_style=True)
-
-            # Plot keypoints
-            if len(kpts):
-                msg = "Keypoints are not supported."
-                raise NotImplementedError(msg)
 
             # Plot masks
             if len(masks):

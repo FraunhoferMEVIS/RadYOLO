@@ -46,72 +46,6 @@ def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.
     return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 
-def bbox_iou(
-    box1: torch.Tensor,
-    box2: torch.Tensor,
-    xywh: bool = True,
-    GIoU: bool = False,  # noqa: N803
-    DIoU: bool = False,  # noqa: N803
-    CIoU: bool = False,  # noqa: N803
-    eps: float = 1e-7,
-) -> torch.Tensor:
-    """Calculate Intersection over Union (IoU) of box1(1, 4) to box2(n, 4).
-
-    Args:
-        box1 (torch.Tensor): A tensor representing a single bounding box with shape (1, 4).
-        box2 (torch.Tensor): A tensor representing n bounding boxes with shape (n, 4).
-        xywh (bool, optional): If True, input boxes are in (x, y, w, h) format. If False, input boxes are in
-                               (x1, y1, x2, y2) format. Defaults to True.
-        GIoU (bool, optional): If True, calculate Generalized IoU. Defaults to False.
-        DIoU (bool, optional): If True, calculate Distance IoU. Defaults to False.
-        CIoU (bool, optional): If True, calculate Complete IoU. Defaults to False.
-        eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
-
-    Returns:
-        (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
-    """
-    # Get the coordinates of bounding boxes
-    if xywh:  # transform from xywh to xyxy
-        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
-        w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
-        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
-        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
-    else:  # x1, y1, x2, y2 = box1
-        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
-        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
-        w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
-        w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
-
-    # Intersection area
-    inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
-        b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
-    ).clamp_(0)
-
-    # Union Area
-    union = w1 * h1 + w2 * h2 - inter + eps
-
-    # IoU
-    iou = inter / union
-    if CIoU or DIoU or GIoU:
-        cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
-        ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
-        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
-            c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
-            rho2 = (
-                (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
-            ) / 4  # center dist**2
-            if (
-                CIoU
-            ):  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
-                v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
-                with torch.no_grad():
-                    alpha = v / (v - iou + (1 + eps))
-                return iou - (rho2 / c2 + v * alpha)  # CIoU
-            return iou - rho2 / c2  # DIoU
-        c_area = cw * ch + eps  # convex area
-        return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
-    return iou  # IoU
-
 
 def bbox_iou_3d(
     box1: torch.Tensor,
@@ -211,63 +145,6 @@ def bbox_iou_3d(
     return iou  # IoU
 
 
-def _get_covariance_matrix(boxes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Generating covariance matrix from obbs.
-
-    Args:
-        boxes (torch.Tensor): A tensor of shape (N, 5) representing rotated bounding boxes, with xywhr format.
-
-    Returns:
-        (torch.Tensor): Covariance matrices corresponding to original rotated bounding boxes.
-    """
-    # Gaussian bounding boxes, ignore the center points (the first two columns) because they are not needed here.
-    gbbs = torch.cat((boxes[:, 2:4].pow(2) / 12, boxes[:, 4:]), dim=-1)
-    a, b, c = cast("tuple[torch.Tensor, torch.Tensor, torch.Tensor]", gbbs.split(1, dim=-1))
-    cos: torch.Tensor = c.cos()
-    sin: torch.Tensor = c.sin()
-    cos2: torch.Tensor = cos.pow(2)
-    sin2: torch.Tensor = sin.pow(2)
-    return a * cos2 + b * sin2, a * sin2 + b * cos2, (a - b) * cos * sin
-
-
-def batch_probiou(
-    obb1: torch.Tensor | npt.NDArray, obb2: torch.Tensor | npt.NDArray, eps: float = 1e-7
-) -> torch.Tensor:
-    """Calculate the prob IoU between oriented bounding boxes, https://arxiv.org/pdf/2106.06072v1.pdf.
-
-    Args:
-        obb1 (torch.Tensor | np.ndarray): A tensor of shape (N, 5) representing ground truth obbs, with xywhr format.
-        obb2 (torch.Tensor | np.ndarray): A tensor of shape (M, 5) representing predicted obbs, with xywhr format.
-        eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
-
-    Returns:
-        (torch.Tensor): A tensor of shape (N, M) representing obb similarities.
-    """
-    obb1 = torch.from_numpy(obb1) if isinstance(obb1, np.ndarray) else obb1
-    obb2 = torch.from_numpy(obb2) if isinstance(obb2, np.ndarray) else obb2
-
-    x1, y1 = obb1[..., :2].split(1, dim=-1)
-    x2, y2 = (x.squeeze(-1)[None] for x in obb2[..., :2].split(1, dim=-1))
-    a1, b1, c1 = _get_covariance_matrix(obb1)
-    a2, b2, c2 = (x.squeeze(-1)[None] for x in _get_covariance_matrix(obb2))
-
-    t1 = (
-        ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2))
-        / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
-    ) * 0.25
-    t2 = (
-        ((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
-    ) * 0.5
-    t3 = (
-        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
-        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
-        + eps
-    ).log() * 0.5
-    bd = (t1 + t2 + t3).clamp(eps, 100.0)
-    hd = (1.0 - (-bd).exp() + eps).sqrt()
-    return 1 - hd
-
-
 class ConfusionMatrix:
     """A class for calculating and updating a confusion matrix for object detection and classification tasks.
 
@@ -307,7 +184,6 @@ class ConfusionMatrix:
         Args:
             detections (Array[N, 6] | Array[N, 7]): Detected bounding boxes and their associated information.
                                       Each row should contain (x1, y1, x2, y2, conf, class)
-                                      or with an additional element `angle` when it's obb.
             gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
             gt_cls (Array[M]): The class labels.
         """
@@ -327,14 +203,7 @@ class ConfusionMatrix:
         detections = detections[detections[:, 6] > self.conf]
         gt_classes = gt_cls.int()
         detection_classes = detections[:, 7].int()
-        is_obb = (
-            detections.shape[1] == 7 and gt_bboxes.shape[1] == 5
-        )  # with additional `angle` dimension
-        iou = (
-            batch_probiou(gt_bboxes, torch.cat([detections[:, :4], detections[:, -1:]], dim=-1))
-            if is_obb
-            else box_iou(gt_bboxes, detections[:, :6])
-        )
+        iou = box_iou(gt_bboxes, detections[:, :6])
 
         x = torch.where(iou > self.iou_thres)
         if x[0].shape[0]:

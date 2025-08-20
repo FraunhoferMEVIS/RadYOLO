@@ -5,7 +5,6 @@ from typing import Any
 
 import torch
 from yolo11_3d.nn.augmentations import (
-    enhance_bounding_boxes,
     random_mirroring,
     random_zoom,
     tensor_cutout,
@@ -40,7 +39,6 @@ if __name__ == "__main__":
     ]
 
     # add a single box with a width of <8 pixels to test the behavior of the
-    # enhance_bounding_boxes function
     lt.append([0.1, 0.1, 0.1])
     rb.append([0.1 + 0.02, 0.1 + 0.02, 0.1 + 0.02])
 
@@ -107,30 +105,6 @@ if __name__ == "__main__":
 
         # apply operation
         op_img, op_labels = op(op_img, op_labels, p=1.0, **kwargs)
-
-        # labels are already in format required for plotting
-        images.append(op_img)
-        labels.append(op_labels)
-        paths.append(op.__name__)
-
-    # loop to evaluate all functions that require labels to be in format xyzwhd (not normalized)
-    for op, kwargs in (
-        (enhance_bounding_boxes, {"imgsz": imgsz, "stride": 8}),
-        (enhance_bounding_boxes, {"imgsz": imgsz, "stride": 8}),
-        (enhance_bounding_boxes, {"imgsz": imgsz, "stride": 8}),
-    ):
-        kwargs: dict[str, Any]
-
-        # clone image tensor so that modifications do not affect original image and thus also
-        # subsequent loop evaluations
-        op_img = orig_img.clone()
-
-        # convert labels to xyzwhd and scale them with image size to denormalize
-        # torch.cat already creates a new tensor so no cloning necessary
-        op_labels = torch.cat((orig_cls, xyzxyz2xyzwhd(orig_labels) * scale_tensor), dim=1)
-
-        # apply operation
-        op_img, op_labels = op(op_img, op_labels, **kwargs)
 
         # labels are already in format required for plotting
         images.append(op_img)
