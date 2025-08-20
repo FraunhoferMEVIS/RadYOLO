@@ -159,33 +159,11 @@ class DefaultConfig(BaseModel):
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain
-    # pose: float = 12.0  # pose loss gain
-    # kobj: float = 1.0  # keypoint obj loss gain
     nbs: int = 64  # nominal batch size
-    # hsv_h: float = 0.015  # image HSV-Hue augmentation
-    # hsv_s: float = 0.7  # image HSV-Saturation augmentation
-    # hsv_v: float = 0.4  # image HSV-Value augmentation
     degrees: float = Field(0.0, le=180, ge=0)  # image roation (+/- deg)
     translate: float = 0.1  # image translation
     scale: float = 0.5  # image scale
     shear: float = 0.0  # image shear
-    # perspective: float = Field(0.0, ge=0, le=0.001)  # image perspective
-    # flipud: float = Field(0.0, ge=0, le=1)  # image flip up/down
-    # fliplr: float = Field(0.5, ge=0, le=1)  # image flip left/right
-    # bgr: float = Field(0.0, ge=0, le=1)  # image channel bgr
-    # mosaic: float = Field(1.0, ge=0, le=1)  # image mosaic
-    # mixup: float = Field(0.0, ge=0, le=1)  # image mixup
-    # copy_paste: float = Field(0.0, ge=0, le=1)  # segment copu-paste
-    # copy_paste_mode: Literal["flip", "mixup"] = "flip"  # the method to do copy_paste augmentation
-    # auto_augment: Literal["randaugment", "autoaugment", "augmix"] = (
-    #     "randaugment"  # auto augmentation policy for classification
-    # )
-    # erasing: float = Field(
-    #     0.4, ge=0, le=0.9
-    # )  # probability of random erasing during classification training, 0 means no erasing.
-    # crop_fraction: float = Field(
-    #     1.0, ge=0.1, le=1
-    # )  # image crop fraction for classification, 1.0 means no crop.
 
     # Augmentation
     max_zoom: float = Field(1.5, ge=0)

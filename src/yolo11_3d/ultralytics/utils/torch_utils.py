@@ -4,7 +4,6 @@ import logging
 from typing import Any
 
 import torch
-import torch.optim.optimizer
 
 LOGGER = logging.getLogger(__name__)
 

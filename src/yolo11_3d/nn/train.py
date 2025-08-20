@@ -37,7 +37,6 @@ from .config import (
 from .model import BaseModel
 from .validate import Validator
 
-# from yolo11_3d.ultralytics.utils.checks import check_imgsz
 from .util import ModelEMA, init_seeds, select_device
 
 if TYPE_CHECKING:
@@ -267,12 +266,7 @@ class Trainer:
             ),
             32,
         )
-        # args.imgsz = check_imgsz(args.imgsz, stride=grid_size, floor=grid_size, max_dim=1)
         stride = grid_size
-
-        # Batch size # TODO: maybe later integrate this
-        # if batch_size < 1:
-        #     args.batch = batch_size = self.auto_batch()
 
         # Dataloaders
         train_loader = self.get_dataloader(
