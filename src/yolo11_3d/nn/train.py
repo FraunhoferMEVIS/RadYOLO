@@ -35,7 +35,7 @@ from .config import (
     model_checkpoint_from_torch,
 )
 from .model import BaseModel
-from .validate import Validator3D
+from .validate import Validator
 
 # from yolo11_3d.ultralytics.utils.checks import check_imgsz
 from .util import ModelEMA, init_seeds, select_device
@@ -777,9 +777,9 @@ class Trainer:
         test_loader: InfiniteDataLoader,
         save_dir: Path,
         names: dict[int, str],
-    ) -> Validator3D:
+    ) -> Validator:
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
-        return Validator3D(
+        return Validator(
             test_loader,
             save_dir=save_dir,
             args=self.args,

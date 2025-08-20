@@ -36,60 +36,6 @@ class Colors:
         palette (list of tuple): List of RGB color values.
         n (int): The number of colors in the palette.
         pose_palette (np.ndarray): A specific color palette array with dtype np.uint8.
-
-    ## Ultralytics Color Palette
-
-    | Index | Color                                                             | HEX       | RGB               |
-    |-------|-------------------------------------------------------------------|-----------|-------------------|
-    | 0     | <i class="fa-solid fa-square fa-2xl" style="color: #042aff;"></i> | `#042aff` | (4, 42, 255)      |
-    | 1     | <i class="fa-solid fa-square fa-2xl" style="color: #0bdbeb;"></i> | `#0bdbeb` | (11, 219, 235)    |
-    | 2     | <i class="fa-solid fa-square fa-2xl" style="color: #f3f3f3;"></i> | `#f3f3f3` | (243, 243, 243)   |
-    | 3     | <i class="fa-solid fa-square fa-2xl" style="color: #00dfb7;"></i> | `#00dfb7` | (0, 223, 183)     |
-    | 4     | <i class="fa-solid fa-square fa-2xl" style="color: #111f68;"></i> | `#111f68` | (17, 31, 104)     |
-    | 5     | <i class="fa-solid fa-square fa-2xl" style="color: #ff6fdd;"></i> | `#ff6fdd` | (255, 111, 221)   |
-    | 6     | <i class="fa-solid fa-square fa-2xl" style="color: #ff444f;"></i> | `#ff444f` | (255, 68, 79)     |
-    | 7     | <i class="fa-solid fa-square fa-2xl" style="color: #cced00;"></i> | `#cced00` | (204, 237, 0)     |
-    | 8     | <i class="fa-solid fa-square fa-2xl" style="color: #00f344;"></i> | `#00f344` | (0, 243, 68)      |
-    | 9     | <i class="fa-solid fa-square fa-2xl" style="color: #bd00ff;"></i> | `#bd00ff` | (189, 0, 255)     |
-    | 10    | <i class="fa-solid fa-square fa-2xl" style="color: #00b4ff;"></i> | `#00b4ff` | (0, 180, 255)     |
-    | 11    | <i class="fa-solid fa-square fa-2xl" style="color: #dd00ba;"></i> | `#dd00ba` | (221, 0, 186)     |
-    | 12    | <i class="fa-solid fa-square fa-2xl" style="color: #00ffff;"></i> | `#00ffff` | (0, 255, 255)     |
-    | 13    | <i class="fa-solid fa-square fa-2xl" style="color: #26c000;"></i> | `#26c000` | (38, 192, 0)      |
-    | 14    | <i class="fa-solid fa-square fa-2xl" style="color: #01ffb3;"></i> | `#01ffb3` | (1, 255, 179)     |
-    | 15    | <i class="fa-solid fa-square fa-2xl" style="color: #7d24ff;"></i> | `#7d24ff` | (125, 36, 255)    |
-    | 16    | <i class="fa-solid fa-square fa-2xl" style="color: #7b0068;"></i> | `#7b0068` | (123, 0, 104)     |
-    | 17    | <i class="fa-solid fa-square fa-2xl" style="color: #ff1b6c;"></i> | `#ff1b6c` | (255, 27, 108)    |
-    | 18    | <i class="fa-solid fa-square fa-2xl" style="color: #fc6d2f;"></i> | `#fc6d2f` | (252, 109, 47)    |
-    | 19    | <i class="fa-solid fa-square fa-2xl" style="color: #a2ff0b;"></i> | `#a2ff0b` | (162, 255, 11)    |
-
-    ## Pose Color Palette
-
-    | Index | Color                                                             | HEX       | RGB               |
-    |-------|-------------------------------------------------------------------|-----------|-------------------|
-    | 0     | <i class="fa-solid fa-square fa-2xl" style="color: #ff8000;"></i> | `#ff8000` | (255, 128, 0)     |
-    | 1     | <i class="fa-solid fa-square fa-2xl" style="color: #ff9933;"></i> | `#ff9933` | (255, 153, 51)    |
-    | 2     | <i class="fa-solid fa-square fa-2xl" style="color: #ffb266;"></i> | `#ffb266` | (255, 178, 102)   |
-    | 3     | <i class="fa-solid fa-square fa-2xl" style="color: #e6e600;"></i> | `#e6e600` | (230, 230, 0)     |
-    | 4     | <i class="fa-solid fa-square fa-2xl" style="color: #ff99ff;"></i> | `#ff99ff` | (255, 153, 255)   |
-    | 5     | <i class="fa-solid fa-square fa-2xl" style="color: #99ccff;"></i> | `#99ccff` | (153, 204, 255)   |
-    | 6     | <i class="fa-solid fa-square fa-2xl" style="color: #ff66ff;"></i> | `#ff66ff` | (255, 102, 255)   |
-    | 7     | <i class="fa-solid fa-square fa-2xl" style="color: #ff33ff;"></i> | `#ff33ff` | (255, 51, 255)    |
-    | 8     | <i class="fa-solid fa-square fa-2xl" style="color: #66b2ff;"></i> | `#66b2ff` | (102, 178, 255)   |
-    | 9     | <i class="fa-solid fa-square fa-2xl" style="color: #3399ff;"></i> | `#3399ff` | (51, 153, 255)    |
-    | 10    | <i class="fa-solid fa-square fa-2xl" style="color: #ff9999;"></i> | `#ff9999` | (255, 153, 153)   |
-    | 11    | <i class="fa-solid fa-square fa-2xl" style="color: #ff6666;"></i> | `#ff6666` | (255, 102, 102)   |
-    | 12    | <i class="fa-solid fa-square fa-2xl" style="color: #ff3333;"></i> | `#ff3333` | (255, 51, 51)     |
-    | 13    | <i class="fa-solid fa-square fa-2xl" style="color: #99ff99;"></i> | `#99ff99` | (153, 255, 153)   |
-    | 14    | <i class="fa-solid fa-square fa-2xl" style="color: #66ff66;"></i> | `#66ff66` | (102, 255, 102)   |
-    | 15    | <i class="fa-solid fa-square fa-2xl" style="color: #33ff33;"></i> | `#33ff33` | (51, 255, 51)     |
-    | 16    | <i class="fa-solid fa-square fa-2xl" style="color: #00ff00;"></i> | `#00ff00` | (0, 255, 0)       |
-    | 17    | <i class="fa-solid fa-square fa-2xl" style="color: #0000ff;"></i> | `#0000ff` | (0, 0, 255)       |
-    | 18    | <i class="fa-solid fa-square fa-2xl" style="color: #ff0000;"></i> | `#ff0000` | (255, 0, 0)       |
-    | 19    | <i class="fa-solid fa-square fa-2xl" style="color: #ffffff;"></i> | `#ffffff` | (255, 255, 255)   |
-
-    !!! note "Ultralytics Brand Colors"
-
-        For Ultralytics brand colors see [https://www.ultralytics.com/brand](https://www.ultralytics.com/brand). Please use the official Ultralytics colors for all marketing materials.
     """
 
     def __init__(self) -> None:
@@ -118,31 +64,6 @@ class Colors:
         )
         self.palette: list[tuple[int, int, int]] = [self.hex2rgb(f"#{c}") for c in hexs]
         self.n: int = len(self.palette)
-        self.pose_palette: npt.NDArray[np.uint8] = np.array(
-            [
-                [255, 128, 0],
-                [255, 153, 51],
-                [255, 178, 102],
-                [230, 230, 0],
-                [255, 153, 255],
-                [153, 204, 255],
-                [255, 102, 255],
-                [255, 51, 255],
-                [102, 178, 255],
-                [51, 153, 255],
-                [255, 153, 153],
-                [255, 102, 102],
-                [255, 51, 51],
-                [153, 255, 153],
-                [102, 255, 102],
-                [51, 255, 51],
-                [0, 255, 0],
-                [0, 0, 255],
-                [255, 0, 0],
-                [255, 255, 255],
-            ],
-            dtype=np.uint8,
-        )
 
     def __call__(self, i: int | str, bgr: bool = False) -> tuple[int, int, int]:
         """Converts hex color codes to RGB values."""
@@ -166,7 +87,6 @@ class Annotator:
         pil (bool): Whether to use PIL or cv2 for drawing annotations.
         font (ImageFont.truetype or ImageFont.load_default): Font used for text annotations.
         lw (float): Line width for drawing.
-        skeleton (List[List[int]]): Skeleton structure for keypoints.
         limb_color (List[int]): Color palette for limbs.
         kpt_color (List[int]): Color palette for keypoints.
     """
@@ -181,9 +101,6 @@ class Annotator:
         # example: str = "abc",
     ) -> None:
         """Initialize the Annotator class with image and line width along with color palette for keypoints and limbs."""
-        # non_ascii = not is_ascii(example)  # non-latin labels, i.e. asian, arabic, cyrillic
-        # input_is_pil = isinstance(im, Image.Image)
-        # self.pil = pil or input_is_pil
         self.lw: int = line_width or max(
             round(sum(im.size if isinstance(im, Image.Image) else im.shape) / 2 * 0.003), 2
         )
@@ -198,9 +115,6 @@ class Annotator:
                 self.font = ImageFont.truetype(str(font), size)
             except Exception:
                 self.font = ImageFont.load_default()
-            # Deprecation fix for w, h = getsize(string) -> _, _, w, h = getbox(string)
-            # if check_version(pil_version, "9.2.0"):
-            #     self.font.getsize = lambda x: self.font.getbbox(x)[2:4]  # text width, height
             self.getsize: Callable[[str], tuple[int, int] | tuple[float, float]] = (
                 lambda x: self.font.getbbox(x)[2:4]
             )
@@ -212,35 +126,6 @@ class Annotator:
             self.im = im if im.flags.writeable else im.copy()
             self.tf: int = max(self.lw - 1, 1)  # font thickness
             self.sf: float = self.lw / 3  # font scale
-        # Pose
-        self.skeleton = [
-            [16, 14],
-            [14, 12],
-            [17, 15],
-            [15, 13],
-            [12, 13],
-            [6, 12],
-            [7, 13],
-            [6, 7],
-            [6, 8],
-            [7, 9],
-            [8, 10],
-            [9, 11],
-            [2, 3],
-            [1, 2],
-            [1, 3],
-            [2, 4],
-            [3, 5],
-            [4, 6],
-            [5, 7],
-        ]
-
-        self.limb_color = colors.pose_palette[
-            [9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]
-        ]
-        self.kpt_color = colors.pose_palette[
-            [16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]
-        ]
         self.dark_colors = {
             (235, 219, 11),
             (243, 243, 243),
@@ -501,70 +386,6 @@ class Annotator:
     #         # Convert im back to PIL and update draw
     #         self.fromarray(self.im)
 
-    # def kpts(
-    #     self, kpts, shape=(640, 640), radius=None, kpt_line=True, conf_thres=0.25, kpt_color=None
-    # ):
-    #     """
-    #     Plot keypoints on the image.
-
-    #     Args:
-    #         kpts (torch.Tensor): Keypoints, shape [17, 3] (x, y, confidence).
-    #         shape (tuple, optional): Image shape (h, w). Defaults to (640, 640).
-    #         radius (int, optional): Keypoint radius. Defaults to 5.
-    #         kpt_line (bool, optional): Draw lines between keypoints. Defaults to True.
-    #         conf_thres (float, optional): Confidence threshold. Defaults to 0.25.
-    #         kpt_color (tuple, optional): Keypoint color (B, G, R). Defaults to None.
-
-    #     Note:
-    #         - `kpt_line=True` currently only supports human pose plotting.
-    #         - Modifies self.im in-place.
-    #         - If self.pil is True, converts image to numpy array and back to PIL.
-    #     """
-    #     radius = radius if radius is not None else self.lw
-    #     if self.pil:
-    #         # Convert to numpy first
-    #         self.im = np.asarray(self.im).copy()
-    #     nkpt, ndim = kpts.shape
-    #     is_pose = nkpt == 17 and ndim in {2, 3}
-    #     kpt_line &= is_pose  # `kpt_line=True` for now only supports human pose plotting
-    #     for i, k in enumerate(kpts):
-    #         color_k = kpt_color or (self.kpt_color[i].tolist() if is_pose else colors(i))
-    #         x_coord, y_coord = k[0], k[1]
-    #         if x_coord % shape[1] != 0 and y_coord % shape[0] != 0:
-    #             if len(k) == 3:
-    #                 conf = k[2]
-    #                 if conf < conf_thres:
-    #                     continue
-    #             cv2.circle(
-    #                 self.im, (int(x_coord), int(y_coord)), radius, color_k, -1, lineType=cv2.LINE_AA
-    #             )
-
-    #     if kpt_line:
-    #         ndim = kpts.shape[-1]
-    #         for i, sk in enumerate(self.skeleton):
-    #             pos1 = (int(kpts[(sk[0] - 1), 0]), int(kpts[(sk[0] - 1), 1]))
-    #             pos2 = (int(kpts[(sk[1] - 1), 0]), int(kpts[(sk[1] - 1), 1]))
-    #             if ndim == 3:
-    #                 conf1 = kpts[(sk[0] - 1), 2]
-    #                 conf2 = kpts[(sk[1] - 1), 2]
-    #                 if conf1 < conf_thres or conf2 < conf_thres:
-    #                     continue
-    #             if pos1[0] % shape[1] == 0 or pos1[1] % shape[0] == 0 or pos1[0] < 0 or pos1[1] < 0:
-    #                 continue
-    #             if pos2[0] % shape[1] == 0 or pos2[1] % shape[0] == 0 or pos2[0] < 0 or pos2[1] < 0:
-    #                 continue
-    #             cv2.line(
-    #                 self.im,
-    #                 pos1,
-    #                 pos2,
-    #                 kpt_color or self.limb_color[i].tolist(),
-    #                 thickness=int(np.ceil(self.lw / 2)),
-    #                 lineType=cv2.LINE_AA,
-    #             )
-    #     if self.pil:
-    #         # Convert im back to PIL and update draw
-    #         self.fromarray(self.im)
-
     def rectangle(self, xy, fill=None, outline=None, width: int = 1) -> None:
         """Add rectangle to image (PIL-only)."""
         self.draw.rectangle(xy, fill, outline, width)
@@ -624,12 +445,6 @@ class Annotator:
         im = Image.fromarray(
             np.asarray(self.im)[..., ::-1]
         )  # Convert numpy array to PIL Image with RGB to BGR
-        # if IS_COLAB or IS_KAGGLE:  # can not use IS_JUPYTER as will run for all ipython environments
-        #     try:
-        #         display(im)  # noqa - display() function only available in ipython environments
-        #     except ImportError as e:
-        #         LOGGER.warning(f"Unable to display image in Jupyter notebooks: {e}")
-        # else:
         im.show(title=title)
 
     def save(self, filename: str = "image.jpg") -> None:
@@ -654,35 +469,12 @@ class Annotator:
         height = y_max - y_min
         return width, height, width * height
 
-    # def draw_region(self, reg_pts=None, color=(0, 255, 0), thickness=5):
-    #     """Draw region line.
-
-    #     Args:
-    #         reg_pts (list): Region Points (for line 2 points, for region 4 points)
-    #         color (tuple): Region Color value
-    #         thickness (int): Region area thickness value
-    #     """
-    #     cv2.polylines(
-    #         self.im,
-    #         [np.array(reg_pts, dtype=np.int32)],
-    #         isClosed=True,
-    #         color=color,
-    #         thickness=thickness,
-    #     )
-
-    #     # Draw small circles at the corner points
-    #     for point in reg_pts:
-    #         cv2.circle(
-    #             self.im, (point[0], point[1]), thickness * 2, color, -1
-    #         )  # -1 fills the circle
-
 
 def plot_labels(
     boxes: npt.NDArray,
     cls: npt.NDArray,
     names: dict[int, str],
     save_dir: Path = Path(),
-    # on_plot=None,
 ):
     """Plot training labels including class histograms and box statistics."""
     import pandas  # scope for faster 'import ultralytics'
@@ -742,8 +534,6 @@ def plot_labels(
     fname = save_dir / "labels.jpg"
     plt.savefig(fname, dpi=200)
     plt.close()
-    # if on_plot:
-    #     on_plot(fname)
 
 
 def plot_images(
@@ -822,13 +612,12 @@ def plot_images(
         mosaic = cv2.resize(mosaic, tuple(int(x * ns) for x in (w, h)))
 
     # Annotate
-    fs = int((h + w) * ns * 0.01)  # font size
+    font_size = int((h + w) * ns * 0.01)
     annotator = Annotator(
         mosaic,
-        line_width=round(fs / 10),
-        font_size=fs,
+        line_width=round(font_size / 10),
+        font_size=font_size,
         pil=True,
-        # example=names,
     )
     for i in range(bs):
         x, y = int(w * (i // ns)), int(h * (i % ns))  # block origin
@@ -879,20 +668,6 @@ def plot_images(
             if len(kpts):
                 msg = "Keypoints are not supported."
                 raise NotImplementedError(msg)
-                kpts_ = kpts[idx].copy()
-                if len(kpts_):
-                    if (
-                        kpts_[..., 0].max() <= 1.01 or kpts_[..., 1].max() <= 1.01
-                    ):  # if normalized with tolerance .01
-                        kpts_[..., 0] *= w  # scale to pixels
-                        kpts_[..., 1] *= h
-                    elif scale < 1:  # absolute coords need scale if image scales
-                        kpts_ *= scale
-                kpts_[..., 0] += x
-                kpts_[..., 1] += y
-                for j in range(len(kpts_)):
-                    if labels or conf[j] > conf_thres:
-                        annotator.kpts(kpts_[j], conf_thres=conf_thres)
 
             # Plot masks
             if len(masks):
@@ -923,9 +698,7 @@ def plot_images(
                 annotator.fromarray(im)
     if not save:
         return np.asarray(annotator.im)
-    annotator.im.save(fname)  # save
-    # if on_plot:
-    #     on_plot(fname)
+    annotator.im.save(fname)
     return None
 
 
@@ -933,9 +706,6 @@ def plot_results(
     file: Path | str | None = "path/to/results.csv",
     dir: Path | str = "",
     # segment: bool = False,
-    # pose: bool = False,
-    # classify: bool = False,
-    # on_plot: bool = None,
 ):
     """Plot training results from a results CSV file.
 
@@ -949,10 +719,6 @@ def plot_results(
             Defaults to ''.
         segment (bool, optional): Flag to indicate if the data is for segmentation.
             Defaults to False.
-        pose (bool, optional): Flag to indicate if the data is for pose estimation.
-            Defaults to False.
-        classify (bool, optional): Flag to indicate if the data is for classification.
-            Defaults to False.
         on_plot (callable, optional): Callback function to be executed after plotting. Takes
             filename as an argument. Defaults to None.
 
@@ -964,19 +730,11 @@ def plot_results(
         ```
     """
     import pandas as pd  # scope for faster 'import ultralytics'
-    # from scipy.ndimage import gaussian_filter1d
 
     save_dir = Path(file).parent if file else Path(dir)
-    # if classify:
-    #     fig, ax = plt.subplots(2, 2, figsize=(6, 6), tight_layout=True)
-    #     index = [2, 5, 3, 4]
-    # elif segment:
+    # if segment:
     #     fig, ax = plt.subplots(2, 8, figsize=(18, 6), tight_layout=True)
     #     index = [2, 3, 4, 5, 6, 7, 10, 11, 14, 15, 16, 17, 8, 9, 12, 13]
-    # elif pose:
-    #     fig, ax = plt.subplots(2, 9, figsize=(21, 6), tight_layout=True)
-    #     index = [2, 3, 4, 5, 6, 7, 8, 11, 12, 15, 16, 17, 18, 19, 9, 10, 13, 14]
-    # else:
     fig, ax = plt.subplots(2, 5, figsize=(12, 6), tight_layout=True)
     index = [2, 3, 4, 5, 6, 9, 10, 11, 7, 8]
 
@@ -990,45 +748,24 @@ def plot_results(
             x = data.values[:, 0]
             for i, j in enumerate(index):
                 y = data.values[:, j].astype("float")
-                # y[y == 0] = np.nan  # don't show zero values
                 ax[i].plot(
                     x, y, marker=".", label=f.stem, linewidth=2, markersize=8
                 )  # actual results
-                # ax[i].plot(
-                #     x, gaussian_filter1d(y, sigma=3), ":", label="smooth", linewidth=2
-                # )  # smoothing line
                 ax[i].set_title(s[j], fontsize=12)
-                # if j in {8, 9, 10}:  # share train and val loss y axes
-                #     ax[i].get_shared_y_axes().join(ax[i], ax[i - 5])
         except Exception as e:
             LOGGER.warning("WARNING: Plotting error for %s: %s", f, e)
         else:
             ax[1].legend()
             fname = save_dir / "results.png"
             fig.savefig(fname, dpi=200)
-            # if on_plot:
-            #     on_plot(fname)
         finally:
             plt.close()
 
 
 def output_to_target(
-    output: list[torch.Tensor], max_det: int = 300
-) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-    """Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting."""
-    targets: list[torch.Tensor] = []
-    for i, o in enumerate(output):
-        box, conf, cls = o[:max_det, :6].cpu().split((4, 1, 1), 1)
-        j = torch.full((conf.shape[0], 1), i)
-        targets.append(torch.cat((j, cls, ops.xyxy2xywh(box), conf), 1))
-    targets_ = torch.cat(targets, 0).numpy()
-    return targets_[:, 0], targets_[:, 1], targets_[:, 2:-1], targets_[:, -1]
-
-
-def output_to_target_3d(
     output: list[torch.Tensor], max_det: int = 300, axis: int = 2
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-    """Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting.
+    """Convert model output to target format [batch_id, class_id, x, y, z, w, h, d conf] for plotting.
 
     Results are flattened to 2d for easier visualization.
     """

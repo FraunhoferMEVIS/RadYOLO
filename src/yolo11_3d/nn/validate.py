@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -17,7 +16,7 @@ from yolo11_3d.ultralytics.utils.metrics import (
     DetMetrics,
     box_iou,
 )
-from yolo11_3d.ultralytics.utils.plotting import output_to_target, output_to_target_3d, plot_images
+from yolo11_3d.ultralytics.utils.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
     from yolo11_3d.ultralytics.data.build import InfiniteDataLoader
@@ -32,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 
 
-class BaseValidator(ABC):
+class Validator():
     def __init__(
         self,
         dataloader: InfiniteDataLoader,
@@ -161,55 +160,25 @@ class BaseValidator(ABC):
             LOGGER.info("Results saved to %s", self.save_dir)
         return stats
 
-    def match_predictions(
-        self,
-        pred_classes: torch.Tensor,
-        true_classes: torch.Tensor,
-        iou: torch.Tensor,
-        use_scipy: Literal[False] = False,
-    ) -> torch.Tensor:
-        """Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
+    def init_metrics(self, model) -> None:
+        """Initialize evaluation metrics for YOLO."""
+        self.metrics.names = self.names
+        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
+        self.seen = 0
+        self.jdict = []
+        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
 
-        Args:
-            pred_classes (torch.Tensor): Predicted class indices of shape(N,).
-            true_classes (torch.Tensor): Target class indices of shape(M,).
-            iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
-            use_scipy (bool): Whether to use scipy for matching (more precise).
-
-        Returns:
-            (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
-        """
-        # Dx10 matrix, where D - detections, 10 - IoU thresholds
-        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
-        # LxD matrix where L - labels (rows), D - detections (columns)
-        correct_class = true_classes[:, None] == pred_classes
-        iou = iou * correct_class  # zero out the wrong classes
-        iou_np = iou.cpu().numpy()
-        for i, threshold in enumerate(self.iouv.cpu().tolist()):
-            if use_scipy:
-                raise NotImplementedError
-                # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
-                import scipy  # scope import to avoid importing for all commands
-
-                cost_matrix = iou_np * (iou_np >= threshold)
-                if cost_matrix.any():
-                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(
-                        cost_matrix, maximize=True
-                    )
-                    valid = cost_matrix[labels_idx, detections_idx] > 0
-                    if valid.any():
-                        correct[detections_idx[valid], i] = True
-            else:
-                matches = np.nonzero(iou_np >= threshold)  # IoU > threshold and classes match
-                matches = np.array(matches).T
-                if matches.shape[0]:
-                    if matches.shape[0] > 1:
-                        matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                        # matches = matches[matches[:, 2].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                    correct[matches[:, 1].astype(int), i] = True
-        return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+    def get_desc(self) -> str:
+        """Return a formatted string summarizing class metrics of YOLO model."""
+        return ("%22s" + "%11s" * 6) % (
+            "Class",
+            "Images",
+            "Instances",
+            "Box(P",
+            "R",
+            "mAP10",
+            "mAP10-95)",
+        )
 
     def preprocess(self, batch: Batch) -> Batch:
         """Preprocesses batch of images for YOLO training."""
@@ -233,175 +202,6 @@ class BaseValidator(ABC):
             ]
 
         return batch
-
-    @abstractmethod
-    def init_metrics(self, model) -> None:
-        """Initialize evaluation metrics for YOLO."""
-        ...
-
-    @abstractmethod
-    def get_desc(self) -> str:
-        """Return a formatted string summarizing class metrics of YOLO model."""
-        ...
-
-    @abstractmethod
-    def postprocess(
-        self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
-    ) -> list[torch.Tensor]:
-        """Apply Non-maximum suppression to prediction outputs."""
-        ...
-
-    @abstractmethod
-    def _prepare_batch(self, si: int, batch: Batch) -> dict[str, Any]:
-        """Prepares a batch of images and annotations for validation."""
-        ...
-
-    @abstractmethod
-    def _prepare_pred(self, pred: torch.Tensor, pbatch: dict[str, Any]) -> torch.Tensor:
-        """Prepares a batch of images and annotations for validation."""
-        ...
-
-    @abstractmethod
-    def update_metrics(self, preds: list[torch.Tensor], batch: Batch) -> None:
-        """Metrics."""
-        ...
-
-    def finalize_metrics(self, *args, **kwargs) -> None:
-        """Set final values for metrics speed and confusion matrix."""
-        # self.metrics.speed = self.speed
-        self.metrics.confusion_matrix = self.confusion_matrix
-
-    def get_stats(self) -> dict[str, float]:
-        """Returns metrics statistics and results dictionary."""
-        stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in self.stats.items()}  # to numpy
-        self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=self.nc)
-        self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=self.nc)
-        stats.pop("target_img", None)
-        if stats and stats["tp"].any():
-            self.metrics.process(**stats)
-        return self.metrics.results_dict
-
-    def print_results(self) -> None:
-        """Prints training/validation set metrics per class."""
-        LOGGER.warning(self.get_desc())
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
-        LOGGER.warning(pf, "all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results())
-        if self.nt_per_class.sum() == 0:
-            LOGGER.warning(
-                "WARNING ⚠️ no labels found in %s set, can not compute metrics without labels",
-                self.args.task,
-            )
-
-        # Print results per class
-        if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
-            for i, c in enumerate(self.metrics.ap_class_index):
-                LOGGER.warning(
-                    pf,
-                    self.names[c],
-                    self.nt_per_image[c],
-                    self.nt_per_class[c],
-                    *self.metrics.class_result(i),
-                )
-
-        if self.args.plots:
-            for normalize in True, False:
-                self.confusion_matrix.plot(
-                    save_dir=self.save_dir,
-                    names=self.names.values(),
-                    normalize=normalize,
-                )
-
-    @abstractmethod
-    def _process_batch(
-        self, detections: torch.Tensor, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor
-    ) -> torch.Tensor:
-        """Return correct prediction matrix.
-
-        Args:
-            detections (torch.Tensor): Tensor of shape (N, 6) representing detections where each detection is
-                (x1, y1, x2, y2, conf, class).
-            gt_bboxes (torch.Tensor): Tensor of shape (M, 4) representing ground-truth bounding box coordinates. Each
-                bounding box is of the format: (x1, y1, x2, y2).
-            gt_cls (torch.Tensor): Tensor of shape (M,) representing target class indices.
-
-        Returns:
-            (torch.Tensor): Correct prediction matrix of shape (N, 10) for 10 IoU levels.
-
-        Note:
-            The function does not return any value directly usable for metrics calculation. Instead, it provides an
-            intermediate representation used for evaluating predictions against ground truth.
-        """
-        ...
-
-    # def build_dataset(self, img_path, mode="val", batch=None):
-    #     """
-    #     Build YOLO Dataset.
-
-    #     Args:
-    #         img_path (str): Path to the folder containing images.
-    #         mode (str): `train` mode or `val` mode, users are able to customize different augmentations for each mode.
-    #         batch (int, optional): Size of batches, this is for `rect`. Defaults to None.
-    #     """
-    #     return build_yolo_dataset(
-    #         self.args, img_path, batch, self.data, mode=mode, stride=self.stride
-    #     )
-
-    # def get_dataloader(self, dataset_path, batch_size):
-    #     """Construct and return dataloader."""
-    #     dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
-    #     return build_dataloader(
-    #         dataset, batch_size, self.args.workers, shuffle=False, rank=-1
-    #     )  # return dataloader
-
-    @abstractmethod
-    def plot_val_samples(self, batch: Batch, ni: int) -> None:
-        """Plot validation image samples."""
-
-    @abstractmethod
-    def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
-        """Plots predicted bounding boxes on input images and saves the result."""
-
-
-class Validator3D(BaseValidator):
-    def __init__(
-        self,
-        dataloader: InfiniteDataLoader,
-        save_dir: Path,
-        args: DefaultConfig,
-        names: dict[int, str],
-    ) -> None:
-        super().__init__(dataloader, save_dir, args, names)
-        if self.args.conf is None:
-            msg = "self.args.conf should have been specified in BaseValidator."
-            raise ValueError(msg)
-        self.metrics = DetMetrics(
-            save_dir=self.save_dir,
-            names=self.names,
-            plot=self.args.plots,
-        )
-        self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
-        self.niou: int = self.iouv.numel()
-        self.confusion_matrix = ConfusionMatrix(self.nc, self.args.conf)
-    
-    def init_metrics(self, model) -> None:
-        """Initialize evaluation metrics for YOLO."""
-        self.metrics.names = self.names
-        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
-        self.seen = 0
-        self.jdict = []
-        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
-
-    def get_desc(self) -> str:
-        """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % (
-            "Class",
-            "Images",
-            "Instances",
-            "Box(P",
-            "R",
-            "mAP10",
-            "mAP10-95)",
-        )
 
     def postprocess(
         self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
@@ -526,6 +326,101 @@ class Validator3D(BaseValidator):
         iou = box_iou(gt_bboxes, detections[:, :6])
         return self.match_predictions(detections[:, 7], gt_cls, iou)
 
+    def match_predictions(
+        self,
+        pred_classes: torch.Tensor,
+        true_classes: torch.Tensor,
+        iou: torch.Tensor,
+        use_scipy: Literal[False] = False,
+    ) -> torch.Tensor:
+        """Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
+
+        Args:
+            pred_classes (torch.Tensor): Predicted class indices of shape(N,).
+            true_classes (torch.Tensor): Target class indices of shape(M,).
+            iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
+            use_scipy (bool): Whether to use scipy for matching (more precise).
+
+        Returns:
+            (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
+        """
+        # Dx10 matrix, where D - detections, 10 - IoU thresholds
+        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        # LxD matrix where L - labels (rows), D - detections (columns)
+        correct_class = true_classes[:, None] == pred_classes
+        iou = iou * correct_class  # zero out the wrong classes
+        iou_np = iou.cpu().numpy()
+        for i, threshold in enumerate(self.iouv.cpu().tolist()):
+            if use_scipy:
+                raise NotImplementedError
+                # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
+                import scipy  # scope import to avoid importing for all commands
+
+                cost_matrix = iou_np * (iou_np >= threshold)
+                if cost_matrix.any():
+                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(
+                        cost_matrix, maximize=True
+                    )
+                    valid = cost_matrix[labels_idx, detections_idx] > 0
+                    if valid.any():
+                        correct[detections_idx[valid], i] = True
+            else:
+                matches = np.nonzero(iou_np >= threshold)  # IoU > threshold and classes match
+                matches = np.array(matches).T
+                if matches.shape[0]:
+                    if matches.shape[0] > 1:
+                        matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
+                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                        # matches = matches[matches[:, 2].argsort()[::-1]]
+                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                    correct[matches[:, 1].astype(int), i] = True
+        return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+
+    def get_stats(self) -> dict[str, float]:
+        """Returns metrics statistics and results dictionary."""
+        stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in self.stats.items()}  # to numpy
+        self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=self.nc)
+        self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=self.nc)
+        stats.pop("target_img", None)
+        if stats and stats["tp"].any():
+            self.metrics.process(**stats)
+        return self.metrics.results_dict
+
+    def finalize_metrics(self, *args, **kwargs) -> None:
+        """Set final values for metrics speed and confusion matrix."""
+        # self.metrics.speed = self.speed
+        self.metrics.confusion_matrix = self.confusion_matrix
+    
+    def print_results(self) -> None:
+        """Prints training/validation set metrics per class."""
+        LOGGER.warning(self.get_desc())
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
+        LOGGER.warning(pf, "all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results())
+        if self.nt_per_class.sum() == 0:
+            LOGGER.warning(
+                "WARNING ⚠️ no labels found in %s set, can not compute metrics without labels",
+                self.args.task,
+            )
+
+        # Print results per class
+        if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
+            for i, c in enumerate(self.metrics.ap_class_index):
+                LOGGER.warning(
+                    pf,
+                    self.names[c],
+                    self.nt_per_image[c],
+                    self.nt_per_class[c],
+                    *self.metrics.class_result(i),
+                )
+
+        if self.args.plots:
+            for normalize in True, False:
+                self.confusion_matrix.plot(
+                    save_dir=self.save_dir,
+                    names=self.names.values(),
+                    normalize=normalize,
+                )
+
     def plot_val_samples(self, batch: Batch, ni: int) -> None:
         """Plot validation image samples."""
         plot_images(
@@ -550,18 +445,38 @@ class Validator3D(BaseValidator):
     def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
         plot_images(
             project_nifti_images(batch["img"], -3),
-            *output_to_target_3d(preds, max_det=self.args.max_det, axis=2),
+            *output_to_target(preds, max_det=self.args.max_det, axis=2),
             paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xy_pred.jpg"),
             names=self.names,
         )  # pred
         plot_images(
             project_nifti_images(batch["img"], -2),
-            *output_to_target_3d(preds, max_det=self.args.max_det, axis=1),
+            *output_to_target(preds, max_det=self.args.max_det, axis=1),
             paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xz_pred.jpg"),
             names=self.names,
         )  # pred
+
+    # def build_dataset(self, img_path, mode="val", batch=None):
+    #     """
+    #     Build YOLO Dataset.
+
+    #     Args:
+    #         img_path (str): Path to the folder containing images.
+    #         mode (str): `train` mode or `val` mode, users are able to customize different augmentations for each mode.
+    #         batch (int, optional): Size of batches, this is for `rect`. Defaults to None.
+    #     """
+    #     return build_yolo_dataset(
+    #         self.args, img_path, batch, self.data, mode=mode, stride=self.stride
+    #     )
+
+    # def get_dataloader(self, dataset_path, batch_size):
+    #     """Construct and return dataloader."""
+    #     dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
+    #     return build_dataloader(
+    #         dataset, batch_size, self.args.workers, shuffle=False, rank=-1
+    #     )  # return dataloader
 
 
 def project_nifti_images(

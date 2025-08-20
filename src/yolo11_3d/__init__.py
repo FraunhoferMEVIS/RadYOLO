@@ -15,7 +15,7 @@ from tqdm_loggable.tqdm_logging import tqdm_logging
 from yolo11_3d.nn import DATASETS
 from yolo11_3d.nn.config import DatasetConfig, model_checkpoint_from_torch
 from yolo11_3d.nn.train import Trainer
-from yolo11_3d.nn.validate import Validator3D
+from yolo11_3d.nn.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, export_model, select_device
 from yolo11_3d.ultralytics.data.build import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
@@ -203,7 +203,7 @@ def validate(model_path: Path, dataset_type: str, dataset_path: Path) -> int:
             device=device,
         )
 
-        validator = Validator3D(
+        validator = Validator(
             dataloader=dataloader,
             save_dir=model_path.parents[1] / "validation",
             args=train_args,
