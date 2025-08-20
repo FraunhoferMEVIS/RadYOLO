@@ -565,14 +565,9 @@ class Trainer:
                     },
                     train_time_start=train_time_start,
                 )
-                # with self.val_loss_csv_path.open("a", encoding="utf-8") as f:
-                #     f.write(",".join(map(str, metrics)) + "\n")
             else:
                 metrics = {}
                 fitness = 0.0
-            # if best_fitness is None:
-            #     best_fitness = loss.item()
-            # best_fitness = min(loss.item(), best_fitness)
 
             stop |= stopper(self.epoch + 1, fitness) or final_epoch
             if args.time:
@@ -712,23 +707,6 @@ class Trainer:
             do_batchgenerators_intensity_augmentation=self.args.do_batchgenerators_intensity_augmentation,
             do_intensity_augmentations_per_channel=self.args.do_intensity_augmentations_per_channel,
         )
-        # return DummyDataset(256, self.data.nc, (3, 640, 640))
-        # return YOLODataset(
-        #     img_path=img_path,
-        #     imgsz=self.args.imgsz,
-        #     batch_size=batch,
-        #     augment=mode == "train",  # sugmentation
-        #     hyp=self.args,  # TODO: probably add a get_hyps_from_cfg function
-        #     rect=self.args.rect or mode == "val",  # rectangular batches
-        #     cache=self.args.cache or None,
-        #     single_cls=self.args.single_cls or False,
-        #     stride=grid_size,
-        #     pad=0.0 if mode == "train" else 0.5,
-        #     task=self.args.task,
-        #     classes=self.args.classes,
-        #     data=self.data,
-        #     fraction=self.args.fraction if mode == "train" else 1.0,
-        # )
 
     def save_model(
         self,
@@ -753,7 +731,7 @@ class Trainer:
             updates=ema.updates,
             optimizer=convert_optimizer_state_dict_to_fp16(deepcopy(optimizer.state_dict())),
             train_args=train_args,
-            train_metrics={**metrics, "fitness": fitness, "metrics/mAP-ewa(B)": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0},
+            train_metrics={**metrics, "metrics/mAP-ewa(B)": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0},
             train_results={},
             date=datetime.datetime.now(tz=datetime.UTC),
         )
@@ -789,9 +767,8 @@ class Trainer:
         amp: bool,
     ) -> tuple[dict[str, float], float, float]:
         metrics = validator(self, ema=ema, amp=amp)
-        # Update stateful EWA using per-epoch mAP 0.1–0.95 
-        map_key = "metrics/mAP10-95(B)"
-        map_val = metrics.get(map_key)
+        # Update stateful EWA using per-epoch mAP 0.1–0.95
+        map_val = metrics.get("metrics/mAP10-95(B)")
         if map_val is not None:
             if self.ewa_mAP1095 is None:
                 self.ewa_mAP1095 = float(map_val)
@@ -802,7 +779,7 @@ class Trainer:
         fitness: float = (
             float(self.ewa_mAP1095)
             if self.ewa_mAP1095 is not None
-            else metrics.pop("fitness", -loss.detach().cpu().item())
+            else 0.0
         )
         if not best_fitness or best_fitness < fitness:
             best_fitness = fitness
@@ -834,7 +811,6 @@ class Trainer:
     ) -> tuple[float | None, int]:
         if ckpt is None:  # or not self.resume:
             return best_fitness, 0
-        # best_fitness = 0.0
         start_epoch = ckpt["epoch"] + 1
         if ckpt["optimizer"] is not None:
             optimizer.load_state_dict(ckpt["optimizer"])

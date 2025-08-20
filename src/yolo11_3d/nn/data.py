@@ -8,7 +8,6 @@ from collections.abc import Sized
 from pathlib import Path
 from typing import Any, ClassVar, Literal, TypedDict, cast
 
-import cv2
 import nibabel as nib
 import nibabel.filebasedimages
 import numpy as np
@@ -19,6 +18,7 @@ from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.nn.augmentations import (
     batch_generators_intensity_augmentations,
+    enlarge_bounding_boxes,
     random_mirroring,
     random_zoom,
     tensor_cutout,
@@ -309,6 +309,8 @@ class NIfTIDataset(BaseDataset):
         if nl:
             labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
 
+        img, labels = enlarge_bounding_boxes(img, labels, self.imgsz, self.min_stride)
+        
         if nl:
             labels[:, 1:] = labels[:, 1:] / scale_tensor
 

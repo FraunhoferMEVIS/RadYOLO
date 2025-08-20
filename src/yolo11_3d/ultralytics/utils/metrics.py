@@ -560,19 +560,6 @@ class Metric:
         all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 18).
         ap_class_index (list): Index of class for each AP score. Shape: (nc,).
         nc (int): Number of classes.
-
-    Methods:
-        ap10(): AP at IoU threshold of 0.1 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
-        ap(): AP at IoU thresholds from 0.1 to 0.95 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
-        mp(): Mean precision of all classes. Returns: Float.
-        mr(): Mean recall of all classes. Returns: Float.
-        map10(): Mean AP at IoU threshold of 0.1 for all classes. Returns: Float.
-        map(): Mean AP at IoU thresholds from 0.1 to 0.95 for all classes. Returns: Float.
-        mean_results(): Mean of results, returns mp, mr, map10, map.
-        class_result(i): Class-aware result, returns p[i], r[i], ap10[i], ap[i].
-        maps(): mAP of each class. Returns: Array of mAP scores, shape: (nc,).
-        fitness(): Model fitness as a weighted combination of metrics. Returns: Float.
-        update(results): Update metric attributes with new evaluation results.
     """
 
     def __init__(self) -> None:
@@ -656,11 +643,6 @@ class Metric:
             maps[c] = self.ap[i]
         return maps
 
-    def fitness(self) -> float:
-        """Model fitness as a weighted combination of metrics."""
-        w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.1, mAP@0.1:0.95]
-        return (np.array(self.mean_results()) * w).sum()
-
     def update(
         self,
         results: tuple[
@@ -737,18 +719,6 @@ class DetMetrics:
         names (dict of str): A dict of strings that represents the names of the classes.
         box (Metric): An instance of the Metric class for storing the results of the detection metrics.
         speed (dict): A dictionary for storing the execution time of different parts of the detection process.
-
-    Methods:
-        process(tp, conf, pred_cls, target_cls): Updates the metric results with the latest batch of predictions.
-        keys: Returns a list of keys for accessing the computed detection metrics.
-        mean_results: Returns a list of mean values for the computed detection metrics.
-        class_result(i): Returns a list of values for the computed detection metrics for a specific class.
-        maps: Returns a dictionary of mean average precision (mAP) values for different IoU thresholds.
-        fitness: Computes the fitness score based on the computed detection metrics.
-        ap_class_index: Returns a list of class indices sorted by their average precision (AP) values.
-        results_dict: Returns a dictionary that maps detection metric keys to their computed values.
-        curves: TODO
-        curves_results: TODO
     """
 
     def __init__(
@@ -817,11 +787,6 @@ class DetMetrics:
         return self.box.maps
 
     @property
-    def fitness(self):
-        """Returns the fitness of box object."""
-        return self.box.fitness()
-
-    @property
     def ap_class_index(self) -> npt.NDArray | list[int]:
         """Returns the average precision index per class."""
         return self.box.ap_class_index
@@ -829,7 +794,7 @@ class DetMetrics:
     @property
     def results_dict(self) -> dict[str, float]:
         """Returns dictionary of computed performance metrics and statistics."""
-        return dict(zip([*self.keys, "fitness"], [*self.mean_results(), self.fitness], strict=True))
+        return dict(zip(self.keys, self.mean_results(), strict=True))
 
     @property
     def curves(self) -> list[str]:
