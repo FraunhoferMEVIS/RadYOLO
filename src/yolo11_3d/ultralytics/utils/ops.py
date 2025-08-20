@@ -9,12 +9,12 @@ import numpy as np
 import numpy.typing as npt
 import torch
 
-from .metrics import bbox_iou_3d
+from .metrics import bbox_iou
 
 LOGGER = logging.getLogger(__name__)
 
 
-def scale_boxes_3d(
+def scale_boxes(
     img1_shape: tuple[int, ...],
     boxes: torch.Tensor,
     img0_shape: tuple[int, ...],
@@ -68,11 +68,11 @@ def scale_boxes_3d(
     boxes[..., :6] /= torch.as_tensor(gain, device=boxes.device).tile(
         1, 2
     )  # TODO(muellergroh): check indexing for 3D
-    return clip_boxes_3d(boxes, img0_shape)  # TODO(muellergroh): check indexing for 3D
+    return clip_boxes(boxes, img0_shape)  # TODO(muellergroh): check indexing for 3D
 
 
 
-def nms_3d_(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+def nms_(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
     order = torch.argsort(-scores)
     indices = torch.arange(boxes.shape[0])
     keep = torch.ones_like(indices, dtype=torch.bool)
@@ -80,7 +80,7 @@ def nms_3d_(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> 
     for i in indices:
         if keep[i]:
             box = boxes[order[i]]
-            iou = bbox_iou_3d(
+            iou = bbox_iou(
                 box.unsqueeze(0),
                 (boxes[order[i] + 1 :]) * keep[i + 1 :].unsqueeze(-1),
                 xyzwhd=False,
@@ -91,7 +91,7 @@ def nms_3d_(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> 
     return order[keep]
 
 
-def nms_3d(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
     order = torch.argsort(-scores)
     keep = []
 
@@ -112,7 +112,7 @@ def nms_3d(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> t
         if iter_count > num_indices:
             break
 
-        iou = bbox_iou_3d(boxes[idx], boxes[order], xyzwhd=False).squeeze(-1)
+        iou = bbox_iou(boxes[idx], boxes[order], xyzwhd=False).squeeze(-1)
 
         mask = iou <= iou_threshold
         order = order[mask]
@@ -120,7 +120,7 @@ def nms_3d(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> t
     return torch.stack(keep, 0)
 
 
-def non_max_suppression_3d(
+def non_max_suppression(
     prediction: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
     conf_thres: float = 0.25,
     iou_thres: float = 0.45,
@@ -251,7 +251,7 @@ def non_max_suppression_3d(
         scores = x[:, 6]  # scores
         boxes = x[:, :6] + c  # boxes (offset by class)
         # i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
-        i = nms_3d(boxes, scores, iou_thres)
+        i = nms(boxes, scores, iou_thres)
         i = i[:max_det]  # limit detections
 
         output[xi] = x[i]
@@ -263,29 +263,6 @@ def non_max_suppression_3d(
 
 
 def clip_boxes(boxes: torch.Tensor, shape: tuple[int, ...]) -> torch.Tensor:
-    """Takes a list of bounding boxes and a shape (height, width) and clips the bounding boxes.
-
-    Args:
-        boxes (torch.Tensor): The bounding boxes to clip.
-        shape (tuple): The shape of the image.
-
-    Returns:
-        (torch.Tensor | numpy.ndarray): The clipped boxes.
-    """
-    if isinstance(
-        boxes, torch.Tensor
-    ):  # faster individually (WARNING: inplace .clamp_() Apple MPS bug)
-        boxes[..., 0] = boxes[..., 0].clamp(0, shape[1])  # x1
-        boxes[..., 1] = boxes[..., 1].clamp(0, shape[0])  # y1
-        boxes[..., 2] = boxes[..., 2].clamp(0, shape[1])  # x2
-        boxes[..., 3] = boxes[..., 3].clamp(0, shape[0])  # y2
-    else:  # np.array (faster grouped)
-        boxes[..., [0, 2]] = boxes[..., [0, 2]].clip(0, shape[1])  # x1, x2
-        boxes[..., [1, 3]] = boxes[..., [1, 3]].clip(0, shape[0])  # y1, y2
-    return boxes
-
-
-def clip_boxes_3d(boxes: torch.Tensor, shape: tuple[int, ...]) -> torch.Tensor:
     """Takes a list of bounding boxes and a shape (height, width) and clips the bounding boxes.
 
     Args:

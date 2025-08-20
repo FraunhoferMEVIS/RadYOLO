@@ -207,7 +207,7 @@ class Validator():
         self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
     ) -> list[torch.Tensor]:
         """Apply Non-maximum suppression to prediction outputs."""
-        return ops.non_max_suppression_3d(
+        return ops.non_max_suppression(
             preds,
             self.args.conf,
             self.args.iou,
@@ -231,7 +231,7 @@ class Validator():
                 * torch.tensor(imgsz, device=self.device)[[2, 1, 0, 2, 1, 0]]
             )  # target boxes
             # TODO(muellergroh): check for 3D
-            ops.scale_boxes_3d(imgsz, bboxes, ori_shape, ratio_pad=ratio_pad)  # native-space labels
+            ops.scale_boxes(imgsz, bboxes, ori_shape, ratio_pad=ratio_pad)  # native-space labels
         return {
             "cls": classes,
             "bboxes": bboxes,
@@ -244,7 +244,7 @@ class Validator():
         """Prepares a batch of images and annotations for validation."""
         predn = pred.clone()
         # TODO(muellergroh): check for 3D
-        ops.scale_boxes_3d(
+        ops.scale_boxes(
             pbatch["imgsz"], predn[:, :6], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
         )  # native-space pred
         return predn

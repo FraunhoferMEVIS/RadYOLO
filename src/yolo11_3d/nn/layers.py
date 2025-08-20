@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, assert_never, cast, overload
 import torch
 from torch import nn
 
-from yolo11_3d.ultralytics.utils.tal import dist2bbox, make_anchors_3d
+from yolo11_3d.ultralytics.utils.tal import dist2bbox, make_anchors
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,7 +59,7 @@ def autopad[
 
 
 
-class Conv_3D(nn.Module):
+class Conv(nn.Module):
     default_activation = nn.SiLU(inplace=True)
 
     def __init__(  # noqa: PLR0913
@@ -101,7 +101,7 @@ class Conv_3D(nn.Module):
 
 
 
-class DWConv_3D(Conv_3D):
+class DWConv(Conv):
     def __init__(  # noqa: PLR0913
         self,
         in_channels: int,
@@ -123,7 +123,7 @@ class DWConv_3D(Conv_3D):
 
 
 
-class DFL_3D(nn.Module):
+class DFL(nn.Module):
     """Integral module of Distribution Focal Loss (DFL).
 
     Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
@@ -142,7 +142,7 @@ class DFL_3D(nn.Module):
 
 
 
-class Bottleneck_3D(nn.Module):
+class Bottleneck(nn.Module):
     def __init__(  # noqa: PLR0913
         self,
         in_channels: int,
@@ -154,15 +154,15 @@ class Bottleneck_3D(nn.Module):
     ) -> None:
         super().__init__()
         c_ = int(out_channels * expansion)
-        self.conv1 = Conv_3D(in_channels, c_, kernel_sizes[0], 1)
-        self.conv2 = Conv_3D(c_, out_channels, kernel_sizes[1], 1, n_groups=n_groups)
+        self.conv1 = Conv(in_channels, c_, kernel_sizes[0], 1)
+        self.conv2 = Conv(c_, out_channels, kernel_sizes[1], 1, n_groups=n_groups)
         self.add = shortcut and in_channels == out_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.conv2(self.conv1(x)) if self.add else self.conv2(self.conv1(x))
 
 
-class C2f_3D(nn.Module):
+class C2f(nn.Module):
     def __init__(  # noqa: PLR0913
         self,
         in_channels: int,
@@ -174,10 +174,10 @@ class C2f_3D(nn.Module):
     ) -> None:
         super().__init__()
         self.hidden_channels = int(out_channels * expansion)
-        self.in_conv = Conv_3D(in_channels, 2 * self.hidden_channels, 1, 1)
-        self.out_conv = Conv_3D((2 + n_bottlenecks) * self.hidden_channels, out_channels, 1)
+        self.in_conv = Conv(in_channels, 2 * self.hidden_channels, 1, 1)
+        self.out_conv = Conv((2 + n_bottlenecks) * self.hidden_channels, out_channels, 1)
         self.m = nn.ModuleList(
-            Bottleneck_3D(
+            Bottleneck(
                 self.hidden_channels,
                 self.hidden_channels,
                 shortcut,
@@ -202,7 +202,7 @@ class C2f_3D(nn.Module):
         return self.out_conv(torch.cat(hidden_layers, 1))
 
 
-class C3k2_3D(C2f_3D):
+class C3k2(C2f):
     def __init__(  # noqa: PLR0913
         self,
         in_channels: int,
@@ -215,14 +215,14 @@ class C3k2_3D(C2f_3D):
     ) -> None:
         super().__init__(in_channels, out_channels, n_bottlenecks, shortcut, n_groups, expansion)
         self.m = nn.ModuleList(
-            C3k_3D(self.hidden_channels, self.hidden_channels, 2, shortcut, n_groups)
+            C3k(self.hidden_channels, self.hidden_channels, 2, shortcut, n_groups)
             if c3k
-            else Bottleneck_3D(self.hidden_channels, self.hidden_channels, shortcut, n_groups)
+            else Bottleneck(self.hidden_channels, self.hidden_channels, shortcut, n_groups)
             for _ in range(n_bottlenecks)
         )
 
 
-class C3_3D(nn.Module):
+class C3(nn.Module):
     def __init__(  # noqa: PLR0913
         self,
         in_channels: int,
@@ -234,12 +234,12 @@ class C3_3D(nn.Module):
     ) -> None:
         super().__init__()
         hidden_channels = int(out_channels * expansion)
-        self.conv1 = Conv_3D(in_channels, hidden_channels, 1, 1)
-        self.conv2 = Conv_3D(in_channels, hidden_channels, 1, 1)
-        self.out_conv = Conv_3D(2 * hidden_channels, out_channels, 1)
+        self.conv1 = Conv(in_channels, hidden_channels, 1, 1)
+        self.conv2 = Conv(in_channels, hidden_channels, 1, 1)
+        self.out_conv = Conv(2 * hidden_channels, out_channels, 1)
         self.hidden_layer = nn.Sequential(
             *(
-                Bottleneck_3D(
+                Bottleneck(
                     hidden_channels,
                     hidden_channels,
                     shortcut,
@@ -255,7 +255,7 @@ class C3_3D(nn.Module):
         return self.out_conv(torch.cat((self.hidden_layer(self.conv1(x)), self.conv2(x)), 1))
 
 
-class C3k_3D(C3_3D):
+class C3k(C3):
     def __init__(  # noqa: PLR0913
         self,
         in_channels: int,
@@ -270,7 +270,7 @@ class C3k_3D(C3_3D):
         hidden_channels = int(out_channels * 3)
         self.m = nn.Sequential(
             *(
-                Bottleneck_3D(
+                Bottleneck(
                     hidden_channels,
                     hidden_channels,
                     shortcut,
@@ -283,15 +283,15 @@ class C3k_3D(C3_3D):
         )
 
 
-class SPPF_3D(nn.Module):
+class SPPF(nn.Module):
     """Spatial Pyramid Pooling Fast."""
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 5) -> None:
         super().__init__()
         hidden_channels = in_channels // 2
         self.n_concat_layers = 4
-        self.input_conv = Conv_3D(in_channels, hidden_channels, 1, 1)
-        self.output_conv = Conv_3D(hidden_channels * self.n_concat_layers, out_channels, 1, 1)
+        self.input_conv = Conv(in_channels, hidden_channels, 1, 1)
+        self.output_conv = Conv(hidden_channels * self.n_concat_layers, out_channels, 1, 1)
         self.hidden_layer = nn.MaxPool3d(
             kernel_size=kernel_size, stride=1, padding=kernel_size // 2
         )
@@ -303,7 +303,7 @@ class SPPF_3D(nn.Module):
         return self.output_conv(torch.cat(concat_layers, 1))
 
 
-class Attention_3D(nn.Module):
+class Attention(nn.Module):
     def __init__(self, in_dim: int, num_heads: int = 8, attention_ratio: float = 0.5) -> None:
         super().__init__()
         self.num_heads = num_heads
@@ -312,9 +312,9 @@ class Attention_3D(nn.Module):
         self.scale: float = self.key_dim**-0.5
         nh_kd = self.key_dim * num_heads
         h = in_dim + nh_kd * 2
-        self.query_key_value = Conv_3D(in_dim, h, 1, activation=False)
-        self.projection = Conv_3D(in_dim, in_dim, 1, activation=False)
-        self.positional_encoding = Conv_3D(in_dim, in_dim, 3, 1, n_groups=in_dim, activation=False)
+        self.query_key_value = Conv(in_dim, h, 1, activation=False)
+        self.projection = Conv(in_dim, in_dim, 1, activation=False)
+        self.positional_encoding = Conv(in_dim, in_dim, 3, 1, n_groups=in_dim, activation=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, channel, depth, height, width = x.shape
@@ -339,7 +339,7 @@ class Attention_3D(nn.Module):
         return self.projection(x)
 
 
-class PSABlock_3D(nn.Module):
+class PSABlock(nn.Module):
     """PSABlock implements a Position-Sensitive Attention block.
 
     Attributes:
@@ -366,11 +366,11 @@ class PSABlock_3D(nn.Module):
         """
         super().__init__()
 
-        self.attention = Attention_3D(
+        self.attention = Attention(
             channels, attention_ratio=attention_ratio, num_heads=num_heads
         )
         self.feed_forward_network = nn.Sequential(
-            Conv_3D(channels, channels * 2, 1), Conv_3D(channels * 2, channels, 1, activation=False)
+            Conv(channels, channels * 2, 1), Conv(channels * 2, channels, 1, activation=False)
         )
         self.add = shortcut
 
@@ -381,7 +381,7 @@ class PSABlock_3D(nn.Module):
 
 
 
-class C2PSA_3D(nn.Module):
+class C2PSA(nn.Module):
     """Cross Stage Partial Self-Attention.
 
     This module implements a convolutional block with a configurable number of Partial Self-Attention (PSA) blocks.
@@ -408,12 +408,12 @@ class C2PSA_3D(nn.Module):
         if in_channels != out_channels:
             raise ValueError  # TODO: add error message
         self.hidden_channels = int(in_channels * expansion)
-        self.in_conv = Conv_3D(in_channels, 2 * self.hidden_channels, 1, 1)
-        self.out_conv = Conv_3D(2 * self.hidden_channels, in_channels, 1)
+        self.in_conv = Conv(in_channels, 2 * self.hidden_channels, 1, 1)
+        self.out_conv = Conv(2 * self.hidden_channels, in_channels, 1)
 
         self.m = nn.Sequential(
             *(
-                PSABlock_3D(
+                PSABlock(
                     self.hidden_channels, attention_ratio=0.5, num_heads=self.hidden_channels // 64
                 )
                 for _ in range(n_hidden_layers)
@@ -435,7 +435,7 @@ class Concat(nn.Module):
         return torch.cat(x, self.d)
 
 
-class Detect_3D(nn.Module):
+class Detect(nn.Module):
     export = False
     max_det = 300
     shape = None
@@ -455,21 +455,21 @@ class Detect_3D(nn.Module):
         )  # channels
         self.cv2 = nn.ModuleList(
             nn.Sequential(
-                Conv_3D(x, c2, 3),
-                Conv_3D(c2, c2, 3),
+                Conv(x, c2, 3),
+                Conv(c2, c2, 3),
                 nn.Conv3d(c2, 6 * self.reg_max, 1),
             )
             for x in ch
         )
         self.cv3 = nn.ModuleList(
             nn.Sequential(
-                nn.Sequential(DWConv_3D(x, x, 3), Conv_3D(x, c3, 1)),
-                nn.Sequential(DWConv_3D(c3, c3, 3), Conv_3D(c3, c3, 1)),
+                nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
                 nn.Conv3d(c3, self.nc, 1),
             )
             for x in ch
         )
-        self.dfl = DFL_3D(self.reg_max) if self.reg_max > 1 else nn.Identity()
+        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     def forward(
         self, x: list[torch.Tensor]
@@ -485,7 +485,7 @@ class Detect_3D(nn.Module):
         shape = x[0].shape
         if self.shape != shape:
             self.anchors, self.strides = (
-                x.transpose(0, 1) for x in make_anchors_3d(x, self.stride, 0.5)
+                x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5)
             )
             self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)

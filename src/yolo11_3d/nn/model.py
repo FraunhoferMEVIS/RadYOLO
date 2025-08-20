@@ -7,15 +7,15 @@ import torch
 from torch import nn
 
 from yolo11_3d.nn.layers import (
-    C2PSA_3D,
-    SPPF_3D,
-    C3k2_3D,
+    C2PSA,
+    SPPF,
+    C3k2,
     Concat,
-    Conv_3D,
-    Detect_3D,
+    Conv,
+    Detect,
 )
 from yolo11_3d.nn.util import intersect_dicts, make_divisible
-from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss_3D
+from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss
 
 if TYPE_CHECKING:
     from yolo11_3d.nn.config import ModelCheckpoint
@@ -57,7 +57,7 @@ class BaseModel(nn.Module, ABC):
     ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
 
 
-class Hardcoded3DModel(BaseModel):
+class HardcodedModel(BaseModel):
     def __init__(
         self,
         input_channels: int,
@@ -96,62 +96,62 @@ class Hardcoded3DModel(BaseModel):
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(64)
-        self.l0 = Conv_3D(in_channels, out_channels, 3, 2)
+        self.l0 = Conv(in_channels, out_channels, 3, 2)
         output_channels = [out_channels]
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(128)
-        self.l1 = Conv_3D(in_channels, out_channels, 3, 2)
+        self.l1 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(256)
-        self.l2 = C3k2_3D(in_channels, out_channels, num_repeats, c3k2_use_c3k, 0.25)
+        self.l2 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k, 0.25)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(256)
-        self.l3 = Conv_3D(in_channels, out_channels, 3, 2)
+        self.l3 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(512)
-        self.l4 = C3k2_3D(in_channels, out_channels, num_repeats, c3k2_use_c3k, 0.25)
+        self.l4 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k, 0.25)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(512)
-        self.l5 = Conv_3D(in_channels, out_channels, 3, 2)
+        self.l5 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(512)
-        self.l6 = C3k2_3D(in_channels, out_channels, num_repeats, True)
+        self.l6 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(1024)
-        self.l7 = Conv_3D(in_channels, out_channels, 3, 2)
-        output_channels.append(out_channels)
-
-        in_channels = output_channels[-1]
-        num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(1024)
-        self.l8 = C3k2_3D(in_channels, out_channels, num_repeats, True)
-        output_channels.append(out_channels)
-
-        in_channels = output_channels[-1]
-        out_channels = make_divisible_(1024)
-        self.l9 = SPPF_3D(in_channels, out_channels, 5)
+        self.l7 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(1024)
-        self.l10 = C2PSA_3D(in_channels, out_channels, num_repeats)
+        self.l8 = C3k2(in_channels, out_channels, num_repeats, True)
+        output_channels.append(out_channels)
+
+        in_channels = output_channels[-1]
+        out_channels = make_divisible_(1024)
+        self.l9 = SPPF(in_channels, out_channels, 5)
+        output_channels.append(out_channels)
+
+        in_channels = output_channels[-1]
+        num_repeats = num_repeats_(2)
+        out_channels = make_divisible_(1024)
+        self.l10 = C2PSA(in_channels, out_channels, num_repeats)
         output_channels.append(out_channels)
 
         # HEAD
@@ -167,7 +167,7 @@ class Hardcoded3DModel(BaseModel):
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(512)
-        self.l13 = C3k2_3D(in_channels, out_channels, num_repeats, c3k2_use_c3k)
+        self.l13 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
         out_channels = output_channels[-1]
@@ -181,12 +181,12 @@ class Hardcoded3DModel(BaseModel):
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(256)
-        self.l16 = C3k2_3D(in_channels, out_channels, num_repeats, c3k2_use_c3k)
+        self.l16 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(256)
-        self.l17 = Conv_3D(in_channels, out_channels, 3, 2)
+        self.l17 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         out_channels = sum(output_channels[x] for x in [-1, 13])
@@ -196,12 +196,12 @@ class Hardcoded3DModel(BaseModel):
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(512)
-        self.l19 = C3k2_3D(in_channels, out_channels, num_repeats, c3k2_use_c3k)
+        self.l19 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         out_channels = make_divisible_(512)
-        self.l20 = Conv_3D(in_channels, out_channels, 3, 2)
+        self.l20 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         out_channels = sum(output_channels[x] for x in [-1, 10])
@@ -211,10 +211,10 @@ class Hardcoded3DModel(BaseModel):
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
         out_channels = make_divisible_(1024)
-        self.l22 = C3k2_3D(in_channels, out_channels, num_repeats, True)
+        self.l22 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
-        self.l23 = Detect_3D(num_classes, [output_channels[x] for x in [16, 19, 22]])
+        self.l23 = Detect(num_classes, [output_channels[x] for x in [16, 19, 22]])
         s = 256
         self.l23.stride = torch.tensor(
             [s / x.shape[-2] for x in self.forward(torch.zeros(1, input_channels, s, s, s))]
@@ -222,7 +222,7 @@ class Hardcoded3DModel(BaseModel):
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-        self.criterion = v8DetectionLoss_3D(self, box, cls, dfl, self.l23, device, tal_beta=1.0, tal_fallback=True)
+        self.criterion = v8DetectionLoss(self, box, cls, dfl, self.l23, device, tal_beta=1.0, tal_fallback=True)
 
     @overload
     def forward(

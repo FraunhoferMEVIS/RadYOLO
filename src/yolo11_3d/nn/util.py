@@ -17,8 +17,8 @@ import torch.nn.functional as F  # noqa: N812
 from torch import nn
 
 from yolo11_3d.nn.layers import (
-    C2f_3D,
-    Detect_3D,
+    C2f,
+    Detect,
 )
 
 PYTHON_VERSION = platform.python_version()
@@ -101,9 +101,9 @@ def export_model(
         model(inputs)
 
     for m in model.modules():
-        if isinstance(m, Detect_3D):
+        if isinstance(m, Detect):
             m.export = True
-        if isinstance(m, C2f_3D):
+        if isinstance(m, C2f):
             m.forward = m.forward_split
 
     onnx_path = Path(dest).with_suffix(".onnx")

@@ -8,19 +8,19 @@ import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
-from yolo11_3d.ultralytics.utils.metrics import bbox_iou_3d
+from yolo11_3d.ultralytics.utils.metrics import bbox_iou
 from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
 from yolo11_3d.ultralytics.utils.tal import (
     TaskAlignedAssigner,
     bbox2dist,
     dist2bbox,
-    make_anchors_3d,
+    make_anchors,
 )
 
 if TYPE_CHECKING:
     from yolo11_3d.nn.data import Batch
-    from yolo11_3d.nn.layers import Detect_3D
-    from yolo11_3d.nn.model import Hardcoded3DModel
+    from yolo11_3d.nn.layers import Detect
+    from yolo11_3d.nn.model import HardcodedModel
 
 
 class DFLoss(nn.Module):
@@ -48,7 +48,7 @@ class DFLoss(nn.Module):
         ).mean(-1, keepdim=True)
 
 
-class BboxLoss_3D(nn.Module):
+class BboxLoss(nn.Module):
     """Criterion class for computing training losses during training."""
 
     def __init__(self, reg_max: int = 16) -> None:
@@ -68,7 +68,7 @@ class BboxLoss_3D(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """IoU loss."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
-        iou = bbox_iou_3d(pred_bboxes[fg_mask], target_bboxes[fg_mask], xyzwhd=False, CIoU=True)
+        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xyzwhd=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
@@ -87,16 +87,16 @@ class BboxLoss_3D(nn.Module):
         return loss_iou, loss_dfl
 
 
-class v8DetectionLoss_3D:  # noqa: N801
+class v8DetectionLoss:  # noqa: N801
     """Criterion class for computing training losses."""
 
     def __init__(
         self,
-        model: Hardcoded3DModel,
+        model: HardcodedModel,
         box: float,
         cls: float,
         dfl: float,
-        detect_layer: Detect_3D,
+        detect_layer: Detect,
         device: torch.device,
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
@@ -126,7 +126,7 @@ class v8DetectionLoss_3D:  # noqa: N801
             topk=tal_topk, num_classes=self.num_classes, alpha=tal_alpha, beta=tal_beta,
             use_fallback_if_alignment_zero=tal_fallback
         )
-        self.bbox_loss = BboxLoss_3D(m.reg_max).to(device)
+        self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(
@@ -176,7 +176,7 @@ class v8DetectionLoss_3D:  # noqa: N801
         imgsz = (
             torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
         )  # image size (d,h,w)
-        anchor_points, stride_tensor = make_anchors_3d(feats, self.stride, 0.5)
+        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
 
         # Targets
         targets = torch.cat(

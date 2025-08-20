@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .data import BaseDataset, NIfTIDataset
-from .model import BaseModel, Hardcoded3DModel
+from .model import BaseModel, HardcodedModel
 
 DATASETS: dict[str, tuple[type[BaseDataset], int]] = {
     "nifti": (NIfTIDataset, 3),
@@ -10,6 +10,6 @@ DATASETS: dict[str, tuple[type[BaseDataset], int]] = {
 }
 
 MODELS: dict[str, tuple[type[BaseModel], int]] = {
-    "3d": (Hardcoded3DModel, 3),
+    "3d": (HardcodedModel, 3),
 }
 
