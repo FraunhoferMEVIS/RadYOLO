@@ -17,138 +17,14 @@ import torch.nn.functional as F  # noqa: N812
 from torch import nn
 
 from yolo11_3d.nn.layers import (
-    C2PSA,
-    C3,
-    SPPF,
-    Bottleneck,
-    C2f,
     C2f_3D,
-    C3k2,
-    Concat,
-    Conv,
-    Detect,
     Detect_3D,
-    DWConv,
 )
 
 PYTHON_VERSION = platform.python_version()
 NUM_THREADS = min(8, max(1, (os.cpu_count() or 1) - 1))
 
 LOGGER = logging.getLogger(__name__)
-
-
-def parse_model(
-    d: dict, input_channels: int, verbose: bool = True
-) -> tuple[nn.Sequential, list[int]]:  # model_dict, input_channels(3)
-    """Parse a YOLO model.yaml dictionary into a PyTorch model."""
-    import ast
-
-    # Args
-    max_channels = float("inf")
-    nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
-    depth, width, kpt_shape = (
-        d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape")
-    )
-    if scales:
-        scale = d.get("scale")
-        if not scale:
-            scale = next(iter(scales.keys()))
-            LOGGER.warning(f"WARNING ⚠️ no model scale passed. Assuming scale='{scale}'.")
-        depth, width, max_channels = scales[scale]
-
-    if act:
-        Conv.default_activation = eval(
-            act
-        )  # redefine default activation, i.e. Conv.default_act = nn.SiLU()
-        if verbose:
-            LOGGER.info(f"{'activation:'} {act}")  # print
-
-    if verbose:
-        LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
-    channels: list[int] = [input_channels]
-    layers: list[nn.Module] = []
-    save: list[int] = []
-    c2: int = channels[-1]  # layers, savelist, ch out
-    for i, (from_layer_index, n, module_name, args) in enumerate(
-        d["backbone"] + d["head"]
-    ):  # from, number, module, args
-        from_layer_index: int | Sequence[int]
-        n: int
-        args: list
-        module_name = (
-            getattr(torch.nn, module_name[3:]) if "nn." in module_name else globals()[module_name]
-        )  # get module
-        for j, a in enumerate(args):
-            if isinstance(a, str):
-                with contextlib.suppress(ValueError):
-                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
-        n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
-        if module_name in {
-            Conv,
-            Bottleneck,
-            SPPF,
-            C2PSA,
-            DWConv,
-            C2f,
-            C3k2,
-            C3,
-            nn.ConvTranspose2d,
-        }:
-            if not isinstance(from_layer_index, int):
-                raise ValueError  # TODO add error message
-            c1, c2 = channels[from_layer_index], args[0]
-            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-                c2 = make_divisible(min(c2, max_channels) * width, 8)
-
-            args = [c1, c2, *args[1:]]
-            if module_name in {
-                C2f,
-                C3k2,
-                C3,
-                C2PSA,
-            }:
-                args.insert(2, n)  # number of repeats
-                n = 1
-            if module_name is C3k2:  # for M/L/X sizes
-                if scale in "mlx":
-                    args[3] = True
-        elif module_name is nn.BatchNorm2d:
-            if not isinstance(from_layer_index, int):
-                raise ValueError  # TODO add error message
-            args = [channels[from_layer_index]]
-        elif module_name is Concat:
-            if not isinstance(from_layer_index, Sequence):
-                raise ValueError  # TODO add error message
-            c2 = sum(channels[x] for x in from_layer_index)
-        elif module_name is Detect:
-            if not isinstance(from_layer_index, Sequence):
-                raise ValueError  # TODO add error message
-            args.append([channels[x] for x in from_layer_index])
-        else:
-            if not isinstance(from_layer_index, int):
-                raise ValueError  # TODO add error message
-            c2 = channels[from_layer_index]
-
-        m_ = (
-            nn.Sequential(*(module_name(*args) for _ in range(n))) if n > 1 else module_name(*args)
-        )  # module
-        t = str(module_name)[8:-2].replace("__main__.", "")  # module type
-        m_.np = sum(x.numel() for x in m_.parameters())  # number params
-        m_.i, m_.f, m_.type = i, from_layer_index, t  # attach index, 'from' index, type
-        if verbose:
-            LOGGER.info(
-                f"{i:>3}{str(from_layer_index):>20}{n_:>3}{m_.np:10.0f}  {t:<45}{str(args):<30}"
-            )  # print
-        save.extend(
-            x % i
-            for x in ([from_layer_index] if isinstance(from_layer_index, int) else from_layer_index)
-            if x != -1 and isinstance(x, int)
-        )  # append to savelist
-        layers.append(m_)
-        if i == 0:
-            channels = []
-        channels.append(c2)
-    return nn.Sequential(*layers), sorted(save)
 
 
 def make_divisible(x: float, divisor: int | torch.Tensor) -> int:
@@ -225,9 +101,9 @@ def export_model(
         model(inputs)
 
     for m in model.modules():
-        if isinstance(m, Detect | Detect_3D):
+        if isinstance(m, Detect_3D):
             m.export = True
-        if isinstance(m, C2f | C2f_3D):
+        if isinstance(m, C2f_3D):
             m.forward = m.forward_split
 
     onnx_path = Path(dest).with_suffix(".onnx")
@@ -383,28 +259,3 @@ def copy_attr(
             continue
         setattr(a, k, v)
 
-
-def check_train_batch_size(model, imgsz=640, amp=True, batch=-1, max_num_obj=1):
-    """Compute optimal YOLO training batch size using the autobatch() function.
-
-    Args:
-        model (torch.nn.Module): YOLO model to check batch size for.
-        imgsz (int, optional): Image size used for training.
-        amp (bool, optional): Use automatic mixed precision if True.
-        batch (float, optional): Fraction of GPU memory to use. If -1, use default.
-        max_num_obj (int, optional): The maximum number of objects from dataset.
-
-    Returns:
-        (int): Optimal batch size computed using the autobatch() function.
-
-    Note:
-        If 0.0 < batch < 1.0, it's used as the fraction of GPU memory to use.
-        Otherwise, a default fraction of 0.6 is used.
-    """
-    with torch.autocast("cuda", enabled=amp):
-        return autobatch(
-            deepcopy(model).train(),
-            imgsz,
-            fraction=batch if 0.0 < batch < 1.0 else 0.6,
-            max_num_obj=max_num_obj,
-        )
