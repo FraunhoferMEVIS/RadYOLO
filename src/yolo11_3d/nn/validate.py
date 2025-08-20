@@ -16,7 +16,6 @@ from yolo11_3d.ultralytics.utils.metrics import (
     ConfusionMatrix,
     ConfusionMatrix3D,
     DetMetrics,
-    DetMetrics3D,
     box_iou,
 )
 from yolo11_3d.ultralytics.utils.plotting import output_to_target, output_to_target_3d, plot_images
@@ -77,7 +76,7 @@ class BaseValidator(ABC):
             names=self.names,
             plot=self.args.plots,
         )
-        self.iouv: torch.Tensor = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
+        self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 10)  # IoU vector for mAP@0.1:0.95
         self.niou = self.iouv.numel()
         self.lb = []  # for autolabelling
         if self.args.save_hybrid:
@@ -376,7 +375,7 @@ class Validator3D(BaseValidator):
         if self.args.conf is None:
             msg = "self.args.conf should have been specified in BaseValidator."
             raise ValueError(msg)
-        self.metrics = DetMetrics3D(
+        self.metrics = DetMetrics(
             save_dir=self.save_dir,
             names=self.names,
             plot=self.args.plots,

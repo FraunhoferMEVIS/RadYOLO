@@ -81,13 +81,10 @@ class Trainer:
         self.lf: Callable[[int], float] | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
 
-        # self.best_fitness = None
-        # self.fitness = None
         self.loss = None
         self.tloss = None
         self.loss_names = ["Loss"]
         self.loss_items = torch.ones((0,))
-        # self.loss_names = "box_loss", "cls_loss", "dfl_loss"
 
         time_now = datetime.datetime.now(tz=datetime.UTC)
 
@@ -117,6 +114,9 @@ class Trainer:
         self.csv_path = self.save_dir / "results.csv"
 
         self.plot_idx = [0, 1, 2]
+        # Stateful metric: exponentially weighted mAP10-90 across epochs (persisted on resume)
+        self.ewa_mAP1095 = None
+        self.ewa_alpha = 0.6
 
     def check_resume(self, run_dir: Path) -> None:
         resume = self.args.resume
@@ -759,7 +759,7 @@ class Trainer:
             updates=ema.updates,
             optimizer=convert_optimizer_state_dict_to_fp16(deepcopy(optimizer.state_dict())),
             train_args=train_args,
-            train_metrics={**metrics, "fitness": fitness},
+            train_metrics={**metrics, "fitness": fitness, "metrics/mAP-ewa(B)": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0},
             train_results={},
             date=datetime.datetime.now(tz=datetime.UTC),
         )
@@ -795,7 +795,21 @@ class Trainer:
         amp: bool,
     ) -> tuple[dict[str, float], float, float]:
         metrics = validator(self, ema=ema, amp=amp)
-        fitness: float = metrics.pop("fitness", -loss.detach().cpu().item())
+        # Update stateful EWA using per-epoch mAP 0.1–0.95 
+        map_key = "metrics/mAP10-95(B)"
+        map_val = metrics.get(map_key)
+        if map_val is not None:
+            if self.ewa_mAP1095 is None:
+                self.ewa_mAP1095 = float(map_val)
+            else:
+                self.ewa_mAP1095 = self.ewa_alpha * float(self.ewa_mAP1095) + (1.0 - self.ewa_alpha) * float(map_val)
+            metrics["metrics/mAP-ewa(B)"] = float(self.ewa_mAP1095)
+        # Use EWA as new fitness metric if available, otherwise fall back to original
+        fitness: float = (
+            float(self.ewa_mAP1095)
+            if self.ewa_mAP1095 is not None
+            else metrics.pop("fitness", -loss.detach().cpu().item())
+        )
         if not best_fitness or best_fitness < fitness:
             best_fitness = fitness
         return metrics, fitness, best_fitness
@@ -834,6 +848,13 @@ class Trainer:
         if self.ema and ckpt["ema"]:
             ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
             ema.updates = ckpt["updates"]
+        # Restore stateful EWA metric if present in saved train_metrics
+        try:
+            ewa_saved = ckpt.get("train_metrics", {}).get("metrics/mAP-ewa(B)")
+            if isinstance(ewa_saved, (int, float)):
+                self.ewa_mAP1095 = float(ewa_saved)
+        except Exception:
+            pass
         assert start_epoch > 0
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",
@@ -848,7 +869,6 @@ class Trainer:
                 ckpt["epoch"],
                 self.epochs,
             )
-        # self.best_fitness = best_fitness
         return best_fitness, start_epoch
 
     def save_metrics(self, metrics: dict, train_time_start: float) -> None:

@@ -299,17 +299,6 @@ class ConfusionMatrix:
         )  # apply 0.25 if default val conf is passed
         self.iou_thres = iou_thres
 
-    # def process_cls_preds(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
-    #     """Update confusion matrix for classification task.
-
-    #     Args:
-    #         preds (Array[N, min(nc,5)]): Predicted class labels.
-    #         targets (Array[N, 1]): Ground truth class labels.
-    #     """
-    #     preds, targets = torch.cat(preds)[:, 0], torch.cat(targets)
-    #     for p, t in zip(preds.cpu().numpy(), targets.cpu().numpy(), strict=True):
-    #         self.matrix_[p][t] += 1
-
     def process_batch(
         self, detections: torch.Tensor | None, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor
     ) -> None:
@@ -392,7 +381,6 @@ class ConfusionMatrix:
         normalize: bool = True,
         save_dir: Path | str = "",
         names: tuple[str, ...] = (),
-        # on_plot=None,
     ) -> None:
         """Plot the confusion matrix using seaborn and save it to a file.
 
@@ -400,7 +388,6 @@ class ConfusionMatrix:
             normalize (bool): Whether to normalize the confusion matrix.
             save_dir (str): Directory where the plot will be saved.
             names (tuple): Names of classes, used as labels on the plot.
-            on_plot (func): An optional callback to pass plots path and data when they are rendered.
         """
         import seaborn  # scope for faster 'import ultralytics'
 
@@ -437,8 +424,6 @@ class ConfusionMatrix:
         plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
         fig.savefig(plot_fname, dpi=250)
         plt.close(fig)
-        # if on_plot:
-        #     on_plot(plot_fname)
 
     def print(self):
         """Print the confusion matrix to the console."""
@@ -525,7 +510,6 @@ def plot_pr_curve(
     ap: npt.NDArray,
     save_dir: Path = Path("pr_curve.png"),
     names: dict[int, str] = {},
-    # on_plot=None,
 ) -> None:
     """Plots a precision-recall curve."""
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
@@ -544,7 +528,7 @@ def plot_pr_curve(
         py.mean(1),
         linewidth=3,
         color="blue",
-        label=f"all classes {ap[:, 0].mean():.3f} mAP@0.5",
+        label=f"all classes {ap[:, 0].mean():.3f} mAP@0.1",
     )
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
@@ -554,8 +538,6 @@ def plot_pr_curve(
     ax.set_title("Precision-Recall Curve")
     fig.savefig(save_dir, dpi=250)
     plt.close(fig)
-    # if on_plot:
-    #     on_plot(save_dir)
 
 
 # @plt_settings()
@@ -566,7 +548,6 @@ def plot_mc_curve(
     names: dict[int, str] = {},
     xlabel: str = "Confidence",
     ylabel: str = "Metric",
-    # on_plot=None,
 ) -> None:
     """Plots a metric-confidence curve."""
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
@@ -589,8 +570,6 @@ def plot_mc_curve(
     ax.set_title(f"{ylabel}-Confidence Curve")
     fig.savefig(save_dir, dpi=250)
     plt.close(fig)
-    # if on_plot:
-    #     on_plot(save_dir)
 
 
 def compute_ap(
@@ -632,7 +611,6 @@ def ap_per_class(
     pred_cls: npt.NDArray[np.integer],
     target_cls: npt.NDArray[np.integer],
     plot: bool = False,
-    # on_plot: Callable[[Path, Any], None] | None = None,
     save_dir: Path = Path(),
     names: dict = {},
     eps: float = 1e-16,
@@ -646,7 +624,6 @@ def ap_per_class(
         pred_cls (np.ndarray): Array of predicted classes of the detections.
         target_cls (np.ndarray): Array of true classes of the detections.
         plot (bool, optional): Whether to plot PR curves or not. Defaults to False.
-        on_plot (func, optional): A callback to pass plots path and data when they are rendered. Defaults to None.
         save_dir (Path, optional): Directory to save the PR curves. Defaults to an empty path.
         names (dict, optional): Dict of class names to plot PR curves. Defaults to an empty tuple.
         eps (float, optional): A small value to avoid division by zero. Defaults to 1e-16.
@@ -658,13 +635,13 @@ def ap_per_class(
         p (np.ndarray): Precision values at threshold given by max F1 metric for each class. Shape: (nc,).
         r (np.ndarray): Recall values at threshold given by max F1 metric for each class. Shape: (nc,).
         f1 (np.ndarray): F1-score values at threshold given by max F1 metric for each class. Shape: (nc,).
-        ap (np.ndarray): Average precision for each class at different IoU thresholds. Shape: (nc, 10).
+        ap (np.ndarray): Average precision for each class at different IoU thresholds. Shape: (nc, 18).
         unique_classes (np.ndarray): An array of unique classes that have data. Shape: (nc,).
         p_curve (np.ndarray): Precision curves for each class. Shape: (nc, 1000).
         r_curve (np.ndarray): Recall curves for each class. Shape: (nc, 1000).
         f1_curve (np.ndarray): F1-score curves for each class. Shape: (nc, 1000).
         x (np.ndarray): X-axis values for the curves. Shape: (1000,).
-        prec_values (np.ndarray): Precision values at mAP@0.5 for each class. Shape: (nc, 1000).
+        prec_values (np.ndarray): Precision values at mAP@0.1 for each class. Shape: (nc, 1000).
     """
     # Sort by objectness
     i: npt.NDArray[np.intp] = np.argsort(-conf)
@@ -704,7 +681,7 @@ def ap_per_class(
         for j in range(tp.shape[1]):
             ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
             if j == 0:
-                prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.5
+                prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.1
 
     prec_values = np.array(prec_values)  # (nc, 1000)
 
@@ -721,7 +698,6 @@ def ap_per_class(
             ap,
             save_dir / f"{prefix}PR_curve.png",
             names,
-            # on_plot=on_plot,
         )
         plot_mc_curve(
             x,
@@ -729,7 +705,6 @@ def ap_per_class(
             save_dir / f"{prefix}F1_curve.png",
             names,
             ylabel="F1",
-            # on_plot=on_plot,
         )
         plot_mc_curve(
             x,
@@ -737,7 +712,6 @@ def ap_per_class(
             save_dir / f"{prefix}P_curve.png",
             names,
             ylabel="Precision",
-            # on_plot=on_plot,
         )
         plot_mc_curve(
             x,
@@ -745,7 +719,6 @@ def ap_per_class(
             save_dir / f"{prefix}R_curve.png",
             names,
             ylabel="Recall",
-            # on_plot=on_plot,
         )
 
     max_i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
@@ -779,20 +752,19 @@ class Metric:
         p (list): Precision for each class. Shape: (nc,).
         r (list): Recall for each class. Shape: (nc,).
         f1 (list): F1 score for each class. Shape: (nc,).
-        all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 10).
+        all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 18).
         ap_class_index (list): Index of class for each AP score. Shape: (nc,).
         nc (int): Number of classes.
 
     Methods:
-        ap50(): AP at IoU threshold of 0.5 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
-        ap(): AP at IoU thresholds from 0.5 to 0.95 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
+        ap10(): AP at IoU threshold of 0.1 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
+        ap(): AP at IoU thresholds from 0.1 to 0.95 for all classes. Returns: List of AP scores. Shape: (nc,) or [].
         mp(): Mean precision of all classes. Returns: Float.
         mr(): Mean recall of all classes. Returns: Float.
-        map50(): Mean AP at IoU threshold of 0.5 for all classes. Returns: Float.
-        map75(): Mean AP at IoU threshold of 0.75 for all classes. Returns: Float.
-        map(): Mean AP at IoU thresholds from 0.5 to 0.95 for all classes. Returns: Float.
-        mean_results(): Mean of results, returns mp, mr, map50, map.
-        class_result(i): Class-aware result, returns p[i], r[i], ap50[i], ap[i].
+        map10(): Mean AP at IoU threshold of 0.1 for all classes. Returns: Float.
+        map(): Mean AP at IoU thresholds from 0.1 to 0.95 for all classes. Returns: Float.
+        mean_results(): Mean of results, returns mp, mr, map10, map.
+        class_result(i): Class-aware result, returns p[i], r[i], ap10[i], ap[i].
         maps(): mAP of each class. Returns: Array of mAP scores, shape: (nc,).
         fitness(): Model fitness as a weighted combination of metrics. Returns: Float.
         update(results): Update metric attributes with new evaluation results.
@@ -803,25 +775,25 @@ class Metric:
         self.p: npt.NDArray | list = []  # (nc, )
         self.r: npt.NDArray | list = []  # (nc, )
         self.f1: npt.NDArray | list = []  # (nc, )
-        self.all_ap: npt.NDArray | list = []  # (nc, 10)
+        self.all_ap: npt.NDArray | list = []  # (nc, 18)
         self.ap_class_index: npt.NDArray | list[int] = []  # (nc, )
         self.nc: int = 0
 
     @property
-    def ap50(self) -> npt.NDArray | list:
-        """Returns the Average Precision (AP) at an IoU threshold of 0.5 for all classes.
+    def ap10(self) -> npt.NDArray | list:
+        """Returns the Average Precision (AP) at an IoU threshold of 0.1 for all classes.
 
         Returns:
-            (np.ndarray, list): Array of shape (nc,) with AP50 values per class, or an empty list if not available.
+            (np.ndarray, list): Array of shape (nc,) with AP10 values per class, or an empty list if not available.
         """
         return self.all_ap[:, 0] if isinstance(self.all_ap, np.ndarray) else []
 
     @property
     def ap(self) -> npt.NDArray | list:
-        """Returns the Average Precision (AP) at an IoU threshold of 0.5-0.95 for all classes.
+        """Returns the Average Precision (AP) at an IoU threshold of 0.1-0.95 for all classes.
 
         Returns:
-            (np.ndarray, list): Array of shape (nc,) with AP50-95 values per class, or an empty list if not available.
+            (np.ndarray, list): Array of shape (nc,) with AP10-95 values per class, or an empty list if not available.
         """
         return self.all_ap.mean(1) if isinstance(self.all_ap, np.ndarray) else []
 
@@ -844,41 +816,32 @@ class Metric:
         return self.r.mean() if isinstance(self.r, np.ndarray) else 0.0
 
     @property
-    def map50(self) -> float:
-        """Returns the mean Average Precision (mAP) at an IoU threshold of 0.5.
+    def map10(self) -> float:
+        """Returns the mean Average Precision (mAP) at an IoU threshold of 0.1.
 
         Returns:
-            (float): The mAP at an IoU threshold of 0.5.
+            (float): The mAP at an IoU threshold of 0.1.
         """
         return self.all_ap[:, 0].mean() if isinstance(self.all_ap, np.ndarray) else 0.0
 
     @property
-    def map75(self) -> float:
-        """Returns the mean Average Precision (mAP) at an IoU threshold of 0.75.
-
-        Returns:
-            (float): The mAP at an IoU threshold of 0.75.
-        """
-        return self.all_ap[:, 5].mean() if isinstance(self.all_ap, np.ndarray) else 0.0
-
-    @property
     def map(self) -> float:
-        """Returns the mean Average Precision (mAP) over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
+        """Returns the mean Average Precision (mAP) over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
 
         Returns:
-            (float): The mAP over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
+            (float): The mAP over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
         """
         return self.all_ap.mean() if isinstance(self.all_ap, np.ndarray) else 0.0
 
     def mean_results(self) -> list[float]:
-        """Mean of results, return mp, mr, map50, map."""
-        return [self.mp, self.mr, self.map50, self.map]
+        """Mean of results, return mp, mr, map10, map."""
+        return [self.mp, self.mr, self.map10, self.map]
 
     def class_result(
         self, i: int
     ) -> tuple[npt.NDArray | Any, npt.NDArray | Any, npt.NDArray | Any, npt.NDArray | Any]:
-        """Class-aware result, return p[i], r[i], ap50[i], ap[i]."""
-        return self.p[i], self.r[i], self.ap50[i], self.ap[i]
+        """Class-aware result, return p[i], r[i], ap10[i], ap[i]."""
+        return self.p[i], self.r[i], self.ap10[i], self.ap[i]
 
     @property
     def maps(self) -> npt.NDArray:
@@ -890,7 +853,7 @@ class Metric:
 
     def fitness(self) -> float:
         """Model fitness as a weighted combination of metrics."""
-        w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+        w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.1, mAP@0.1:0.95]
         return (np.array(self.mean_results()) * w).sum()
 
     def update(
@@ -1021,7 +984,6 @@ class DetMetrics:
             plot=self.plot,
             save_dir=self.save_dir,
             names=self.names,
-            # on_plot=self.on_plot,
         )[2:]
         self.box.nc = len(self.names)
         self.box.update(results)
@@ -1032,12 +994,12 @@ class DetMetrics:
         return [
             "metrics/precision(B)",
             "metrics/recall(B)",
-            "metrics/mAP50(B)",
-            "metrics/mAP50-95(B)",
+            "metrics/mAP10(B)",
+            "metrics/mAP10-95(B)",
         ]
 
     def mean_results(self) -> list[float]:
-        """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
+        """Calculate mean of detected objects & return precision, recall, mAP10, and mAP10-95."""
         return self.box.mean_results()
 
     def class_result(self, i) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
@@ -1079,14 +1041,3 @@ class DetMetrics:
         """Returns dictionary of computed performance metrics and statistics."""
         return self.box.curves_results
 
-
-class DetMetrics3D(DetMetrics):
-    @property
-    def keys(self) -> list[str]:
-        """Returns a list of keys for accessing specific metrics."""
-        return [
-            "metrics/precision(B)",
-            "metrics/recall(B)",
-            "metrics/mAP10(B)",
-            "metrics/mAP10-95(B)",
-        ]
