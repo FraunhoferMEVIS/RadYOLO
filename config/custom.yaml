@@ -7,14 +7,14 @@ mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmar
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
 model_type: "3d"
-# data: "/gaia/industry/Siemens/BreastMARC/GJ2021/Projects/MasterThesisYOLO3D/datasets/2025_04_04-test2/yolo.yaml" # (str, optional) path to data file, i.e. coco8.yaml
-data: "/home/muellergroh/projects/yolo11-3d/datasets/2025_04_11-test/yolo.yaml" # (str, optional) path to data file, i.e. coco8.yaml
+data: "D:/datasets/AMOS22/yolov11_3d/dataset.yaml" # (str, optional) path to data file, i.e. coco8.yaml
 dataset_type: "nifti"
 epochs: 1000 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 2 # (int) number of images per batch (-1 for AutoBatch)
-imgsz: [128, 256, 448] # (int | list) input images size as int for train and val modes, or list[h,w] for predict and export modes
+imgsz: [128, 128, 128] # (int | list) input images size as int for train and val modes, or list[h,w] for predict and export modes
+normalization: "none" # Normalization to be applied during image loading
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 cache: False # (bool) True/ram, disk or False. Use cache for data loading
@@ -32,7 +32,7 @@ single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
 cos_lr: False # (bool) use cosine learning rate scheduler
 close_mosaic: 10 # (int) disable mosaic augmentation for final epochs (0 to disable)
-resume: False # (bool) resume training from last checkpoint
+resume: True # (bool) resume training from last checkpoint
 amp: True # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
 fraction: 1.0 # (float) dataset fraction to train on (default is 1.0, all images in train set)
 profile: False # (bool) profile ONNX and TensorRT speeds during training for loggers
@@ -50,7 +50,7 @@ split: val # (str) dataset split to use for validation, i.e. 'val', 'test' or 't
 save_json: False # (bool) save results to JSON file
 save_hybrid: False # (bool) save hybrid version of labels (labels + additional predictions)
 conf: # (float, optional) object confidence threshold for detection (default 0.25 predict, 0.001 val)
-iou: 0.7 # (float) intersection over union (IoU) threshold for NMS
+iou: 0.2 # (float) intersection over union (IoU) threshold for NMS
 max_det: 300 # (int) maximum number of detections per image
 half: False # (bool) use half precision (FP16)
 dnn: False # (bool) use OpenCV DNN for ONNX inference
@@ -61,7 +61,7 @@ source: # (str, optional) source directory for images or videos
 vid_stride: 1 # (int) video frame-rate stride
 stream_buffer: False # (bool) buffer all streaming frames (True) or return the most recent frame (False)
 visualize: False # (bool) visualize model features
-augment: False # (bool) apply image augmentation to prediction sources
+augment: True # (bool) apply image augmentation to prediction sources
 agnostic_nms: False # (bool) class-agnostic NMS
 classes: # (int | list[int], optional) filter results by class, i.e. classes=0, or classes=[0,2,3]
 retina_masks: False # (bool) use high-resolution segmentation masks
@@ -79,7 +79,7 @@ show_boxes: True # (bool) show prediction boxes
 line_width: # (int, optional) line width of the bounding boxes. Scaled to image size if None.
 
 # Export settings ------------------------------------------------------------------------------------------------------
-format: torchscript # (str) format to export to, choices at https://docs.ultralytics.com/modes/export/#export-formats
+format: onnx # (str) format to export to, choices at https://docs.ultralytics.com/modes/export/#export-formats
 keras: False # (bool) use Kera=s
 optimize: False # (bool) TorchScript: optimize for mobile
 int8: False # (bool) CoreML/TF INT8 quantization
@@ -102,7 +102,7 @@ cls: 0.5 # (float) cls loss gain (scale with pixels)
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
 kobj: 1.0 # (float) keypoint obj loss gain
-nbs: 8 # (int) nominal batch size
+nbs: 64 # (int) nominal batch size
 hsv_h: 0.015 # (float) image HSV-Hue augmentation (fraction)
 hsv_s: 0.7 # (float) image HSV-Saturation augmentation (fraction)
 hsv_v: 0.4 # (float) image HSV-Value augmentation (fraction)
@@ -121,6 +121,7 @@ copy_paste_mode: "flip" # (str) the method to do copy_paste augmentation (flip, 
 auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)
 erasing: 0.4 # (float) probability of random erasing during classification training (0-0.9), 0 means no erasing, must be less than 1.0.
 crop_fraction: 1.0 # (float) image crop fraction for classification (0.1-1), 1.0 means no crop, must be greater than 0.
+do_batchgenerators_intensity_augmentation: True
 
 # Custom config.yaml ---------------------------------------------------------------------------------------------------
 cfg: # (str, optional) for overriding defaults.yaml

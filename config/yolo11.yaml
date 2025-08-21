@@ -2,5 +2,5 @@
 # YOLO11 object detection model with P3-P5 outputs. For Usage examples see https://docs.ultralytics.com/tasks/detect
 
 # Parameters
-nc: 3 # number of channels
-scale: n
+nc: 1 # number of channels
+scale: s
