@@ -38,8 +38,8 @@ from .util import ModelEMA, init_seeds, select_device
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .data import BaseDataset, Batch
-    from .validate import BaseValidator
+    from .data import NIfTIDataset, Batch
+    from .validate import Validator
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)
@@ -665,7 +665,7 @@ class Trainer:
         batch: int,
         mode: Literal["train", "val"] = "train",
         model: torch.nn.Module | None = None,
-    ) -> BaseDataset:
+    ) -> NIfTIDataset:
         grid_size = max(
             int(model.stride.max() if model and isinstance(model.stride, torch.Tensor) else 0), 32
         )
@@ -749,7 +749,7 @@ class Trainer:
 
     def validate(
         self,
-        validator: BaseValidator,
+        validator: Validator,
         ema: ModelEMA,
         best_fitness: float | None,
         loss: torch.Tensor,
@@ -863,7 +863,7 @@ class Trainer:
 
     def plot_training_labels(self, train_loader: InfiniteDataLoader) -> None:
         """Create a labeled training plot of the YOLO model."""
-        dataset = cast("BaseDataset", train_loader.dataset)
+        dataset = cast("NIfTIDataset", train_loader.dataset)
         boxes = np.concatenate([lb["bboxes"] for lb in dataset.samples], 0)
         cls = np.concatenate([lb["classes"] for lb in dataset.samples], 0)
         plot_labels(

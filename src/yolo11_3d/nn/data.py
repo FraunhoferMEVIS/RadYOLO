@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import random
-from abc import ABC, abstractmethod
 from collections.abc import Sized
 from pathlib import Path
 from typing import Any, ClassVar, Literal, TypedDict, cast
@@ -26,7 +25,6 @@ from yolo11_3d.nn.augmentations import (
 from yolo11_3d.ultralytics.utils.ops import xyxy2xywh, xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 LOGGER = logging.getLogger(__name__)
-# IMG_FORMATS = {"jpg", "jpeg", "png"}
 
 
 class LazyLabel(TypedDict):
@@ -68,8 +66,8 @@ class Batch(TypedDict):
     batch_idx: torch.Tensor
 
 
-class BaseDataset(Dataset[Label], Sized, ABC):
-    img_formats: ClassVar[set[str]]
+class NIfTIDataset(Dataset[Label], Sized):
+    img_formats: ClassVar[set[str]] = {"nii"}
 
     def __init__(
         self,
@@ -109,6 +107,60 @@ class BaseDataset(Dataset[Label], Sized, ABC):
             return self.augmentation(self.load_image_and_label(index))
 
     def augmentation(self, label: Label) -> Label:
+        if not self.augment:
+            return label
+
+        scale_tensor = torch.as_tensor(self.imgsz)[[2, 1, 0, 2, 1, 0]]
+
+        img = label["img"]
+        classes = label["classes"]
+
+        if label["bbox_format"] == "xywh":
+            bboxes = xyzwhd2xyzxyz(label["bboxes"])
+        elif label["bbox_format"] == "xyxy":
+            bboxes = label["bboxes"]
+        else:
+            msg = f"bbox format {label['bbox_format']} is not supported."
+            raise NotImplementedError(msg)
+        bboxes = bboxes * scale_tensor
+
+        labels = torch.cat((classes, bboxes), dim=1)
+
+        img, labels = random_zoom(
+            img,
+            labels,
+            self.hyp["max_zoom"],
+            self.hyp["min_zoom"],
+            self.hyp["prob_zoom"],
+            self.hyp["out_zoom_padding"],
+        )
+
+        img, labels = tensor_cutout(img, labels, self.hyp["cutout_params"], self.hyp["prob_cutout"])
+        nl = len(labels)
+        if nl:
+            labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
+
+        img, labels = enlarge_bounding_boxes(img, labels, self.imgsz, self.min_stride)
+        
+        if nl:
+            labels[:, 1:] = labels[:, 1:] / scale_tensor
+
+        img, labels = random_mirroring(
+            img, labels, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
+        )
+
+        if self.hyp["do_batchgenerators_intensity_augmentation"]:
+            img = batch_generators_intensity_augmentations(
+                img, self.hyp["do_intensity_augmentations_per_channel"]
+            )
+
+        label["img"] = img
+        label["classes"] = labels[:, 0:1]
+        if label["bbox_format"] == "xywh":
+            label["bboxes"] = labels[:, 1:]
+        elif label["bbox_format"] == "xyxy":
+            label["bboxes"] = xyzwhd2xyzxyz(labels[:, 1:])
+
         return label
 
     def get_img_files(self, src_path: Path | list[Path]) -> list[Path]:
@@ -161,41 +213,6 @@ class BaseDataset(Dataset[Label], Sized, ABC):
             bbox_format=label["bbox_format"],
             img=img,
         )
-
-    @abstractmethod
-    def get_samples(self) -> list[LazyLabel]: ...
-
-    @abstractmethod
-    def load_image(
-        self, f: Path
-    ) -> tuple[
-        torch.Tensor,
-        tuple[int, int] | tuple[int, int, int],
-        tuple[int, int] | tuple[int, int, int],
-    ]: ...
-
-    @staticmethod
-    def collate_fn(batch: list[Label]) -> Batch:
-        with torch.no_grad():
-            return {
-                "img": torch.stack([item["img"] for item in batch]),
-                "ori_shape": tuple(item["ori_shape"] for item in batch),
-                "ratio_pad": tuple(item["ratio_pad"] for item in batch),
-                "im_file": tuple(item["im_file"] for item in batch),
-                "shape": tuple(item["shape"] for item in batch),
-                "cls": torch.cat([item["classes"] for item in batch], 0),
-                "bboxes": torch.cat([item["bboxes"] for item in batch], 0),
-                "normalized": tuple(item["normalized"] for item in batch),
-                "bbox_format": tuple(item["bbox_format"] for item in batch),
-                "batch_idx": torch.cat(
-                    [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)],
-                    0,
-                ),
-            }
-
-
-class NIfTIDataset(BaseDataset):
-    img_formats: ClassVar[set[str]] = {"nii"}
 
     def get_samples(self) -> list[LazyLabel]:
         # find all images and corresponding labels
@@ -275,62 +292,24 @@ class NIfTIDataset(BaseDataset):
 
         return im_t_scaled, im_t.shape[1:], im_t_scaled.shape[1:]
 
-    def augmentation(self, label: Label) -> Label:
-        if not self.augment:
-            return label
-
-        scale_tensor = torch.as_tensor(self.imgsz)[[2, 1, 0, 2, 1, 0]]
-
-        img = label["img"]
-        classes = label["classes"]
-
-        if label["bbox_format"] == "xywh":
-            bboxes = xyzwhd2xyzxyz(label["bboxes"])
-        elif label["bbox_format"] == "xyxy":
-            bboxes = label["bboxes"]
-        else:
-            msg = f"bbox format {label['bbox_format']} is not supported."
-            raise NotImplementedError(msg)
-        bboxes = bboxes * scale_tensor
-
-        labels = torch.cat((classes, bboxes), dim=1)
-
-        img, labels = random_zoom(
-            img,
-            labels,
-            self.hyp["max_zoom"],
-            self.hyp["min_zoom"],
-            self.hyp["prob_zoom"],
-            self.hyp["out_zoom_padding"],
-        )
-
-        img, labels = tensor_cutout(img, labels, self.hyp["cutout_params"], self.hyp["prob_cutout"])
-        nl = len(labels)
-        if nl:
-            labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
-
-        img, labels = enlarge_bounding_boxes(img, labels, self.imgsz, self.min_stride)
-        
-        if nl:
-            labels[:, 1:] = labels[:, 1:] / scale_tensor
-
-        img, labels = random_mirroring(
-            img, labels, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
-        )
-
-        if self.hyp["do_batchgenerators_intensity_augmentation"]:
-            img = batch_generators_intensity_augmentations(
-                img, self.hyp["do_intensity_augmentations_per_channel"]
-            )
-
-        label["img"] = img
-        label["classes"] = labels[:, 0:1]
-        if label["bbox_format"] == "xywh":
-            label["bboxes"] = labels[:, 1:]
-        elif label["bbox_format"] == "xyxy":
-            label["bboxes"] = xyzwhd2xyzxyz(labels[:, 1:])
-
-        return label
+    @staticmethod
+    def collate_fn(batch: list[Label]) -> Batch:
+        with torch.no_grad():
+            return {
+                "img": torch.stack([item["img"] for item in batch]),
+                "ori_shape": tuple(item["ori_shape"] for item in batch),
+                "ratio_pad": tuple(item["ratio_pad"] for item in batch),
+                "im_file": tuple(item["im_file"] for item in batch),
+                "shape": tuple(item["shape"] for item in batch),
+                "cls": torch.cat([item["classes"] for item in batch], 0),
+                "bboxes": torch.cat([item["bboxes"] for item in batch], 0),
+                "normalized": tuple(item["normalized"] for item in batch),
+                "bbox_format": tuple(item["bbox_format"] for item in batch),
+                "batch_idx": torch.cat(
+                    [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)],
+                    0,
+                ),
+            }
 
 
 class DummyDataset(Dataset, Sized):

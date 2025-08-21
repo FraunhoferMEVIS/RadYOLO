@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.utils.data import dataloader, sampler
 
-from yolo11_3d.nn.data import BaseDataset, Label
+from yolo11_3d.nn.data import NIfTIDataset, Label
 
 
 class InfiniteDataLoader(dataloader.DataLoader[Label], Sized):
@@ -69,7 +69,7 @@ def seed_worker(worker_id) -> None:
 
 
 def build_dataloader(
-    dataset: BaseDataset,
+    dataset: NIfTIDataset,
     batch: int,
     workers: int,
     shuffle: bool = True,
