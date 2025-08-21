@@ -113,7 +113,7 @@ class Trainer:
         self.csv_path = self.save_dir / "results.csv"
 
         self.plot_idx = [0, 1, 2]
-        # Stateful metric: exponentially weighted mAP10-90 across epochs (persisted on resume)
+        # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
         self.ewa_mAP1095 = None
         self.ewa_alpha = 0.6
 
@@ -903,22 +903,7 @@ class Trainer:
         available_normalization_layers = tuple(
             v for k, v in torch.nn.__dict__.items() if "Norm" in k
         )
-        if name == "auto":
-            raise NotImplementedError
-            LOGGER.info(
-                "'optimizer=auto' found, "
-                "ignoring 'lr0=%f' and 'momentum=%f' and "
-                "determining best 'optimizer', 'lr0' and 'momentum' automatically... ",
-                self.args.lr0,
-                self.args.momentum,
-            )
-            lr_fit = round(0.002 * 5 / (4 + self.nc), 6)
-            name_, lr, momentum = (
-                ("SGD", 0.01, 0.9) if iterations > 10000 else ("Adam", lr_fit, 0.9)
-            )
-            self.args.warmup_bias_lr = 0.0
-        else:
-            name_ = name
+        name_ = name
 
         for module_name, module in model.named_modules():
             for param_name, param in module.named_parameters(recurse=False):
