@@ -456,72 +456,6 @@ class Annotator:
         return width, height, width * height
 
 
-def plot_labels(
-    boxes: npt.NDArray,
-    cls: npt.NDArray,
-    names: dict[int, str],
-    save_dir: Path = Path(),
-):
-    """Plot training labels including class histograms and box statistics."""
-    import pandas  # scope for faster 'import ultralytics'
-    import seaborn  # scope for faster 'import ultralytics'
-
-    # Filter matplotlib>=3.7.2 warning and Seaborn use_inf and is_categorical FutureWarnings
-    warnings.filterwarnings(
-        "ignore", category=UserWarning, message="The figure layout has changed to tight"
-    )
-    warnings.filterwarnings("ignore", category=FutureWarning)
-
-    # Plot dataset labels
-    LOGGER.info("Plotting labels to %s... ", save_dir / "labels.jpg")
-    nc = int(cls.max() + 1)  # number of classes
-    boxes = boxes[:1000000]  # limit to 1M boxes
-    x = pandas.DataFrame(boxes, columns=["x", "y", "width", "height"])
-
-    # Seaborn correlogram
-    seaborn.pairplot(
-        x,
-        corner=True,
-        diag_kind="auto",
-        kind="hist",
-        diag_kws={"bins": 50},
-        plot_kws={"pmax": 0.9},
-    )
-    plt.savefig(save_dir / "labels_correlogram.jpg", dpi=200)
-    plt.close()
-
-    # Matplotlib labels
-    ax = plt.subplots(2, 2, figsize=(8, 8), tight_layout=True)[1].ravel()
-    y = ax[0].hist(cls, bins=np.linspace(0, nc, nc + 1) - 0.5, rwidth=0.8)
-    for i in range(nc):
-        y[2].patches[i].set_color([x / 255 for x in colors(i)])
-    ax[0].set_ylabel("instances")
-    if 0 < len(names) < 30:
-        ax[0].set_xticks(range(len(names)))
-        ax[0].set_xticklabels(list(names.values()), rotation=90, fontsize=10)
-    else:
-        ax[0].set_xlabel("classes")
-    seaborn.histplot(x, x="x", y="y", ax=ax[2], bins=50, pmax=0.9)
-    seaborn.histplot(x, x="width", y="height", ax=ax[3], bins=50, pmax=0.9)
-
-    # Rectangles
-    boxes[:, 0:2] = 0.5  # center
-    boxes = ops.xywh2xyxy(boxes) * 1000
-    img = Image.fromarray(np.ones((1000, 1000, 3), dtype=np.uint8) * 255)
-    for cls, box in zip(cls[:500], boxes[:500], strict=True):
-        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors(cls))  # plot
-    ax[1].imshow(img)
-    ax[1].axis("off")
-
-    for a in [0, 1, 2, 3]:
-        for s in ["top", "right", "left", "bottom"]:
-            ax[a].spines[s].set_visible(False)
-
-    fname = save_dir / "labels.jpg"
-    plt.savefig(fname, dpi=200)
-    plt.close()
-
-
 def plot_images(
     images: torch.Tensor | np.ndarray,
     batch_idx: torch.Tensor | np.ndarray,
@@ -529,7 +463,6 @@ def plot_images(
     bboxes: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.float32),
     confs: torch.Tensor | np.ndarray | None = None,
     masks: torch.Tensor | np.ndarray = np.zeros(0, dtype=np.uint8),
-    paths: Sequence[str | Path] | None = None,
     fname: str = "images.jpg",
     names: dict[int, str] | None = None,
     max_size: int = 1920,
@@ -603,10 +536,6 @@ def plot_images(
     for i in range(bs):
         x, y = int(w * (i // ns)), int(h * (i % ns))  # block origin
         annotator.rectangle([x, y, x + w, y + h], None, (255, 255, 255), width=2)  # borders
-        if paths:
-            annotator.text(
-                (x + 5, y + 5), text=Path(paths[i]).name[:40], txt_color=(220, 220, 220)
-            )  # filenames
         if len(cls) > 0:
             idx = batch_idx == i
             classes = cls[idx].astype("int")

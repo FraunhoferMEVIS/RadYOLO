@@ -12,8 +12,8 @@ import tqdm_loggable.utils
 import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
-from yolo11_3d.nn import DATASETS
 from yolo11_3d.nn.config import DatasetConfig, model_checkpoint_from_torch
+from yolo11_3d.nn.data import NIfTIDatasetWithMasks
 from yolo11_3d.nn.train import Trainer
 from yolo11_3d.nn.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, export_model, select_device
@@ -131,10 +131,6 @@ def train(config: Path) -> int:
     ),
 )
 @click.argument(
-    "dataset_type",
-    type=click.Choice(tuple(DATASETS.keys()), case_sensitive=False),
-)
-@click.argument(
     "dataset_path",
     type=click.Path(
         exists=True,
@@ -166,10 +162,7 @@ def validate(model_path: Path, dataset_type: str, dataset_path: Path) -> int:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
 
-        dataset_test_path = dataset_config.test or dataset_config.val
-        if dataset_test_path is None:
-            LOGGER.error("No test or validation dataset path specified in the configuration.")
-            return 1
+        dataset_path = dataset_config.path
 
         checkpoint = model_checkpoint_from_torch(model_path)
         model = checkpoint["ema"]
@@ -179,10 +172,11 @@ def validate(model_path: Path, dataset_type: str, dataset_path: Path) -> int:
         model.to(device)
         ema = ModelEMA(model)
 
-        dataset_cls, _ = DATASETS[dataset_type]
-
-        dataset = dataset_cls(
-            src_path=dataset_test_path,
+        dataset = NIfTIDatasetWithMasks(
+            src_path=dataset_path,
+            # TODO: Add fold as argument
+            fold=0,
+            group="test",
             imgsz=tuple(train_args.imgsz),
             augment=False,
             batch_size=1,

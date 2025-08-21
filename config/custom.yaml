@@ -7,8 +7,8 @@ mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmar
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
 model_type: "3d"
-data: "D:/datasets/AMOS22/yolov11_3d/dataset.yaml" # (str, optional) path to data file, i.e. coco8.yaml
-dataset_type: "nifti"
+data: "D:/datasets/AMOS22/yolov11_3d_new_format/dataset.yaml" # (str) path to data file
+fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training

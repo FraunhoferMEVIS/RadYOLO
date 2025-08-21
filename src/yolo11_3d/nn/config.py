@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict, assert_never
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict
 
 import annotated_types
 import torch
 import yaml
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     DirectoryPath,
@@ -19,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from . import DATASETS, MODELS
+from . import MODELS
 
 if TYPE_CHECKING:
     import datetime
@@ -49,7 +48,7 @@ class DefaultConfig(BaseModel):
     model: FilePath | NewPath  # path to model file
     model_type: str
     data: FilePath  # path to data file
-    dataset_type: str
+    fold: int
     epochs: int = 100  # number of epochs to train for
     time: float | None = None  # number of hours to train for, overrides epochs if supplied
     patience: int = (
@@ -190,19 +189,6 @@ class DefaultConfig(BaseModel):
     save_dir: Path | None = None
 
     @model_validator(mode="after")
-    def validate_dataset_type(self) -> Self:
-        if self.dataset_type not in DATASETS:
-            msg = f"got dataset_type {self.dataset_type}. registered dataset types are {DATASETS.keys()}."
-            raise ValueError(msg)
-        _, ndim = DATASETS[self.dataset_type]
-
-        if len(self.imgsz) != ndim:
-            msg = f"got {len(self.imgsz)} image dimensions, but dataset_type {self.dataset_type} provides {ndim} dimensions."
-            raise ValueError(msg)
-
-        return self
-
-    @model_validator(mode="after")
     def validate_model_type(self) -> Self:
         if self.model_type not in MODELS:
             msg = f"got model_type {self.model_type}. registered model types are {MODELS.keys()}"
@@ -219,36 +205,14 @@ class DefaultConfig(BaseModel):
 
 class DatasetConfig(BaseModel):
     path: Path
-    train: Path | list[Path]
-    val: Path | list[Path] | None = Field(
-        validation_alias=AliasChoices("val", "validation"), default=None
-    )
-    test: Path | list[Path] | None = None
     names: dict[NonNegativeInt, str] | None = None
     nc: NonNegativeInt = 0
-    download: str | None = None
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:
         self.path = (DATASETS_DIR / self.path).resolve()
         if not self.path.is_dir():
             raise ValueError
-        for k, split in (
-            ("train", self.train),
-            ("val", self.val),
-            ("test", self.test),
-        ):
-            if split is None:
-                continue
-            if isinstance(split, Path):
-                x = (self.path / split).resolve()
-                if not x.exists() and split.parts[0] == "..":
-                    x = (self.path / Path(*split.parts[1:])).resolve()
-                setattr(self, k, x)
-            elif isinstance(split, list):
-                setattr(self, k, [(self.path / path_).resolve() for path_ in split])
-            else:
-                assert_never(split)
         return self
 
     @model_validator(mode="after")

@@ -18,10 +18,10 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
-from yolo11_3d.ultralytics.utils.plotting import plot_images, plot_labels, plot_results
+from yolo11_3d.ultralytics.utils.plotting import plot_results
 from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
-from . import DATASETS, MODELS
+from . import MODELS
 from .config import (
     DatasetConfig,
     DefaultConfig,
@@ -30,6 +30,7 @@ from .config import (
     get_model_cfg,
     model_checkpoint_from_torch,
 )
+from .data import NIfTIDatasetWithMasks
 from .model import BaseModel
 from .validate import Validator
 
@@ -38,7 +39,6 @@ from .util import ModelEMA, init_seeds, select_device
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .data import NIfTIDataset, Batch
     from .validate import Validator
 
 LOGGER = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ class Trainer:
 
         self.model_path = self.args.model.with_suffix(".pt")
         self.model: torch.nn.Module | None = None
-        self.data, self.trainset, self.testset = self.get_dataset_configs(self.args.data)
+        self.data = self.get_dataset_config(self.args.data)
 
         self.lf: Callable[[int], float] | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
@@ -264,39 +264,34 @@ class Trainer:
 
         # Dataloaders
         train_loader = self.get_dataloader(
-            self.trainset, model, batch_size=batch_size, rank=-1, mode="train", device=device
+            self.data.path, model, batch_size=batch_size, rank=-1, fold=args.fold, mode="train", device=device
         )
-        if self.args.val and self.testset is not None:
-            test_loader = self.get_dataloader(
-                self.testset, model, batch_size=batch_size * 2, rank=-1, mode="val", device=device
+        if self.args.val:
+            val_loader = self.get_dataloader(
+                self.data.path, model, batch_size=batch_size * 2, rank=-1, fold=args.fold, mode="val", device=device
             )
             validator = self.get_validator(
-                test_loader,
+                val_loader,
                 self.save_dir,
                 self.data.names,
             )
             metric_keys = validator.metrics.keys + self.label_loss_items(prefix="val")
             metrics: dict[str, int] = dict(zip(metric_keys, [0] * len(metric_keys), strict=True))
         else:
-            test_loader = None
+            val_loader = None
             validator = None
             metrics = {}
         ema = ModelEMA(model)
-        # ema.enabled = False
-        if args.plots and self.dataset_num_dimensions == 2:
-            self.plot_training_labels(train_loader)
 
         # Optimizer
         accumulate = max(round(args.nbs / batch_size), 1)
         weight_decay = args.weight_decay * batch_size * accumulate / args.nbs
-        iterations = math.ceil(len(train_loader.dataset) / max(batch_size, args.nbs)) * epochs  # pyright: ignore[reportArgumentType]
         optimizer = self.build_optimizer(
             model=model,
             name=args.optimizer,
             lr=args.lr0,
             momentum=args.momentum,
             decay=weight_decay,
-            iterations=iterations,
         )
 
         # Scheduler
@@ -502,13 +497,6 @@ class Trainer:
                         )
                     )
 
-                    if (
-                        self.args.plots
-                        and self.dataset_num_dimensions == 2
-                        and num_iterations in self.plot_idx
-                    ):
-                        self.plot_training_samples(batch, num_iterations)
-
             scheduler.step()
 
             if loss is None:
@@ -628,27 +616,28 @@ class Trainer:
             torch.cuda.empty_cache()
 
     @staticmethod
-    def get_dataset_configs(
+    def get_dataset_config(
         dataset_config_path: Path,
-    ) -> tuple[DatasetConfig, Path | list[Path], Path | list[Path] | None]:
+    ) -> DatasetConfig:
         """Reduction of get_dataset(), check_det_dataset(), check_file() and validation included in Pydantic model."""
         with Path(dataset_config_path).open() as f:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
-        return dataset_config, dataset_config.train, dataset_config.val or dataset_config.test
+        return dataset_config
 
     def get_dataloader(
         self,
-        dataset_path: Path | list[Path],
+        dataset_path: Path,
         model: torch.nn.Module,
         batch_size: int = 16,
         rank: int = 0,
+        fold: int = 0,
         mode: Literal["train", "val"] = "train",
         device: torch.device | str = "cpu",
     ) -> InfiniteDataLoader:
         assert mode in {"train", "val"}
         dataset = self.build_dataset(
-            img_path=dataset_path, mode=mode, model=model, batch=batch_size
+            img_path=dataset_path, fold=fold, group=mode, model=model, batch=batch_size
         )
         shuffle = mode == "train"
         if getattr(dataset, "rect", False) and shuffle:
@@ -663,25 +652,26 @@ class Trainer:
         self,
         img_path: Path | list[Path],
         batch: int,
-        mode: Literal["train", "val"] = "train",
+        group: Literal["train", "val"] = "train",
+        fold: int = 0,
         model: torch.nn.Module | None = None,
-    ) -> NIfTIDataset:
+    ) -> NIfTIDatasetWithMasks:
         grid_size = max(
             int(model.stride.max() if model and isinstance(model.stride, torch.Tensor) else 0), 32
         )
-        dataset, self.dataset_num_dimensions = DATASETS[self.args.dataset_type]
-        return dataset(
+        return NIfTIDatasetWithMasks(
             src_path=img_path,
+            fold=fold,
+            group=group,
             imgsz=tuple(self.args.imgsz),
-            # augment=mode == "train",
-            augment=self.args.augment and mode == "train",
+            augment=self.args.augment and group == "train",
             batch_size=batch,
             stride=grid_size,
             min_stride=int(
                 model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
             ),
-            pad=0.0 if mode == "train" else 0.5,
-            fraction=self.args.fraction if mode == "train" else 1.0,
+            pad=0.0 if group == "train" else 0.5,
+            fraction=self.args.fraction if group == "train" else 1.0,
             normalization=self.args.normalization,
             max_zoom=self.args.max_zoom,
             min_zoom=self.args.min_zoom,
@@ -849,37 +839,6 @@ class Trainer:
     def plot_metrics(self) -> None:
         plot_results(self.csv_path)
 
-    def plot_training_samples(self, batch: Batch, num_iterations: int) -> None:
-        """Plots training samples with their annotations."""
-        plot_images(
-            images=batch["img"],
-            batch_idx=batch["batch_idx"],
-            cls=batch["cls"].squeeze(-1),
-            bboxes=batch["bboxes"],
-            paths=[str(path) for path in batch["im_file"]],
-            fname=str(self.save_dir / f"train_batch{num_iterations}.jpg"),
-            # on_plot=self.on_plot,
-        )
-
-    def plot_training_labels(self, train_loader: InfiniteDataLoader) -> None:
-        """Create a labeled training plot of the YOLO model."""
-        dataset = cast("NIfTIDataset", train_loader.dataset)
-        boxes = np.concatenate([lb["bboxes"] for lb in dataset.samples], 0)
-        cls = np.concatenate([lb["classes"] for lb in dataset.samples], 0)
-        plot_labels(
-            boxes,
-            cls.squeeze(),
-            names=self.data.names,
-            save_dir=self.save_dir,
-            # on_plot=self.on_plot,
-        )
-
-    # def auto_batch(self):
-    #     train_dataset = self.build_dataset(trainset, mode="train", batch=16)
-    #     max_num_obj = max(len(label["cls"]) for label in train_dataset.labels) * 4
-    #     return check_train_batch_size(
-    #         model=model, imgsz=imgsz, amp=amp, batch_size=batch_size, max_num_obj=max_num_obj
-    #     )
 
     def build_optimizer(
         self,
@@ -888,9 +847,7 @@ class Trainer:
         lr: float = 0.0001,
         momentum: float = 0.9,
         decay: float = 1e-5,
-        iterations: float = 1e5,
     ) -> torch.optim.Optimizer:
-        # g = [], [], []
         weights_with_decay, weights_without_decay, bias_weights = [], [], []
         available_normalization_layers = tuple(
             v for k, v in torch.nn.__dict__.items() if "Norm" in k
@@ -902,13 +859,10 @@ class Trainer:
                 fullname = f"{module_name}.{param_name}" if module_name else param_name
                 if "bias" in fullname:
                     bias_weights.append(param)
-                    # g[2].append(param)
                 elif isinstance(module, available_normalization_layers):
                     weights_without_decay.append(param)
-                    # g[1].append(param)
                 else:
                     weights_with_decay.append(param)
-                    # g[0].append(param)
 
         optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "auto"}
         name_ = {x.lower(): x for x in optimizers}.get(name_.lower())

@@ -11,10 +11,10 @@ import numpy as np
 import torch
 from torch.utils.data import dataloader, sampler
 
-from yolo11_3d.nn.data import NIfTIDataset, Label
+from yolo11_3d.nn.data import NIfTIDatasetWithMasks, Sample
 
 
-class InfiniteDataLoader(dataloader.DataLoader[Label], Sized):
+class InfiniteDataLoader(dataloader.DataLoader[Sample], Sized):
     """Dataloader that reuses workers.
 
     Uses same syntax as vanilla DataLoader.
@@ -31,7 +31,7 @@ class InfiniteDataLoader(dataloader.DataLoader[Label], Sized):
         """Returns the length of the batch sampler's sampler."""
         return len(self.batch_sampler.sampler)  # pyright: ignore[reportArgumentType, reportAttributeAccessIssue, reportOptionalMemberAccess]
 
-    def __iter__(self) -> Generator[Label]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def __iter__(self) -> Generator[Sample]:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Creates a sampler that repeats indefinitely."""
         for _ in range(len(self)):
             yield next(self.iterator)
@@ -69,7 +69,7 @@ def seed_worker(worker_id) -> None:
 
 
 def build_dataloader(
-    dataset: NIfTIDataset,
+    dataset: NIfTIDatasetWithMasks,
     batch: int,
     workers: int,
     shuffle: bool = True,

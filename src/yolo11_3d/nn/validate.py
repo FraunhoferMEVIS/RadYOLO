@@ -428,7 +428,6 @@ class Validator():
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
             batch["bboxes"][:, [0, 1, 3, 4]],
-            paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xy_labels.jpg"),
             names=self.names,
         )
@@ -437,7 +436,6 @@ class Validator():
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
             batch["bboxes"][:, [0, 2, 3, 5]],
-            paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xz_labels.jpg"),
             names=self.names,
         )
@@ -446,37 +444,15 @@ class Validator():
         plot_images(
             project_nifti_images(batch["img"], -3),
             *output_to_target(preds, max_det=self.args.max_det, axis=2),
-            paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xy_pred.jpg"),
             names=self.names,
-        )  # pred
+        )
         plot_images(
             project_nifti_images(batch["img"], -2),
             *output_to_target(preds, max_det=self.args.max_det, axis=1),
-            paths=batch["im_file"],
             fname=str(self.save_dir / f"val_batch{ni}_xz_pred.jpg"),
             names=self.names,
-        )  # pred
-
-    # def build_dataset(self, img_path, mode="val", batch=None):
-    #     """
-    #     Build YOLO Dataset.
-
-    #     Args:
-    #         img_path (str): Path to the folder containing images.
-    #         mode (str): `train` mode or `val` mode, users are able to customize different augmentations for each mode.
-    #         batch (int, optional): Size of batches, this is for `rect`. Defaults to None.
-    #     """
-    #     return build_yolo_dataset(
-    #         self.args, img_path, batch, self.data, mode=mode, stride=self.stride
-    #     )
-
-    # def get_dataloader(self, dataset_path, batch_size):
-    #     """Construct and return dataloader."""
-    #     dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
-    #     return build_dataloader(
-    #         dataset, batch_size, self.args.workers, shuffle=False, rank=-1
-    #     )  # return dataloader
+        )
 
 
 def project_nifti_images(
