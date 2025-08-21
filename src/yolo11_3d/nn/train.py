@@ -75,7 +75,6 @@ class Trainer:
         self.model_path = self.args.model.with_suffix(".pt")
         self.model: torch.nn.Module | None = None
         self.data, self.trainset, self.testset = self.get_dataset_configs(self.args.data)
-        self.ema: ModelEMA | None = None
 
         self.lf: Callable[[int], float] | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
@@ -206,7 +205,7 @@ class Trainer:
         int,
         int,
         torch.utils.data.DataLoader,
-        BaseValidator | None,
+        Validator | None,
         dict[str, int],
         ModelEMA,
         int,
@@ -815,7 +814,7 @@ class Trainer:
         if ckpt["optimizer"] is not None:
             optimizer.load_state_dict(ckpt["optimizer"])
             best_fitness = ckpt["best_fitness"]
-        if self.ema and ckpt["ema"]:
+        if ckpt["ema"]:
             ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
             ema.updates = ckpt["updates"]
         # Restore stateful EWA metric if present in saved train_metrics
