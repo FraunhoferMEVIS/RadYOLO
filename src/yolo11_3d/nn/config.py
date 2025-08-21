@@ -285,6 +285,7 @@ class ModelCheckpoint(TypedDict):
     ema: torch.nn.Module
     updates: int
     optimizer: dict | None
+    scaler: dict | None
     train_args: DefaultConfig
     train_metrics: dict
     train_results: dict
@@ -300,6 +301,7 @@ def model_checkpoint_from_torch(checkpoint: Path) -> ModelCheckpoint:
         ema=ckpt["ema"],
         updates=ckpt["updates"],
         optimizer=ckpt["optimizer"],
+        scaler=ckpt["scaler"],
         train_args=DefaultConfig.model_validate(ckpt["train_args"]),
         train_metrics=ckpt["train_metrics"],
         train_results=ckpt["train_results"],

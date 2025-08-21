@@ -6,7 +6,6 @@ import logging
 import math
 import time
 from contextlib import nullcontext
-from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, overload
 
@@ -20,10 +19,7 @@ from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_images, plot_labels, plot_results
-from yolo11_3d.ultralytics.utils.torch_utils import (
-    EarlyStopping,
-    convert_optimizer_state_dict_to_fp16,
-)
+from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
 from . import DATASETS, MODELS
 from .config import (
@@ -251,7 +247,6 @@ class Trainer:
                 "Automatic Mixed Precision enabled. Please check if your system fully supports this."
             )
             # amp = check_amp(model) # TODO(lmg): implement check for stable amp support
-        # TODO: Make sure scaler is saved and restored when training is paused and resumed
         scaler = torch.GradScaler("cuda", enabled=amp)
         if world_size > 1:
             raise NotImplementedError
@@ -307,7 +302,7 @@ class Trainer:
         # Scheduler
         scheduler, lf = self._setup_scheduler(optimizer)
         stopper, stop = EarlyStopping(patience=self.args.patience), False
-        best_fitness, start_epoch = self.resume_training(ckpt, optimizer, ema)
+        best_fitness, start_epoch = self.resume_training(ckpt, optimizer, scaler, ema)
         scheduler.last_epoch = start_epoch - 1
         return (
             model,
@@ -388,7 +383,7 @@ class Trainer:
         args: DefaultConfig,
         model: BaseModel,
         train_loader: torch.utils.data.DataLoader,
-        validator: BaseValidator | None,
+        validator: Validator | None,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         scaler: torch.amp.grad_scaler.GradScaler,
@@ -406,18 +401,13 @@ class Trainer:
         num_warmup_iterations = (
             max(round(args.warmup_epochs * num_batches), 100) if args.warmup_epochs > 0 else -1
         )
-        last_opt_step = -1
-        epoch_time = None
         epoch_time_start = time.time()
         train_time_start = time.time()
         self.epoch = start_epoch
+        last_opt_step = num_batches * self.epoch
         optimizer.zero_grad()
         while True:
-            # epoch_ = epoch
-            
             model.train()
-            # if epoch == (epochs - args.close_mosaic):
-            #     raise NotImplementedError
 
             LOGGER_YOLO.info(
                 "%11s" * (3 + len(self.loss_names)),
@@ -499,9 +489,6 @@ class Trainer:
                         if args.time:
                             raise NotImplementedError
 
-                    # if args.plots:
-                    #     raise NotImplementedError
-
                     # Log
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
                     pbar.set_description(
@@ -578,6 +565,7 @@ class Trainer:
                     best_fitness=best_fitness or 0.0,
                     ema=ema,
                     optimizer=optimizer,
+                    scaler=scaler,
                     train_args=args,
                     metrics=metrics,
                     fitness=fitness,
@@ -713,6 +701,7 @@ class Trainer:
         best_fitness: float,
         ema: ModelEMA,
         optimizer: torch.optim.Optimizer,
+        scaler: torch.GradScaler,
         train_args: DefaultConfig,
         metrics: dict[str, float],
         fitness: float,
@@ -726,9 +715,10 @@ class Trainer:
             epoch=epoch,
             best_fitness=best_fitness,
             model=None,
-            ema=deepcopy(ema.ema).half(),
+            ema=ema.ema,
             updates=ema.updates,
-            optimizer=convert_optimizer_state_dict_to_fp16(deepcopy(optimizer.state_dict())),
+            optimizer=optimizer.state_dict(),
+            scaler=scaler.state_dict(),
             train_args=train_args,
             train_metrics={**metrics, "metrics/mAP-ewa(B)": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0},
             train_results={},
@@ -805,6 +795,7 @@ class Trainer:
         self,
         ckpt: ModelCheckpoint | None,
         optimizer: torch.optim.Optimizer,
+        scaler: torch.GradScaler,
         ema: ModelEMA,
         best_fitness: float | None = None,
     ) -> tuple[float | None, int]:
@@ -814,7 +805,9 @@ class Trainer:
         if ckpt["optimizer"] is not None:
             optimizer.load_state_dict(ckpt["optimizer"])
             best_fitness = ckpt["best_fitness"]
-        if ckpt["ema"]:
+        if ckpt["scaler"] is not None:
+            scaler.load_state_dict(ckpt["scaler"])
+        if ckpt["ema"] is not None:
             ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
             ema.updates = ckpt["updates"]
         # Restore stateful EWA metric if present in saved train_metrics
