@@ -448,6 +448,11 @@ class TaskAlignedAssigner(nn.Module):
         Note:
             b: batch size, h: height, w: width, d: depth.
         """
+        # Keep a copy of the original candidate mask to know which anchors were valid for each GT
+        # before resolving conflicts. This helps us ensure every GT with candidates gets at least
+        # one anchor in the final assignment.
+        orig_mask_pos = mask_pos.clone()
+
         # Convert (b, n_max_boxes, h*w*d) -> (b, h*w*d)
         fg_mask = mask_pos.sum(-2)
         if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes
@@ -465,6 +470,101 @@ class TaskAlignedAssigner(nn.Module):
                 mask_multi_gts, is_max_overlaps, mask_pos
             ).float()  # (b, n_max_boxes, h*w*d)
             fg_mask = mask_pos.sum(-2)
+
+        # Ensure each GT with at least one candidate in the original mask retains at least one
+        # unique anchor assignment after conflict resolution.
+        # Shapes
+        B, M, A = mask_pos.shape
+        # Count anchors per GT after conflict resolution
+        per_gt_counts = mask_pos.sum(-1)  # (B, M)
+
+        # A GT is considered "eligible" if it had candidates originally (avoid padded GTs).
+        gt_had_candidates = orig_mask_pos.sum(-1) > 0  # (B, M)
+
+        # For each batch element, rebalance as needed.
+        for b in range(B):
+            # Indices of GTs that had candidates but currently have 0 assigned anchors
+            need_assign = torch.nonzero(
+                (per_gt_counts[b] == 0) & gt_had_candidates[b], as_tuple=False
+            ).flatten()
+            if need_assign.numel() == 0:
+                continue
+
+            LOGGER.warning(
+                f"Using fall back mechanism to assign targets for {need_assign.numel()} objects "
+                f"because they had no anchors left are highest overlap filtering."
+            )
+
+            # For fast lookup of current owner per anchor (unique after conflict resolution)
+            # owner[j] = gt index that currently owns anchor j, or -1 if unassigned
+            # Build owner by argmax over GT dim where there is a 1
+            owner = torch.full((A,), -1, device=mask_pos.device, dtype=torch.long)
+            # anchors that are currently assigned
+            assigned_anchors = torch.nonzero(fg_mask[b] > 0, as_tuple=False).flatten()
+            if assigned_anchors.numel() > 0:
+                # For these anchors, find gt index with value==1
+                gt_idx_for_anchor = mask_pos[b, :, assigned_anchors].argmax(0)
+                owner[assigned_anchors] = gt_idx_for_anchor
+
+            # Prepare per-gt sorted candidate anchors by descending overlap
+            # We only consider original candidates for that GT
+            # overlaps[b, m, :] may be zero for non-candidates; sorting still works
+            for m in need_assign.tolist():
+                candidates_mask = orig_mask_pos[b, m].bool()
+                if not candidates_mask.any():
+                    # No valid candidates originally -> skip (likely padded GT)
+                    continue
+
+                # Sort candidate anchors by descending IoU overlap
+                cand_overlaps = overlaps[b, m]
+                cand_indices = torch.nonzero(candidates_mask, as_tuple=False).flatten()
+                # If for some reason overlaps are identical, torch.sort is deterministic
+                sorted_vals, order = torch.sort(cand_overlaps[cand_indices], descending=True)
+                sorted_candidates = cand_indices[order]
+
+                # Try to assign the best possible anchor to this GT.
+                assigned = False
+                for j in sorted_candidates.tolist():
+                    cur_owner = owner[j].item()
+                    if cur_owner == -1:
+                        # Anchor is currently free: assign it to GT m
+                        mask_pos[b, m, j] = 1.0
+                        per_gt_counts[b, m] += 1
+                        fg_mask[b, j] += 1
+                        owner[j] = m
+                        assigned = True
+                        break
+                    elif cur_owner != m and per_gt_counts[b, cur_owner] > 1:
+                        # Steal from current owner only if that owner will still have >=1 anchor
+                        mask_pos[b, cur_owner, j] = 0.0
+                        per_gt_counts[b, cur_owner] -= 1
+                        mask_pos[b, m, j] = 1.0
+                        per_gt_counts[b, m] += 1
+                        # fg_mask stays 1 for that anchor (still assigned to exactly one GT)
+                        owner[j] = m
+                        assigned = True
+                        break
+                    # else: try next best candidate
+
+                # If we couldn't assign any candidate (extremely rare), fall back to best global
+                # anchor by overlap for this GT, even if it wasn't in original candidates.
+                if not assigned:
+                    j = int(torch.argmax(overlaps[b, m]).item())
+                    cur_owner = owner[j].item()
+                    if cur_owner == -1:
+                        mask_pos[b, m, j] = 1.0
+                        per_gt_counts[b, m] += 1
+                        fg_mask[b, j] += 1
+                        owner[j] = m
+                    elif cur_owner != m and per_gt_counts[b, cur_owner] > 1:
+                        mask_pos[b, cur_owner, j] = 0.0
+                        per_gt_counts[b, cur_owner] -= 1
+                        mask_pos[b, m, j] = 1.0
+                        per_gt_counts[b, m] += 1
+                        owner[j] = m
+
+        # Recompute fg_mask after potential rebalancing
+        fg_mask = mask_pos.sum(-2)
         # Find each grid serve which gt(index)
         target_gt_idx = mask_pos.argmax(-2)  # (b, h*w*d)
         return target_gt_idx, fg_mask, mask_pos    
