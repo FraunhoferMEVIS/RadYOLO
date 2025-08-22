@@ -241,9 +241,6 @@ class v8DetectionLoss:  # noqa: N801
                     prototype_masks_batch = prototype_masks[batch_index]
                     for mask_index, gt_mask in enumerate(masks):
                         grid_cell_indices = torch.nonzero((target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)).squeeze(1)
-                        if not grid_cell_indices.any():
-                            LOGGER.warning("No detections for this object. Skipping this mask.")
-                            continue
                         mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
                         pred_masks = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
                         gt_mask = F.interpolate(gt_mask[None, None, :], prototype_masks_batch.shape[1:], mode="nearest-exact")[0]
