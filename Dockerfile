@@ -17,4 +17,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ADD src/ /app/
 
-CMD ["uv", "run", "-m", "yolo11_3d", "train"]
+CMD ["/bin/bash"]
