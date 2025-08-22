@@ -108,31 +108,33 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         image = sample["image"]
         classes = sample["classes"]
         bboxes = xyzwhd2xyzxyz(sample["bboxes"])
+        masks = sample["masks"]
         bboxes = bboxes * scale_tensor
 
         labels = torch.cat((classes, bboxes), dim=1)
 
-        image, labels = random_zoom(
+        image, labels, masks = random_zoom(
             image,
             labels,
+            masks,
             self.hyp["max_zoom"],
             self.hyp["min_zoom"],
             self.hyp["prob_zoom"],
             self.hyp["out_zoom_padding"],
         )
 
-        image, labels = tensor_cutout(image, labels, self.hyp["cutout_params"], self.hyp["prob_cutout"])
+        image, labels, masks = tensor_cutout(image, labels, masks, self.hyp["cutout_params"], self.hyp["prob_cutout"])
         nl = len(labels)
         if nl:
             labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
 
-        image, labels = enlarge_bounding_boxes(image, labels, self.imgsz, self.min_stride)
+        image, labels, masks = enlarge_bounding_boxes(image, labels, masks, self.imgsz, self.min_stride)
         
         if nl:
             labels[:, 1:] = labels[:, 1:] / scale_tensor
 
-        image, labels = random_mirroring(
-            image, labels, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
+        image, labels, masks = random_mirroring(
+            image, labels, masks, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
         )
 
         if self.hyp["do_batchgenerators_intensity_augmentation"]:
@@ -143,6 +145,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         sample["image"] = image
         sample["classes"] = labels[:, 0:1]
         sample["bboxes"] = labels[:, 1:]
+        sample["masks"] = masks
 
         return sample
 
@@ -241,16 +244,16 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
     def collate_fn(batch: list[Sample]) -> Batch:
         with torch.no_grad():
             return {
-                "img": torch.stack([item["image"] for item in batch]),
-                "ori_shape": tuple(item["original_shape"] for item in batch),
-                "ratio_pad": tuple(item["ratio_pad"] for item in batch),
-                "shape": tuple(item["shape"] for item in batch),
-                "cls": torch.cat([item["classes"] for item in batch], 0),
-                "bboxes": torch.cat([item["bboxes"] for item in batch], 0),
+                "img": torch.stack([sample["image"] for sample in batch]),
+                "ori_shape": tuple(sample["original_shape"] for sample in batch),
+                "ratio_pad": tuple(sample["ratio_pad"] for sample in batch),
+                "shape": tuple(sample["shape"] for sample in batch),
+                "cls": torch.cat([sample["classes"] for sample in batch], 0),
+                "bboxes": torch.cat([sample["bboxes"] for sample in batch], 0),
                 "batch_idx": torch.cat(
-                    [torch.full(item["classes"].size()[:1], idx) for idx, item in enumerate(batch)],
+                    [torch.full(sample["classes"].size()[:1], idx) for idx, sample in enumerate(batch)],
                     0,
                 ),
-                "masks": tuple(item["masks"] for item in batch),
+                "masks": tuple(sample["masks"] for sample in batch),
             }
 

@@ -8,6 +8,7 @@ import random
 from typing import TYPE_CHECKING, Any
 
 import torch
+import torch.nn.functional as F  # noqa: N812
 from batchgeneratorsv2.transforms.intensity.brightness import (
     MultiplicativeBrightnessTransform,  # , BrightnessAdditiveTransform
 )
@@ -53,9 +54,10 @@ def bbox_iov(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch
 def tensor_cutout(
     im: torch.Tensor,
     labels: torch.Tensor,
+    masks: list[torch.Tensor | None] | None,
     cutout_params: list[tuple[float, int]],
     p: float = 0.5,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Applies image cutout augmentation https://arxiv.org/abs/1708.04552.
 
     Args:
@@ -70,7 +72,7 @@ def tensor_cutout(
         tuple[torch.Tensor, torch.Tensor]: A tuple of the augmented image and labels.
     """
     if random.random() >= p:
-        return im, labels
+        return im, labels, masks
 
     d, h, w = im.shape[1:]
 
@@ -99,20 +101,23 @@ def tensor_cutout(
                 [xmin, ymin, zmin, xmax, ymax, zmax], dtype=labels.dtype, device=labels.device
             )
             iov = bbox_iov(box, labels[:, 1:7])  # intersection over volume
-            labels = labels[iov < 0.60]  # remove >60% obscured labels
+            keep_mask = iov < 0.60
+            labels = labels[keep_mask]  # remove >60% obscured labels
+            if masks is not None:
+                # Filter masks in sync with labels (do not modify mask tensors’ voxels for cutout)
+                masks = [masks[i] for i, k in enumerate(keep_mask.tolist()) if k]
 
-    return im, labels
-
-# TODO: Adapt augmentations to handle masks as well
+    return im, labels, masks
 
 def random_zoom(
     image: torch.Tensor,
     labels: torch.Tensor,
+    masks: list[torch.Tensor | None] | None,
     max_zoom: float = 1.5,
     min_zoom: float = 0.7,
     p: float = 0.5,
     out_zoom_padding: str = "random",
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Randomly zooms in or out of a random part of the input image.
 
     Args:
@@ -127,7 +132,7 @@ def random_zoom(
         augmented_labels: Adjusted labels.
     """
     if random.random() >= p:
-        return image, labels
+        return image, labels, masks
 
     augmented_labels = labels.clone()
 
@@ -140,6 +145,19 @@ def random_zoom(
     image = torch.nn.functional.interpolate(
         image.unsqueeze(0), scale_factor=zoom_factor, mode="trilinear", align_corners=False
     ).squeeze_(0)
+    # Scale masks (nearest)
+    if masks is not None:
+        scaled_masks: list[torch.Tensor | None] = []
+        for m in masks:
+            if m is None:
+                scaled_masks.append(None)
+                continue
+            # m: (D,H,W) -> (1,1,D,H,W)
+            m5 = m.unsqueeze(0).unsqueeze(0)
+            m_scaled = F.interpolate(m5, scale_factor=zoom_factor, mode="nearest-exact").squeeze(0).squeeze(0)
+            scaled_masks.append(m_scaled)
+        masks = scaled_masks
+
     # remove batch dimension for compatibility with later code
 
     # retrieve new image shape
@@ -165,6 +183,15 @@ def random_zoom(
 
         image = image[:, zmin:zmax, ymin:ymax, xmin:xmax]
 
+        if masks is not None:
+            cropped_masks: list[torch.Tensor | None] = []
+            for m in masks:
+                if m is None:
+                    cropped_masks.append(None)
+                    continue
+                cropped_masks.append(m[zmin:zmax, ymin:ymax, xmin:xmax])
+            masks = cropped_masks
+
         # move labels to correspond to new center of zoom
         augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] - xmin
         # augmented_labels[:, 4] = augmented_labels[:, 4] - xmin
@@ -178,7 +205,7 @@ def random_zoom(
         label_center_y = (augmented_labels[:, 2] + augmented_labels[:, 5]) / 2
         label_center_z = (augmented_labels[:, 3] + augmented_labels[:, 6]) / 2
 
-        mask = ~(
+        filter = ~(
             (label_center_x < xmin - 8)
             | (label_center_x > xmax + 8)
             | (label_center_y < ymin - 8)
@@ -186,7 +213,9 @@ def random_zoom(
             | (label_center_z < zmin - 8)
             | (label_center_z > zmax + 8)
         )
-        augmented_labels = augmented_labels[mask]
+        augmented_labels = augmented_labels[filter]
+        if masks is not None:
+            masks = [m for m, k in zip(masks, filter.tolist()) if k]
 
         # crop labels beyond bounds of new image
         # faster individually
@@ -226,6 +255,18 @@ def random_zoom(
         image = new_image
         del new_image
 
+        if masks is not None:
+            padded_masks: list[torch.Tensor | None] = []
+            for m in masks:
+                if m is None:
+                    padded_masks.append(None)
+                    continue
+                    
+                new_mask = torch.zeros(d, h, w, dtype=m.dtype, device=m.device)
+                new_mask[zmin:zmax, ymin:ymax, xmin:xmax] = m
+                padded_masks.append(new_mask)
+            masks = padded_masks
+
         # move labels to correspond to new center of zoom
         augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] + xmin
         # augmented_labels[:, 4] = augmented_labels[:, 4] + xmin
@@ -234,15 +275,16 @@ def random_zoom(
         augmented_labels[:, [3, 6]] = augmented_labels[:, [3, 6]] + zmin
         # augmented_labels[:, 6] = augmented_labels[:, 6] + zmin
 
-    return image, augmented_labels
+    return image, augmented_labels, masks
 
 
 def random_mirroring(
     image: torch.Tensor,
     labels: torch.Tensor,
+    masks: list[torch.Tensor | None] | None,
     mirror_axes: list[str] = ["z", "y", "x"],
     p: float = 0.5,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Applies image mirroring augmentation.
 
     Args:
@@ -256,7 +298,7 @@ def random_mirroring(
         labels: augmented labels
     """
     if random.random() >= p:
-        return image, labels
+        return image, labels, masks
 
     flip_dims = []
     new_labels = labels.clone()
@@ -269,8 +311,17 @@ def random_mirroring(
 
     if flip_dims:
         image = torch.flip(image, dims=flip_dims)
+        if masks is not None:
+            mdims = [d - 1 for d in flip_dims]  # map (C,D,H,W) dims -> (D,H,W) dims
+            flipped_masks: list[torch.Tensor | None] = []
+            for m in masks:
+                if m is None:
+                    flipped_masks.append(None)
+                    continue
+                flipped_masks.append(torch.flip(m, dims=mdims))
+            masks = flipped_masks
 
-    return image, new_labels
+    return image, new_labels, masks
 
 
 def batch_generators_intensity_augmentations(
@@ -345,9 +396,10 @@ def batch_generators_intensity_augmentations(
 def enlarge_bounding_boxes(
     image: torch.Tensor,
     labels: torch.Tensor,
+    masks: list[torch.Tensor | None] | None,
     imgsz: tuple[int, int, int],
     stride: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Enlarges bounding box edges to stride size which would be smaller than the stride size.
 
     Args:
@@ -360,7 +412,7 @@ def enlarge_bounding_boxes(
         tuple[torch.Tensor, torch.Tensor]: augmented image and labels
     """
     if labels.shape[0] == 0:
-        return image, labels
+        return image, labels, masks
 
     # enlarge bounding boxes to stride size by replacing the w,h,d which are smaller than the stride
     # size with the stride size
@@ -371,7 +423,7 @@ def enlarge_bounding_boxes(
     # for that we convert the xyzwhd bounding boxes to xyzxyz using the function xyzwhd2xyzxyz
     # and then check if the coordinates are within the image size
     bboxes = xyzwhd2xyzxyz(labels[:, 1:7])
-    mask = (
+    filter = (
         (bboxes[:, 0] >= 0)
         & (bboxes[:, 1] >= 0)
         & (bboxes[:, 2] >= 0)
@@ -379,6 +431,8 @@ def enlarge_bounding_boxes(
         & (bboxes[:, 4] < imgsz[1])
         & (bboxes[:, 5] < imgsz[0])
     )
-    labels = labels[mask]
+    labels = labels[filter]
+    if masks is not None:
+        masks = [m for m, k in zip(masks, filter.tolist()) if k]
 
-    return image, labels
+    return image, labels, masks
