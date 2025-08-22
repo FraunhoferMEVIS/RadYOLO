@@ -18,8 +18,6 @@ from pydantic import (
     model_validator,
 )
 
-from . import MODELS
-
 if TYPE_CHECKING:
     import datetime
 
@@ -46,7 +44,6 @@ class DefaultConfig(BaseModel):
 
     # Train settings
     model: FilePath | NewPath  # path to model file
-    model_type: str
     data: FilePath  # path to data file
     fold: int
     epochs: int = 100  # number of epochs to train for
@@ -158,6 +155,7 @@ class DefaultConfig(BaseModel):
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain
+    mask_gain: float = 1.0  # mask loss gain
     nbs: int = 64  # nominal batch size
     degrees: float = Field(0.0, le=180, ge=0)  # image roation (+/- deg)
     translate: float = 0.1  # image translation
@@ -187,20 +185,6 @@ class DefaultConfig(BaseModel):
     cfg: FilePath | None = None  # for overriding defaults.yaml
 
     save_dir: Path | None = None
-
-    @model_validator(mode="after")
-    def validate_model_type(self) -> Self:
-        if self.model_type not in MODELS:
-            msg = f"got model_type {self.model_type}. registered model types are {MODELS.keys()}"
-            raise ValueError(msg)
-
-        _, ndim = MODELS[self.model_type]
-
-        if len(self.imgsz) != ndim:
-            msg = f"got {len(self.imgsz)} image dimensions, but model_type {self.model_type} expects {ndim} dimensions."
-            raise ValueError(msg)
-
-        return self
 
 
 class DatasetConfig(BaseModel):

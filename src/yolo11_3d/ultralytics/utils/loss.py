@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
+import logging
 
 import torch
 from torch import nn
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from yolo11_3d.nn.layers import Detect
     from yolo11_3d.nn.model import HardcodedModel
 
+LOGGER = logging.getLogger(__name__)
 
 class DFLoss(nn.Module):
     """Criterion class for computing DFL losses during training."""
@@ -96,24 +98,22 @@ class v8DetectionLoss:  # noqa: N801
         box: float,
         cls: float,
         dfl: float,
+        mask_gain: float,
         detect_layer: Detect,
         device: torch.device,
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
         tal_beta: float = 6.0,
         tal_fallback: bool = True,
+        enable_mask_loss: bool = False
     ) -> None:  # model must be de-paralleled
         """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
-        # device: torch.device = next(model.parameters()).device  # get model device
-        # h: DefaultConfig = model.args  # hyperparameters
-
-        # m: Detect = model.model[-1]  # Detect() module
         m = detect_layer
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
-        # self.hyp: DefaultConfig = h
         self.box_gain = box
         self.classification_gain = cls
         self.dfl_gain = dfl
+        self.mask_gain = mask_gain
         self.stride: torch.Tensor = m.stride  # model strides
         self.num_classes: int = m.nc  # number of classes
         self.no: int = m.nc + m.reg_max * 6
@@ -128,6 +128,9 @@ class v8DetectionLoss:  # noqa: N801
         )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
+        self.enable_mask_loss = enable_mask_loss
+        # TODO: Change into sum of Dice and BCE loss
+        self.mask_loss = nn.BCEWithLogitsLoss
 
     def preprocess(
         self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor
@@ -159,11 +162,16 @@ class v8DetectionLoss:  # noqa: N801
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(
-        self, preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]], batch: Batch
+        self,
+        preds: tuple[list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
+                     torch.Tensor | None,
+                     torch.Tensor | None],
+        batch: Batch
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
-        loss = torch.zeros(3, device=self.device)  # box, cls, dfl
-        feats = preds[1] if isinstance(preds, tuple) else preds
+        """Calculate the sum of the loss for box, cls, dfl and mask multiplied by batch size."""
+        loss = torch.zeros(4, device=self.device)  # box, cls, dfl, mask
+        feats = preds[0]
+        feats = feats[1] if isinstance(feats, tuple) else feats # Handling of inference pass
         pred_distri, pred_scores = torch.cat(
             [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2
         ).split((self.reg_max * 6, self.num_classes), 1)
@@ -190,13 +198,11 @@ class v8DetectionLoss:  # noqa: N801
 
         # Pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyzxyz, (b, h*w*d, 6)
-        # dfl_conf = pred_distri.view(batch_size, -1, 4, self.reg_max).detach().softmax(-1)
-        # dfl_conf = (dfl_conf.amax(-1).mean(-1) + dfl_conf.amax(-1).amin(-1)) / 2
+        pred_bboxes_image_coordinates = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
 
-        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
-            # pred_scores.detach().sigmoid() * 0.8 + dfl_conf.unsqueeze(-1) * 0.2,
+        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
             pred_scores.detach().sigmoid(),
-            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            pred_bboxes_image_coordinates,
             anchor_points * stride_tensor,
             gt_labels,
             gt_bboxes,
@@ -206,7 +212,6 @@ class v8DetectionLoss:  # noqa: N801
         target_scores_sum = max(target_scores.sum(), 1)
 
         # Cls loss
-        # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
 
         # Bbox loss
@@ -222,8 +227,56 @@ class v8DetectionLoss:  # noqa: N801
                 fg_mask,
             )
 
-        loss[0] *= self.box_gain  # box gain
-        loss[1] *= self.classification_gain  # cls gain
-        loss[2] *= self.dfl_gain  # dfl gain
+            # Mask loss
+            if self.enable_mask_loss:
+                target_bboxes_grid = target_bboxes / 4
+                pred_bboxes_grid = pred_bboxes_image_coordinates / 4
+                mask_loss_count = 0
+                mask_coefficients = preds[1]
+                mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
+                prototype_masks = preds[2]
+                for batch_index, masks in enumerate(batch["masks"]):
+                    target_gt_idx_batch = target_gt_idx[batch_index]
+                    fg_mask_batch = fg_mask[batch_index]
+                    prototype_masks_batch = prototype_masks[batch_index]
+                    for mask_index, gt_mask in enumerate(masks):
+                        grid_cell_indices = torch.nonzero((target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)).squeeze(1)
+                        if not grid_cell_indices.any():
+                            LOGGER.warning("No detections for this object. Skipping this mask.")
+                            continue
+                        mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
+                        pred_masks = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
+                        gt_mask = F.interpolate(gt_mask[None, None, :], prototype_masks_batch.shape[1:], mode="nearest-exact")[0]
+                        gt_mask = gt_mask.to(self.device)
+                        if not gt_mask.any():
+                            LOGGER.warning("Empty mask after downsampling. Skipping this mask.")
+                            continue
+                        gt_mask = gt_mask.repeat(pred_masks.shape[0], 1, 1, 1)
+                        gt_mask = gt_mask.to(pred_masks.dtype)
+                        mask_loss = F.binary_cross_entropy_with_logits(pred_masks, gt_mask, reduction="none")
+                        target_box = target_bboxes_grid[batch_index, mask_index]
+                        predicted_boxes = pred_bboxes_grid[batch_index, grid_cell_indices]
+                        predicted_box = torch.cat([predicted_boxes[:,:3].amin(dim=0), predicted_boxes[:,3:].amax(dim=0)])
+                        cropping_box = torch.cat([torch.amin(torch.cat([target_box[:3, None], predicted_box[:3, None]], dim=1), dim=1),
+                                                  torch.amax(torch.cat([target_box[3:, None], predicted_box[3:, None]], dim=1), dim=1)])
+                        cropping_box[:3] = cropping_box[:3].floor()
+                        cropping_box[3:] = cropping_box[3:].ceil()
+                        cropping_box[:3] = cropping_box[:3].clamp(min=0)
+                        cropping_box[3] = cropping_box[3].clamp(max=prototype_masks.shape[2])
+                        cropping_box[4] = cropping_box[4].clamp(max=prototype_masks.shape[3])
+                        cropping_box[5] = cropping_box[5].clamp(max=prototype_masks.shape[4])
+                        cropping_box = cropping_box.to(torch.int)
+                        mask_loss = mask_loss[:,
+                                              cropping_box[0].item():cropping_box[3].item(),
+                                              cropping_box[1].item():cropping_box[4].item(),
+                                              cropping_box[2].item():cropping_box[5].item()]
+                        loss[3] += mask_loss.mean()
+                        mask_loss_count += 1
+                loss[3] = loss[3] / mask_loss_count
 
-        return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
+        loss[0] *= self.box_gain
+        loss[1] *= self.classification_gain
+        loss[2] *= self.dfl_gain
+        loss[3] *= self.mask_gain
+
+        return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask)

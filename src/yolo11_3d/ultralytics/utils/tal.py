@@ -359,29 +359,29 @@ class TaskAlignedAssigner(nn.Module):
         Args:
             gt_labels (Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the
                                 batch size and max_num_obj is the maximum number of objects.
-            gt_bboxes (Tensor): Ground truth bounding boxes of shape (b, max_num_obj, 4).
+            gt_bboxes (Tensor): Ground truth bounding boxes of shape (b, max_num_obj, 6).
             target_gt_idx (Tensor): Indices of the assigned ground truth objects for positive
-                                    anchor points, with shape (b, h*w), where h*w is the total
+                                    anchor points, with shape (b, h*w*d), where h*w*d is the total
                                     number of anchor points.
-            fg_mask (Tensor): A boolean tensor of shape (b, h*w) indicating the positive
+            fg_mask (Tensor): A boolean tensor of shape (b, h*w*d) indicating the positive
                               (foreground) anchor points.
 
         Returns:
             (Tuple[Tensor, Tensor, Tensor]): A tuple containing the following tensors:
-                - target_labels (Tensor): Shape (b, h*w), containing the target labels for
+                - target_labels (Tensor): Shape (b, h*w*d), containing the target labels for
                                           positive anchor points.
-                - target_bboxes (Tensor): Shape (b, h*w, 4), containing the target bounding boxes
+                - target_bboxes (Tensor): Shape (b, h*w*d, 6), containing the target bounding boxes
                                           for positive anchor points.
-                - target_scores (Tensor): Shape (b, h*w, num_classes), containing the target scores
+                - target_scores (Tensor): Shape (b, h*w*d, num_classes), containing the target scores
                                           for positive anchor points, where num_classes is the number
                                           of object classes.
         """
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
-        target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w)
-        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w)
+        target_gt_idx = target_gt_idx + batch_ind * self.n_max_boxes  # (b, h*w*d)
+        target_labels = gt_labels.long().flatten()[target_gt_idx]  # (b, h*w*d)
 
-        # Assigned target boxes, (b, max_num_obj, 4) -> (b, h*w, 4)
+        # Assigned target boxes, (b, max_num_obj, 6) -> (b, h*w*d, 6)
         target_bboxes = gt_bboxes.view(-1, gt_bboxes.shape[-1])[target_gt_idx]
 
         # Assigned target scores
@@ -392,10 +392,10 @@ class TaskAlignedAssigner(nn.Module):
             (target_labels.shape[0], target_labels.shape[1], self.num_classes),
             dtype=torch.int64,
             device=target_labels.device,
-        )  # (b, h*w, 80)
+        )  # (b, h*w*d, 80)
         target_scores.scatter_(2, target_labels.unsqueeze(-1), 1)
 
-        fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w, 80)
+        fg_scores_mask = fg_mask[:, :, None].repeat(1, 1, self.num_classes)  # (b, h*w*d, 80)
         target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
 
         return target_labels, target_bboxes, target_scores
@@ -436,25 +436,25 @@ class TaskAlignedAssigner(nn.Module):
         """Select anchor boxes with highest IoU when assigned to multiple ground truths.
 
         Args:
-            mask_pos (torch.Tensor): Positive mask, shape (b, n_max_boxes, h*w).
-            overlaps (torch.Tensor): IoU overlaps, shape (b, n_max_boxes, h*w).
+            mask_pos (torch.Tensor): Positive mask, shape (b, n_max_boxes, h*w*d).
+            overlaps (torch.Tensor): IoU overlaps, shape (b, n_max_boxes, h*w*d).
             n_max_boxes (int): Maximum number of ground truth boxes.
 
         Returns:
-            target_gt_idx (torch.Tensor): Indices of assigned ground truths, shape (b, h*w).
-            fg_mask (torch.Tensor): Foreground mask, shape (b, h*w).
-            mask_pos (torch.Tensor): Updated positive mask, shape (b, n_max_boxes, h*w).
+            target_gt_idx (torch.Tensor): Indices of assigned ground truths, shape (b, h*w*d).
+            fg_mask (torch.Tensor): Foreground mask, shape (b, h*w*d).
+            mask_pos (torch.Tensor): Updated positive mask, shape (b, n_max_boxes, h*w*d).
 
         Note:
-            b: batch size, h: height, w: width.
+            b: batch size, h: height, w: width, d: depth.
         """
-        # Convert (b, n_max_boxes, h*w) -> (b, h*w)
+        # Convert (b, n_max_boxes, h*w*d) -> (b, h*w*d)
         fg_mask = mask_pos.sum(-2)
         if fg_mask.max() > 1:  # one anchor is assigned to multiple gt_bboxes
             mask_multi_gts = (fg_mask.unsqueeze(1) > 1).expand(
                 -1, n_max_boxes, -1
-            )  # (b, n_max_boxes, h*w)
-            max_overlaps_idx = overlaps.argmax(1)  # (b, h*w)
+            )  # (b, n_max_boxes, h*w*d)
+            max_overlaps_idx = overlaps.argmax(1)  # (b, h*w*d)
 
             is_max_overlaps = torch.zeros(
                 mask_pos.shape, dtype=mask_pos.dtype, device=mask_pos.device
@@ -463,10 +463,10 @@ class TaskAlignedAssigner(nn.Module):
 
             mask_pos = torch.where(
                 mask_multi_gts, is_max_overlaps, mask_pos
-            ).float()  # (b, n_max_boxes, h*w)
+            ).float()  # (b, n_max_boxes, h*w*d)
             fg_mask = mask_pos.sum(-2)
         # Find each grid serve which gt(index)
-        target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
+        target_gt_idx = mask_pos.argmax(-2)  # (b, h*w*d)
         return target_gt_idx, fg_mask, mask_pos    
 
 

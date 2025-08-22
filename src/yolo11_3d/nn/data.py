@@ -219,7 +219,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         masks = []
         if self.load_masks:
             for label_index in range(len(labels)):
-                mask_path = os.path.join(self.src_path, "masks", f"{case_name}_mask_{label_index:04d}.txt")
+                mask_path = os.path.join(self.src_path, "masks", f"{case_name}_mask_{label_index:04d}.nii.gz")
                 if not os.path.exists(mask_path):
                     masks.append(None)
                     continue

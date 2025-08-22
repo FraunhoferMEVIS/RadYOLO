@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 import torch
 from torch import nn
@@ -22,42 +21,7 @@ if TYPE_CHECKING:
     from yolo11_3d.nn.data import Batch
 
 
-class BaseModel(nn.Module, ABC):
-    @overload
-    def forward(
-        self, x: torch.Tensor, *args, **kwargs
-    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
-
-    @overload
-    def forward(self, x: dict[str, Any], *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
-
-    @abstractmethod
-    def forward(
-        self, x: torch.Tensor | dict[str, Any], *args, **kwargs
-    ) -> (
-        list[torch.Tensor]
-        | torch.Tensor
-        | tuple[torch.Tensor, list[torch.Tensor]]
-        | tuple[torch.Tensor, torch.Tensor]
-    ): ...
-
-    @abstractmethod
-    def loss(
-        self,
-        batch: Batch,
-        preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]: ...
-
-    @abstractmethod
-    def load(self, weights: ModelCheckpoint | nn.Module) -> None: ...
-
-    @abstractmethod
-    def predict(
-        self, x: torch.Tensor, augment: bool = False
-    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
-
-
-class HardcodedModel(BaseModel):
+class HardcodedModel(nn.Module):
     def __init__(
         self,
         input_channels: int,
@@ -66,7 +30,10 @@ class HardcodedModel(BaseModel):
         box: float,
         cls: float,
         dfl: float,
+        mask_gain: float,
         device: torch.device,
+        enable_output_masks: bool = True,
+        num_prototype_masks: int = 8,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -87,6 +54,9 @@ class HardcodedModel(BaseModel):
 
         def num_repeats_(n: int) -> int:
             return max(round(n * depth_multiplier), 1)
+
+        self.enable_output_masks = enable_output_masks
+        self.num_prototype_masks = num_prototype_masks
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
@@ -214,23 +184,47 @@ class HardcodedModel(BaseModel):
         self.l22 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
+        if self.enable_output_masks:
+            self.prototype_layer = PrototypeMasks(
+                output_channels[16], num_prototype_masks * 4, num_prototype_masks
+            )
+            c4 = max(output_channels[16] // 4, num_prototype_masks)
+            self.mask_coefficient_layer = nn.ModuleList(
+                nn.Sequential(
+                    Conv(output_channels[x], c4, 3),
+                    Conv(c4, c4, 3),
+                    nn.Conv3d(c4, num_prototype_masks, 1),
+                )
+                for x in [16, 19, 22]
+            )
+
         self.l23 = Detect(num_classes, [output_channels[x] for x in [16, 19, 22]])
         s = 256
         self.l23.stride = torch.tensor(
-            [s / x.shape[-2] for x in self.forward(torch.zeros(1, input_channels, s, s, s))]
+            [
+                s / x.shape[-2]
+                for x in self.forward(torch.zeros(1, input_channels, s, s, s))[0]
+            ]
         )
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-        self.criterion = v8DetectionLoss(self, box, cls, dfl, self.l23, device, tal_beta=1.0, tal_fallback=True)
+        self.criterion = v8DetectionLoss(
+            self, box, cls, dfl, mask_gain, self.l23, device, tal_beta=1.0, tal_fallback=True,
+            enable_mask_loss=enable_output_masks
+        )
 
     @overload
     def forward(
         self, x: torch.Tensor, *args, **kwargs
-    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
+    ) -> (
+        list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
+    ): ...
 
     @overload
-    def forward(self, x: Batch, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
+    def forward(
+        self, x: Batch, *args, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     def forward(
         self, x: torch.Tensor | Batch, *args, **kwargs
@@ -247,7 +241,9 @@ class HardcodedModel(BaseModel):
     def loss(
         self,
         batch: Batch,
-        preds: list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None = None,
+        preds: (
+            list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None
+        ) = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if preds is None:
             prediction = self.forward(batch["img"])
@@ -262,9 +258,11 @@ class HardcodedModel(BaseModel):
         csd = intersect_dicts(csd, self.state_dict())
         self.load_state_dict(csd, strict=False)
 
-    def predict(
-        self, x: torch.Tensor, augment: bool = False
-    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
+    def predict(self, x: torch.Tensor) -> tuple[
+        list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
         # BACKBONE
         x = self.l0(x)
         x = self.l1(x)
@@ -295,4 +293,56 @@ class HardcodedModel(BaseModel):
         x = self.l21([x, o10])
         x = o22 = self.l22(x)
 
-        return self.l23([o16, o19, o22])
+        detections = self.l23([o16, o19, o22])
+
+        if self.enable_output_masks:
+            prototype_masks = self.prototype_layer(o16)
+            batch_size = prototype_masks.shape[0]
+            mask_coefficients = torch.cat(
+                [
+                    self.mask_coefficient_layer[0](o16).view(
+                        batch_size, self.num_prototype_masks, -1
+                    ),
+                    self.mask_coefficient_layer[1](o19).view(
+                        batch_size, self.num_prototype_masks, -1
+                    ),
+                    self.mask_coefficient_layer[2](o22).view(
+                        batch_size, self.num_prototype_masks, -1
+                    ),
+                ],
+                2,
+            )
+            # TODO: Check for proper inference handling of masks
+            return detections, mask_coefficients, prototype_masks
+        else:
+            return detections, None, None
+
+
+class PrototypeMasks(nn.Module):
+    """PrototypeMasks module for segmentation models."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        intermediate_channels: int = 256,
+        prototypes: int = 32,
+    ):
+        """
+        Initialize the PrototypeMasks module with specified number of prototypes.
+
+        Args:
+            input_channels (int): Input channels.
+            intermediate_channels (int): Intermediate channels.
+            prototypes (int): Output channels (number of protos).
+        """
+        super().__init__()
+        self.cv1 = Conv(input_channels, intermediate_channels, kernel_size=3)
+        self.upsample = nn.ConvTranspose3d(
+            intermediate_channels, intermediate_channels, 2, 2, 0, bias=True
+        )
+        self.cv2 = Conv(intermediate_channels, intermediate_channels, kernel_size=3)
+        self.cv3 = Conv(intermediate_channels, prototypes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Perform a forward pass through layers using an upsampled input image."""
+        return self.cv3(self.cv2(self.upsample(self.cv1(x))))

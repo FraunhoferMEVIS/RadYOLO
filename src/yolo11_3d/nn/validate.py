@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
     from .config import DatasetConfig, DefaultConfig
     from .data import Batch
-    from .model import BaseModel
+    from .model import HardcodedModel
     from .train import Trainer
     from .util import ModelEMA
 
@@ -94,12 +94,12 @@ class Validator():
             self.data = trainer.data
             # force FP16 val during training
             self.args.half = self.device.type != "cpu" and amp
-            model = cast("BaseModel", ema.ema)
+            model = cast("HardcodedModel", ema.ema)
             model = model.half() if self.args.half else model.float()
             self.loss = torch.zeros_like(trainer.loss_items, device=trainer.device)
             model.eval()
         else:
-            model = cast("BaseModel", ema.ema)
+            model = cast("HardcodedModel", ema.ema)
             self.device = model.device  # update device
             if self.args.task == "classify":
                 raise NotImplementedError
@@ -121,7 +121,7 @@ class Validator():
             # Inference
             raw_preds: (
                 list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
-            ) = model(batch["img"], augment=augment)
+            ) = model(batch["img"])
             if isinstance(raw_preds, torch.Tensor):
                 raise TypeError(raw_preds)
 
@@ -132,7 +132,8 @@ class Validator():
                 )[1]
 
             # Postprocess
-            preds = self.postprocess(raw_preds)
+            pred_class_box, pred_mask_coeff, pred_prototype_masks = raw_preds
+            preds = self.postprocess(pred_class_box)
 
             self.update_metrics(preds, batch)
             if self.args.plots and batch_i < 3:

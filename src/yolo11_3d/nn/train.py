@@ -21,7 +21,6 @@ from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloade
 from yolo11_3d.ultralytics.utils.plotting import plot_results
 from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
-from . import MODELS
 from .config import (
     DatasetConfig,
     DefaultConfig,
@@ -31,7 +30,7 @@ from .config import (
     model_checkpoint_from_torch,
 )
 from .data import NIfTIDatasetWithMasks
-from .model import BaseModel
+from .model import HardcodedModel
 from .validate import Validator
 
 from .util import ModelEMA, init_seeds, select_device
@@ -142,8 +141,8 @@ class Trainer:
         device: torch.device,
         input_channels: int = 3,
         scale: Literal["n", "s", "m", "l", "x"] = "n",
-    ) -> tuple[ModelCheckpoint | None, BaseModel]:
-        if isinstance(self.model, BaseModel):
+    ) -> tuple[ModelCheckpoint | None, HardcodedModel]:
+        if isinstance(self.model, HardcodedModel):
             return None, self.model
 
         checkpoint_path = self.model_path
@@ -157,15 +156,14 @@ class Trainer:
             raise NotImplementedError
             weights_ema = torch.load(self.args.pretrained)
 
-        model_cls, _ = MODELS[self.args.model_type]
-
-        model = model_cls(
+        model = HardcodedModel(
             input_channels=input_channels,
             num_classes=num_classes,
             scale=scale,
             box=self.args.box,
             cls=self.args.cls,
             dfl=self.args.dfl,
+            mask_gain=self.args.mask_gain,
             device=device,
         )
         if weights_ema:
@@ -194,7 +192,7 @@ class Trainer:
         epochs: int,
         start_epoch: int = 0,
     ) -> tuple[
-        BaseModel,
+        HardcodedModel,
         bool,
         torch.GradScaler,
         DefaultConfig,
@@ -376,7 +374,7 @@ class Trainer:
         epochs: int,
         batch_size: int,
         args: DefaultConfig,
-        model: BaseModel,
+        model: HardcodedModel,
         train_loader: torch.utils.data.DataLoader,
         validator: Validator | None,
         optimizer: torch.optim.Optimizer,
@@ -729,7 +727,7 @@ class Trainer:
         save_dir: Path,
         names: dict[int, str],
     ) -> Validator:
-        self.loss_names = "box_loss", "cls_loss", "dfl_loss"
+        self.loss_names = "box_loss", "cls_loss", "dfl_loss", "mask_loss"
         return Validator(
             test_loader,
             save_dir=save_dir,

@@ -479,7 +479,9 @@ class Detect(nn.Module):
         if self.training:
             return x
         y = self._inference(x)
-        return y if self.export else (y, x)
+        if self.export:
+            return y
+        return (y, x)
 
     def _inference(self, x: list[torch.Tensor]) -> torch.Tensor:
         shape = x[0].shape

@@ -103,6 +103,7 @@ def tensor_cutout(
 
     return im, labels
 
+# TODO: Adapt augmentations to handle masks as well
 
 def random_zoom(
     image: torch.Tensor,
