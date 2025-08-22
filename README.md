@@ -23,6 +23,14 @@ Available commands are:
 
 For further details please refer to the respective `--help` invocation.
 
+## Docker Image
+
+You can build the docker image using the command
+
+```bash
+docker build -t yolo11-3d:latest .
+```
+
 ## Development
 
 The source code can be found in `src/`
