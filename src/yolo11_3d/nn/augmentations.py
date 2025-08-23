@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 import torch.nn.functional as F  # noqa: N812
 from batchgeneratorsv2.transforms.intensity.brightness import (
-    MultiplicativeBrightnessTransform,  # , BrightnessAdditiveTransform
+    MultiplicativeBrightnessTransform, BrightnessAdditiveTransform
 )
 from batchgeneratorsv2.transforms.intensity.contrast import ContrastTransform
 from batchgeneratorsv2.transforms.intensity.gamma import GammaTransform
@@ -312,16 +312,15 @@ def batch_generators_intensity_augmentations(
             ),
             apply_probability=0.15,
         ),
-        # RandomTransform(
-        #   BrightnessAdditiveTransform(
-        #    mu=0,
-        #    sigma=10,
-        #    per_channel=do_intensity_augmentations_per_channel,
-        #    p_per_sample=0.2,
-        #    p_per_channel=1
-        #    ),
-        #    apply_probability=0.15
-        # ),
+        RandomTransform(
+            BrightnessAdditiveTransform(
+                mu=0,
+                sigma=2,
+                per_channel=do_intensity_augmentations_per_channel,
+                p_per_channel=1
+            ),
+           apply_probability=0.15
+        ),
         RandomTransform(
             ContrastTransform(
                 contrast_range=(0.75, 1.25),
