@@ -177,11 +177,8 @@ def random_zoom(
 
         # move labels to correspond to new center of zoom
         augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] - xmin
-        # augmented_labels[:, 4] = augmented_labels[:, 4] - xmin
         augmented_labels[:, [2, 5]] = augmented_labels[:, [2, 5]] - ymin
-        # augmented_labels[:, 5] = augmented_labels[:, 5] - ymin
         augmented_labels[:, [3, 6]] = augmented_labels[:, [3, 6]] - zmin
-        # augmented_labels[:, 6] = augmented_labels[:, 6] - zmin
 
         # remove labels whose centers are 8 voxels outside of the new image region
         label_center_x = (augmented_labels[:, 1] + augmented_labels[:, 4]) / 2
