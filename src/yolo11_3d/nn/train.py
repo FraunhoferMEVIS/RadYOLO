@@ -153,9 +153,6 @@ class Trainer:
             checkpoint = model_checkpoint_from_torch(checkpoint_path)
             self.args = self.args.model_copy(update=checkpoint["train_args"].model_dump())
             weights_ema = checkpoint["ema"].to(self.device).float()
-        elif isinstance(self.args.pretrained, Path):
-            raise NotImplementedError
-            weights_ema = torch.load(self.args.pretrained)
 
         model = HardcodedModel(
             input_channels=input_channels,
@@ -174,19 +171,13 @@ class Trainer:
     def _setup_scheduler(
         self, optimizer: torch.optim.Optimizer
     ) -> tuple[torch.optim.lr_scheduler.LRScheduler, Callable[[int], float]]:
-        if self.args.cos_lr:
-            raise NotImplementedError
-        else:  # noqa: RET506
-
-            def lf(x: int) -> float:
-                return max(1 - x / self.epochs, 0) * (1.0 - self.args.lrf) + self.args.lrf
-
+        def lf(x: int) -> float:
+            return max(1 - x / self.epochs, 0) * (1.0 - self.args.lrf) + self.args.lrf
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lf)
         return scheduler, lf
 
     def _setup_train(
         self,
-        world_size: int,
         device: torch.device,
         args: DefaultConfig,
         batch_size: int,
@@ -242,8 +233,6 @@ class Trainer:
         # Check AMP
         amp = args.amp
         scaler = torch.GradScaler("cuda", enabled=amp)
-        if world_size > 1:
-            raise NotImplementedError
 
         # Check imgsz
         grid_size = max(
@@ -315,9 +304,6 @@ class Trainer:
         )
 
     def train(self) -> None:
-        world_size = 1 if torch.cuda.is_available() else 0
-
-        # Setup Train
         (
             model,
             amp,
@@ -338,7 +324,6 @@ class Trainer:
             best_fitness,
             start_epoch,
         ) = self._setup_train(
-            world_size=world_size,
             device=self.device,
             args=self.args,
             batch_size=self.batch_size,
@@ -380,7 +365,6 @@ class Trainer:
         amp_device_type: str,
         ema: ModelEMA,
         accumulate: int,
-        # world_size=1,
         stopper: EarlyStopping,
         stop: bool,
         best_fitness: float | None,
@@ -475,9 +459,6 @@ class Trainer:
                         self.optimizer_step(scaler, optimizer, model, ema)
                         last_opt_step = num_iterations
 
-                        if args.time:
-                            raise NotImplementedError
-
                     # Log
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
                     pbar.set_description(
@@ -538,8 +519,6 @@ class Trainer:
                 fitness = 0.0
 
             stop |= stopper(self.epoch + 1, fitness) or final_epoch
-            if args.time:
-                raise NotImplementedError
 
             if args.save or final_epoch:
                 self.save_model(
@@ -552,12 +531,6 @@ class Trainer:
                     metrics=metrics,
                     fitness=fitness,
                 )
-
-            t = time.time()
-            epoch_time = t - epoch_time_start
-            epoch_time_start = t
-            if args.time:
-                raise NotImplementedError
 
             self._clear_memory()
 

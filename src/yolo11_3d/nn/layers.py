@@ -96,9 +96,6 @@ class Conv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.activation(self.batch_norm(self.conv(x)))
 
-    def forward_fused(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
-
 
 
 class DWConv(Conv):

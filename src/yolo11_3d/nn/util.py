@@ -136,8 +136,6 @@ def select_device(
 ) -> torch.device:
     if isinstance(device, torch.device):
         return device
-    if str(device).startswith("tpu"):
-        raise NotImplementedError
 
     s = f"yolo11-3d Python-{PYTHON_VERSION} torch-{torch.__version__}"
     device = str(device).lower()
@@ -168,13 +166,9 @@ def select_device(
 
     if not cpu and not mps and torch.cuda.is_available():  # prefer GPU if available
         devices = device.split(",") if device else "0"
-        n = len(devices)  # device count
-        if n > 1:
+        gpus = len(devices)  # device count
+        if gpus > 1:
             raise NotImplementedError
-            # if batch < 1:
-            #     raise ValueError
-            # if batch >= 0 and batch % n != 0:
-            #     raise ValueError
         space = " " * (len(s) + 1)
         for i, d in enumerate(devices):
             s += f"{'' if i == 0 else space}CUDA:{d} ({get_gpu_info(i)})\n"  # bytes to MB

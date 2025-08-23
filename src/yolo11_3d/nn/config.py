@@ -47,7 +47,6 @@ class DefaultConfig(BaseModel):
     data: FilePath  # path to data file
     fold: int
     epochs: int = 100  # number of epochs to train for
-    time: float | None = None  # number of hours to train for, overrides epochs if supplied
     patience: int = (
         100  # epochs to wait for no observable improvement for early stopping of training
     )
@@ -62,9 +61,6 @@ class DefaultConfig(BaseModel):
     project: str = ""  # project name
     name: int | str  # experiment name, results saved to 'project/name' directory
     exist_ok: bool = False  # whether to overwrite existing experiment
-    pretrained: bool | FilePath = (
-        True  # whether to use a pretrained model (bool) or a model to load weights from (Path)
-    )
     optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
         "auto"  # optimizer to use
     )
@@ -75,7 +71,6 @@ class DefaultConfig(BaseModel):
     rect: bool = (
         False  # rectangular training if mode='train' or rectangular validation if mode='val'
     )
-    cos_lr: bool = False  # use cosine learning rate scheduler
     close_mosaic: int = 10  # disable mosaic augmentation for final epochs (0 to disable)
     resume: bool | FilePath = False  # resume training from last checkpoint
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
@@ -122,8 +117,6 @@ class DefaultConfig(BaseModel):
 
     # Visualize Settings
     show: bool = False  # show predicted images and videos if environment allows
-    # save_frames: bool = False  # save predicted individual video frames
-    save_txt: bool = False  # save results as .txt file
     save_conf: bool = False  # save results with confidence scores
     save_crop: bool = False  # save cropped images with results
     show_labels: bool = True  # show prediction labels, i.e. 'person'

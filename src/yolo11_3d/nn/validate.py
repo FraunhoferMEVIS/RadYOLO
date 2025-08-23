@@ -103,8 +103,6 @@ class Validator():
         else:
             model = cast("HardcodedModel", ema.ema)
             self.device = model.device  # update device
-            if self.args.task == "classify":
-                raise NotImplementedError
             if self.device.type in {"cpu", "mps"}:
                 self.args.workers = (
                     0  # faster CPU val as time dominated by inference, not dataloading
@@ -328,14 +326,6 @@ class Validator():
             if self.args.save_json:
                 raise NotImplementedError
                 self.pred_to_json(predn, batch["im_file"][si])
-            if self.args.save_txt:
-                raise NotImplementedError
-                self.save_one_txt(
-                    predn,
-                    self.args.save_conf,
-                    prepared_batch["ori_shape"],
-                    self.save_dir / "labels" / f"{Path(batch['im_file'][si]).stem}.txt",
-                )
 
     def _process_batch(
         self, detections: torch.Tensor, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor
@@ -463,7 +453,6 @@ class Validator():
         pred_classes: torch.Tensor,
         true_classes: torch.Tensor,
         iou: torch.Tensor,
-        use_scipy: Literal[False] = False,
     ) -> torch.Tensor:
         """Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
 
@@ -471,7 +460,6 @@ class Validator():
             pred_classes (torch.Tensor): Predicted class indices of shape(N,).
             true_classes (torch.Tensor): Target class indices of shape(M,).
             iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
-            use_scipy (bool): Whether to use scipy for matching (more precise).
 
         Returns:
             (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
@@ -483,29 +471,15 @@ class Validator():
         iou = iou * correct_class  # zero out the wrong classes
         iou_np = iou.cpu().numpy()
         for i, threshold in enumerate(self.iouv.cpu().tolist()):
-            if use_scipy:
-                raise NotImplementedError
-                # WARNING: known issue that reduces mAP in https://github.com/ultralytics/ultralytics/pull/4708
-                import scipy  # scope import to avoid importing for all commands
-
-                cost_matrix = iou_np * (iou_np >= threshold)
-                if cost_matrix.any():
-                    labels_idx, detections_idx = scipy.optimize.linear_sum_assignment(
-                        cost_matrix, maximize=True
-                    )
-                    valid = cost_matrix[labels_idx, detections_idx] > 0
-                    if valid.any():
-                        correct[detections_idx[valid], i] = True
-            else:
-                matches = np.nonzero(iou_np >= threshold)  # IoU > threshold and classes match
-                matches = np.array(matches).T
-                if matches.shape[0]:
-                    if matches.shape[0] > 1:
-                        matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                        # matches = matches[matches[:, 2].argsort()[::-1]]
-                        matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                    correct[matches[:, 1].astype(int), i] = True
+            matches = np.nonzero(iou_np >= threshold)  # IoU > threshold and classes match
+            matches = np.array(matches).T
+            if matches.shape[0]:
+                if matches.shape[0] > 1:
+                    matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
+                    matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                    # matches = matches[matches[:, 2].argsort()[::-1]]
+                    matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                correct[matches[:, 1].astype(int), i] = True
         return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
 
     def get_stats(self) -> dict[str, float]:

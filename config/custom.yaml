@@ -1,7 +1,7 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 # Default training settings and hyperparameters for medium-augmentation COCO training
 
-task: detect # (str) YOLO task, i.e. detect, segment, classify, pose, obb
+task: detect # (str) YOLO task, i.e. detect, segment
 mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmark
 
 # Train settings -------------------------------------------------------------------------------------------------------
@@ -9,7 +9,6 @@ model: "config/yolo11.yaml" # (str, optional) path to model file, i.e. yolov8n.p
 data: "D:/datasets/AMOS22/yolov11_3d_merged_masks/dataset.yaml" # (str) path to data file
 fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
-time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 2 # (int) number of images per batch (-1 for AutoBatch)
 imgsz: [128, 128, 128] # (int | list) input images size as int for train and val modes, or list[h,w] for predict and export modes
@@ -22,14 +21,12 @@ workers: 4 # (int) number of worker threads for data loading (per RANK if DDP)
 project: "runs" # (str, optional) project name
 name: "default" # (str, optional) experiment name, results saved to 'project/name' directory
 exist_ok: True # (bool) whether to overwrite existing experiment
-pretrained: False # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
 seed: 0 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
-cos_lr: False # (bool) use cosine learning rate scheduler
 close_mosaic: 10 # (int) disable mosaic augmentation for final epochs (0 to disable)
 resume: True # (bool) resume training from last checkpoint
 amp: True # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
@@ -68,8 +65,6 @@ embed: # (list[int], optional) return feature vectors/embeddings from given laye
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
-save_frames: False # (bool) save predicted individual video frames
-save_txt: False # (bool) save results as .txt file
 save_conf: False # (bool) save results with confidence scores
 save_crop: False # (bool) save cropped images with results
 show_labels: True # (bool) show prediction labels, i.e. 'person'
