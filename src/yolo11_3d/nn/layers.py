@@ -406,7 +406,8 @@ class C2PSA(nn.Module):
         """
         super().__init__()
         if in_channels != out_channels:
-            raise ValueError  # TODO: add error message
+            raise ValueError(f"Input channels have to be equals to output channels in C2PSA, "
+                             f"but were {in_channels} and {out_channels}.")
         self.hidden_channels = int(in_channels * expansion)
         self.in_conv = Conv(in_channels, 2 * self.hidden_channels, 1, 1)
         self.out_conv = Conv(2 * self.hidden_channels, in_channels, 1)
@@ -519,8 +520,7 @@ class Detect(nn.Module):
             b_bias = b_last.bias
             if b_bias is None:
                 raise ValueError
-            # TODO(muellergroh): check for validity in 3D
-            b_bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
+            b_bias.data[: self.nc] = math.log(5 / self.nc / (256 / s) ** 3)
 
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
