@@ -239,36 +239,41 @@ class v8DetectionLoss:  # noqa: N801
                     target_gt_idx_batch = target_gt_idx[batch_index]
                     fg_mask_batch = fg_mask[batch_index]
                     prototype_masks_batch = prototype_masks[batch_index]
-                    for mask_index, gt_mask in enumerate(masks):
-                        grid_cell_indices = torch.nonzero((target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)).squeeze(1)
-                        mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
-                        pred_masks = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
-                        gt_mask = F.interpolate(gt_mask[None, None, :], prototype_masks_batch.shape[1:], mode="nearest-exact")[0]
-                        gt_mask = gt_mask.to(self.device)
-                        if not gt_mask.any():
-                            LOGGER.warning("Empty mask after downsampling. Skipping this mask.")
-                            continue
-                        gt_mask = gt_mask.repeat(pred_masks.shape[0], 1, 1, 1)
-                        gt_mask = gt_mask.to(pred_masks.dtype)
-                        mask_loss = F.binary_cross_entropy_with_logits(pred_masks, gt_mask, reduction="none")
-                        target_box = target_bboxes_grid[batch_index, mask_index]
-                        predicted_boxes = pred_bboxes_grid[batch_index, grid_cell_indices]
-                        predicted_box = torch.cat([predicted_boxes[:,:3].amin(dim=0), predicted_boxes[:,3:].amax(dim=0)])
-                        cropping_box = torch.cat([torch.amin(torch.cat([target_box[:3, None], predicted_box[:3, None]], dim=1), dim=1),
-                                                  torch.amax(torch.cat([target_box[3:, None], predicted_box[3:, None]], dim=1), dim=1)])
-                        cropping_box[:3] = cropping_box[:3].floor()
-                        cropping_box[3:] = cropping_box[3:].ceil()
-                        cropping_box[:3] = cropping_box[:3].clamp(min=0)
-                        cropping_box[3] = cropping_box[3].clamp(max=prototype_masks.shape[2])
-                        cropping_box[4] = cropping_box[4].clamp(max=prototype_masks.shape[3])
-                        cropping_box[5] = cropping_box[5].clamp(max=prototype_masks.shape[4])
-                        cropping_box = cropping_box.to(torch.int)
-                        mask_loss = mask_loss[:,
-                                              cropping_box[0].item():cropping_box[3].item(),
-                                              cropping_box[1].item():cropping_box[4].item(),
-                                              cropping_box[2].item():cropping_box[5].item()]
-                        loss[3] += mask_loss.mean()
-                        mask_loss_count += 1
+                    if masks is not None and masks.shape[0] >= 1:
+                        masks = F.interpolate(masks[None, :], prototype_masks_batch.shape[1:], mode="nearest-exact")[0]
+                        masks = masks.to(self.device)
+                        for mask_index, gt_mask in enumerate(masks):
+                            if not gt_mask.any():
+                                LOGGER.warning("Empty mask after downsampling. Skipping this mask.")
+                                continue
+                            grid_cell_indices = torch.nonzero((target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)).squeeze(1)
+                            if not grid_cell_indices.any():
+                                LOGGER.warning("No assinged grid cells. Skipping this mask.")
+                                continue
+                            mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
+                            pred_masks = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
+                            gt_mask = gt_mask.repeat(pred_masks.shape[0], 1, 1, 1)
+                            gt_mask = gt_mask.to(pred_masks.dtype)
+                            #TODO: Switch order of cropping and loss computation
+                            mask_loss = F.binary_cross_entropy_with_logits(pred_masks, gt_mask, reduction="none")
+                            target_box = target_bboxes_grid[batch_index, mask_index]
+                            predicted_boxes = pred_bboxes_grid[batch_index, grid_cell_indices]
+                            predicted_box = torch.cat([predicted_boxes[:,:3].amin(dim=0), predicted_boxes[:,3:].amax(dim=0)])
+                            cropping_box = torch.cat([torch.amin(torch.cat([target_box[:3, None], predicted_box[:3, None]], dim=1), dim=1),
+                                                    torch.amax(torch.cat([target_box[3:, None], predicted_box[3:, None]], dim=1), dim=1)])
+                            cropping_box[:3] = cropping_box[:3].floor()
+                            cropping_box[3:] = cropping_box[3:].ceil()
+                            cropping_box[:3] = cropping_box[:3].clamp(min=0)
+                            cropping_box[3] = cropping_box[3].clamp(max=prototype_masks.shape[2])
+                            cropping_box[4] = cropping_box[4].clamp(max=prototype_masks.shape[3])
+                            cropping_box[5] = cropping_box[5].clamp(max=prototype_masks.shape[4])
+                            cropping_box = cropping_box.to(torch.int)
+                            mask_loss = mask_loss[:,
+                                                cropping_box[0].item():cropping_box[3].item(),
+                                                cropping_box[1].item():cropping_box[4].item(),
+                                                cropping_box[2].item():cropping_box[5].item()]
+                            loss[3] += mask_loss.mean()
+                            mask_loss_count += 1
                 loss[3] = loss[3] / mask_loss_count
 
         loss[0] *= self.box_gain

@@ -219,26 +219,25 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         classes = torch.from_numpy(labels[:, 0:1])
         bboxes = torch.from_numpy(labels[:, 1:])
 
-        masks = []
         if self.load_masks:
-            for label_index in range(len(labels)):
-                mask_path = os.path.join(self.src_path, "masks", f"{case_name}_mask_{label_index:04d}.nii.gz")
-                if not os.path.exists(mask_path):
-                    masks.append(None)
-                    continue
+            mask_path = os.path.join(self.src_path, "masks", f"{case_name}.nii.gz")
+            if not os.path.exists(mask_path):
+                mask_tensor_resampled = None
+            else:
                 nifti_image = nib.loadsave.load(mask_path)
                 if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
                     raise TypeError
-                mask = np.asanyarray(nifti_image.dataobj, dtype=np.uint8)
-                mask_tensor = torch.from_numpy(mask)
+                mask_numpy = np.asanyarray(nifti_image.dataobj, dtype=np.uint8)
+                mask_tensor = torch.from_numpy(mask_numpy)
                 mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
-                mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
+                mask_tensor = mask_tensor.unsqueeze(0)
+                if len(mask_tensor.shape) == 4:
+                    mask_tensor = mask_tensor.unsqueeze(0)
                 mask_tensor_resampled = cast(
                     "torch.Tensor", F.interpolate(mask_tensor, self.imgsz, mode="nearest-exact")
-                ).squeeze_(0).squeeze(0)
-                masks.append(mask_tensor_resampled)
+                ).squeeze_(0)
 
-        return classes, bboxes, masks
+        return classes, bboxes, mask_tensor_resampled
 
     @staticmethod
     def collate_fn(batch: list[Sample]) -> Batch:

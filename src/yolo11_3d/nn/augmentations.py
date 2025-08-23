@@ -54,7 +54,7 @@ def bbox_iov(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch
 def tensor_cutout(
     im: torch.Tensor,
     labels: torch.Tensor,
-    masks: list[torch.Tensor | None] | None,
+    masks: torch.Tensor | None,
     cutout_params: list[tuple[float, int]],
     p: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
@@ -104,15 +104,14 @@ def tensor_cutout(
             keep_mask = iov < 0.60
             labels = labels[keep_mask]  # remove >60% obscured labels
             if masks is not None:
-                # Filter masks in sync with labels (do not modify mask tensors’ voxels for cutout)
-                masks = [masks[i] for i, k in enumerate(keep_mask.tolist()) if k]
+                masks = masks[keep_mask]
 
     return im, labels, masks
 
 def random_zoom(
     image: torch.Tensor,
     labels: torch.Tensor,
-    masks: list[torch.Tensor | None] | None,
+    masks: torch.Tensor | None,
     max_zoom: float = 1.5,
     min_zoom: float = 0.7,
     p: float = 0.5,
@@ -145,20 +144,10 @@ def random_zoom(
     image = torch.nn.functional.interpolate(
         image.unsqueeze(0), scale_factor=zoom_factor, mode="trilinear", align_corners=False
     ).squeeze_(0)
-    # Scale masks (nearest)
-    if masks is not None:
-        scaled_masks: list[torch.Tensor | None] = []
-        for m in masks:
-            if m is None:
-                scaled_masks.append(None)
-                continue
-            # m: (D,H,W) -> (1,1,D,H,W)
-            m5 = m.unsqueeze(0).unsqueeze(0)
-            m_scaled = F.interpolate(m5, scale_factor=zoom_factor, mode="nearest-exact").squeeze(0).squeeze(0)
-            scaled_masks.append(m_scaled)
-        masks = scaled_masks
 
-    # remove batch dimension for compatibility with later code
+    if masks is not None:
+        masks = masks.unsqueeze(0)
+        masks = F.interpolate(masks, scale_factor=zoom_factor, mode="nearest-exact").squeeze(0)
 
     # retrieve new image shape
     new_d, new_h, new_w = image.shape[1:]
@@ -184,13 +173,7 @@ def random_zoom(
         image = image[:, zmin:zmax, ymin:ymax, xmin:xmax]
 
         if masks is not None:
-            cropped_masks: list[torch.Tensor | None] = []
-            for m in masks:
-                if m is None:
-                    cropped_masks.append(None)
-                    continue
-                cropped_masks.append(m[zmin:zmax, ymin:ymax, xmin:xmax])
-            masks = cropped_masks
+            masks = masks[:, zmin:zmax, ymin:ymax, xmin:xmax]
 
         # move labels to correspond to new center of zoom
         augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] - xmin
@@ -215,10 +198,9 @@ def random_zoom(
         )
         augmented_labels = augmented_labels[filter]
         if masks is not None:
-            masks = [m for m, k in zip(masks, filter.tolist()) if k]
+            masks = masks[filter]
 
         # crop labels beyond bounds of new image
-        # faster individually
         augmented_labels[:, 1].clamp_(0, w)  # x1
         augmented_labels[:, 2].clamp_(0, h)  # y1
         augmented_labels[:, 3].clamp_(0, d)  # z1
@@ -256,24 +238,15 @@ def random_zoom(
         del new_image
 
         if masks is not None:
-            padded_masks: list[torch.Tensor | None] = []
-            for m in masks:
-                if m is None:
-                    padded_masks.append(None)
-                    continue
-                    
-                new_mask = torch.zeros(d, h, w, dtype=m.dtype, device=m.device)
-                new_mask[zmin:zmax, ymin:ymax, xmin:xmax] = m
-                padded_masks.append(new_mask)
-            masks = padded_masks
+            mask_channels = masks.shape[0]
+            new_masks = torch.zeros(mask_channels, d, h, w, dtype=masks.dtype, device=masks.device)
+            new_masks[:, zmin:zmax, ymin:ymax, xmin:xmax] = masks
+            masks = new_masks
 
         # move labels to correspond to new center of zoom
         augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] + xmin
-        # augmented_labels[:, 4] = augmented_labels[:, 4] + xmin
         augmented_labels[:, [2, 5]] = augmented_labels[:, [2, 5]] + ymin
-        # augmented_labels[:, 5] = augmented_labels[:, 5] + ymin
         augmented_labels[:, [3, 6]] = augmented_labels[:, [3, 6]] + zmin
-        # augmented_labels[:, 6] = augmented_labels[:, 6] + zmin
 
     return image, augmented_labels, masks
 
@@ -312,14 +285,7 @@ def random_mirroring(
     if flip_dims:
         image = torch.flip(image, dims=flip_dims)
         if masks is not None:
-            mdims = [d - 1 for d in flip_dims]  # map (C,D,H,W) dims -> (D,H,W) dims
-            flipped_masks: list[torch.Tensor | None] = []
-            for m in masks:
-                if m is None:
-                    flipped_masks.append(None)
-                    continue
-                flipped_masks.append(torch.flip(m, dims=mdims))
-            masks = flipped_masks
+            masks = torch.flip(masks, dims=flip_dims)
 
     return image, new_labels, masks
 
@@ -433,6 +399,6 @@ def enlarge_bounding_boxes(
     )
     labels = labels[filter]
     if masks is not None:
-        masks = [m for m, k in zip(masks, filter.tolist()) if k]
+        masks = masks[filter]
 
     return image, labels, masks
