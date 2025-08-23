@@ -7,7 +7,7 @@ import logging
 
 import torch
 from torch import nn
-from torch.nn import functional as F  # noqa: N812
+from torch.nn import functional as F
 
 from yolo11_3d.ultralytics.utils.metrics import bbox_iou
 from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
@@ -49,6 +49,14 @@ class DFLoss(nn.Module):
             + F.cross_entropy(pred_dist, tr.view(-1), reduction="none").view(tl.shape) * wr
         ).mean(-1, keepdim=True)
 
+class DiceLoss:
+    def __call__(self, pred: torch.Tensor, target: torch.Tensor):
+        eps = 1
+        pred = torch.sigmoid(pred)
+        intersection = (pred * target).sum(dim=(1, 2, 3))
+        summed = pred.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
+        dice = (2. * intersection + eps) / (summed + eps)
+        return 1 - dice.mean()
 
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses during training."""
@@ -129,8 +137,8 @@ class v8DetectionLoss:  # noqa: N801
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
         self.enable_mask_loss = enable_mask_loss
-        # TODO: Change into sum of Dice and BCE loss
-        self.mask_loss = nn.BCEWithLogitsLoss
+        self.mask_bce_loss = nn.BCEWithLogitsLoss()
+        self.mask_dice_loss = DiceLoss()
 
     def preprocess(
         self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor
@@ -254,8 +262,6 @@ class v8DetectionLoss:  # noqa: N801
                             pred_masks = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
                             gt_mask = gt_mask.repeat(pred_masks.shape[0], 1, 1, 1)
                             gt_mask = gt_mask.to(pred_masks.dtype)
-                            #TODO: Switch order of cropping and loss computation
-                            mask_loss = F.binary_cross_entropy_with_logits(pred_masks, gt_mask, reduction="none")
                             target_box = target_bboxes_grid[batch_index, mask_index]
                             predicted_boxes = pred_bboxes_grid[batch_index, grid_cell_indices]
                             predicted_box = torch.cat([predicted_boxes[:,:3].amin(dim=0), predicted_boxes[:,3:].amax(dim=0)])
@@ -268,11 +274,17 @@ class v8DetectionLoss:  # noqa: N801
                             cropping_box[4] = cropping_box[4].clamp(max=prototype_masks.shape[3])
                             cropping_box[5] = cropping_box[5].clamp(max=prototype_masks.shape[4])
                             cropping_box = cropping_box.to(torch.int)
-                            mask_loss = mask_loss[:,
-                                                cropping_box[0].item():cropping_box[3].item(),
-                                                cropping_box[1].item():cropping_box[4].item(),
-                                                cropping_box[2].item():cropping_box[5].item()]
-                            loss[3] += mask_loss.mean()
+                            pred_masks_cropped = pred_masks[:,
+                                                            cropping_box[0].item():cropping_box[3].item(),
+                                                            cropping_box[1].item():cropping_box[4].item(),
+                                                            cropping_box[2].item():cropping_box[5].item()]
+                            gt_mask_cropped = gt_mask[:,
+                                                      cropping_box[0].item():cropping_box[3].item(),
+                                                      cropping_box[1].item():cropping_box[4].item(),
+                                                      cropping_box[2].item():cropping_box[5].item()]
+                            mask_loss = self.mask_bce_loss(pred_masks_cropped, gt_mask_cropped) \
+                                      + self.mask_dice_loss(pred_masks_cropped, gt_mask_cropped)
+                            loss[3] += mask_loss
                             mask_loss_count += 1
                 loss[3] = loss[3] / mask_loss_count
 
