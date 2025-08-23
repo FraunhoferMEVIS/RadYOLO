@@ -34,39 +34,12 @@ conf: # (float, optional) object confidence threshold for detection (default 0.2
 iou: 0.2 # (float) intersection over union (IoU) threshold for NMS
 max_det: 300 # (int) maximum number of detections per image
 half: False # (bool) use half precision (FP16)
-dnn: False # (bool) use OpenCV DNN for ONNX inference
 plots: True # (bool) save plots and images during train/val
 
 # Predict settings -----------------------------------------------------------------------------------------------------
 source: # (str, optional) source directory for images or videos
-vid_stride: 1 # (int) video frame-rate stride
-stream_buffer: False # (bool) buffer all streaming frames (True) or return the most recent frame (False)
-visualize: False # (bool) visualize model features
 augment: True # (bool) apply image augmentation to prediction sources
 agnostic_nms: False # (bool) class-agnostic NMS
-classes: # (int | list[int], optional) filter results by class, i.e. classes=0, or classes=[0,2,3]
-retina_masks: False # (bool) use high-resolution segmentation masks
-embed: # (list[int], optional) return feature vectors/embeddings from given layers
-
-# Visualize settings ---------------------------------------------------------------------------------------------------
-show: False # (bool) show predicted images and videos if environment allows
-save_conf: False # (bool) save results with confidence scores
-save_crop: False # (bool) save cropped images with results
-show_labels: True # (bool) show prediction labels, i.e. 'person'
-show_conf: True # (bool) show prediction confidence, i.e. '0.99'
-show_boxes: True # (bool) show prediction boxes
-line_width: # (int, optional) line width of the bounding boxes. Scaled to image size if None.
-
-# Export settings ------------------------------------------------------------------------------------------------------
-format: onnx # (str) format to export to, choices at https://docs.ultralytics.com/modes/export/#export-formats
-keras: False # (bool) use Kera=s
-optimize: False # (bool) TorchScript: optimize for mobile
-int8: False # (bool) CoreML/TF INT8 quantization
-dynamic: False # (bool) ONNX/TF/TensorRT: dynamic axes
-simplify: True # (bool) ONNX: simplify model using `onnxslim`
-opset: # (int, optional) ONNX: opset version
-# workspace: None # (float, optional) TensorRT: workspace size (GiB), `None` will let TensorRT auto-allocate memory
-nms: False # (bool) CoreML: add NMS
 
 # Hyperparameters ------------------------------------------------------------------------------------------------------
 lr0: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
@@ -80,31 +53,15 @@ box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) cls loss gain (scale with pixels)
 dfl: 1.5 # (float) dfl loss gain
 mask_gain: 5 # (float) mask loss gain
-pose: 12.0 # (float) pose loss gain
-kobj: 1.0 # (float) keypoint obj loss gain
 nbs: 64 # (int) nominal batch size
-hsv_h: 0.015 # (float) image HSV-Hue augmentation (fraction)
-hsv_s: 0.7 # (float) image HSV-Saturation augmentation (fraction)
-hsv_v: 0.4 # (float) image HSV-Value augmentation (fraction)
-degrees: 0.0 # (float) image rotation (+/- deg)
-translate: 0.1 # (float) image translation (+/- fraction)
-scale: 0.5 # (float) image scale (+/- gain)
-shear: 0.0 # (float) image shear (+/- deg)
-perspective: 0.0 # (float) image perspective (+/- fraction), range 0-0.001
-flipud: 0.0 # (float) image flip up-down (probability)
-fliplr: 0.5 # (float) image flip left-right (probability)
-bgr: 0.0 # (float) image channel BGR (probability)
-mosaic: 1.0 # (float) image mosaic (probability)
-mixup: 0.0 # (float) image mixup (probability)
-copy_paste: 0.0 # (float) segment copy-paste (probability)
-copy_paste_mode: "flip" # (str) the method to do copy_paste augmentation (flip, mixup)
-auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)
-erasing: 0.4 # (float) probability of random erasing during classification training (0-0.9), 0 means no erasing, must be less than 1.0.
-crop_fraction: 1.0 # (float) image crop fraction for classification (0.1-1), 1.0 means no crop, must be greater than 0.
-do_batchgenerators_intensity_augmentation: False
 
-# Custom config.yaml ---------------------------------------------------------------------------------------------------
-cfg: # (str, optional) for overriding defaults.yaml
-
-# Tracker settings ------------------------------------------------------------------------------------------------------
-tracker: botsort.yaml # (str) tracker type, choices=[botsort.yaml, bytetrack.yaml]
+# Data Augmentation
+max_zoom: 1.5
+min_zoom: 0.7
+out_zoom_padding: "constant"
+prob_zoom: 0.5
+prob_cutout: 0.5
+prob_mirroring: 0.5
+mirror_axes: ["x", "y", "z"]
+do_batchgenerators_intensity_augmentation: True
+do_intensity_augmentations_per_channel: False

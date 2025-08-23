@@ -75,46 +75,15 @@ class DefaultConfig(BaseModel):
     conf: float | None = (
         None  # object confidence threshold for detection (default 0.25 predict, 0.001 val)
     )
-    iou: float = 0.7  # intersection over union (IoU) threshold for NMS
+    iou: float = 0.2  # intersection over union (IoU) threshold for NMS
     max_det: int = 300  # maximum number of detections per image
     half: bool = False  # use half precision (FP16)
-    dnn: bool = False  # use OpenCV DNN for ONNX inference
     plots: bool = True  # save plots and images during train/val
 
     # Predict Settings
     source: DirectoryPath | None = None  # source directory for images or videos
-    # vid_stride: int = 1 # video frame-rate stride
-    # stream_buffer: bool = False # buffer all streaming frames or return the most recent frame
-    visualize: bool = False  # visualize model features
     augment: bool = False  # apply image augmentation to prediction sources
     agnostic_nms: bool = False  # class-agnostic NMS
-    classes: int | list[int] | None = (
-        None  # filter results by class, i.e. classes=0, or classes=[0,2,3]
-    )
-    retina_masks: bool = False  # use high-resolution segmentation masks
-    embed: list[int] | None = None  # return feature vectors/embeddings from given layers
-
-    # Visualize Settings
-    show: bool = False  # show predicted images and videos if environment allows
-    save_conf: bool = False  # save results with confidence scores
-    save_crop: bool = False  # save cropped images with results
-    show_labels: bool = True  # show prediction labels, i.e. 'person'
-    show_conf: bool = True  # show prediction confidence, i.e. '0.99'
-    show_boxes: bool = True  # show prediction boxes
-    line_width: int | None = None  # line width of the bounding boxes. Scaled to image size if None
-
-    # Export Settings
-    format: str = "torchscript"  # format to export to
-    keras: bool = False  # use Keras
-    optimize: bool = False  # TorchScript: optimize for mobile
-    int8: bool = False  # CoreML/TF INT8 quantization
-    dynamic: bool = False  # ONNX/TF/TensorRT: dynamic axes
-    simplify: bool = False  # ONNX: simplify model using `onnxslim`
-    opset: int | None = None  # ONNX: opset version
-    workspace: float | None = (
-        None  # TensorRT: workspace size (GiB), `None` will let TensorRT auto-allocate memory
-    )
-    nms: bool = False  # CoreML: add NMS
 
     # Hyperparameters
     lr0: float = 0.01  # initial learning rate
@@ -129,10 +98,6 @@ class DefaultConfig(BaseModel):
     dfl: float = 1.5  # dfl loss gain
     mask_gain: float = 1.0  # mask loss gain
     nbs: int = 64  # nominal batch size
-    degrees: float = Field(0.0, le=180, ge=0)  # image roation (+/- deg)
-    translate: float = 0.1  # image translation
-    scale: float = 0.5  # image scale
-    shear: float = 0.0  # image shear
 
     # Augmentation
     max_zoom: float = Field(1.5, ge=0)
@@ -153,8 +118,6 @@ class DefaultConfig(BaseModel):
     mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
     do_batchgenerators_intensity_augmentation: bool = True
     do_intensity_augmentations_per_channel: bool = False
-
-    cfg: FilePath | None = None  # for overriding defaults.yaml
 
     save_dir: Path | None = None
 

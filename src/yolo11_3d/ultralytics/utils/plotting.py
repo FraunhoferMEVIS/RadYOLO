@@ -35,7 +35,6 @@ class Colors:
     Attributes:
         palette (list of tuple): List of RGB color values.
         n (int): The number of colors in the palette.
-        pose_palette (np.ndarray): A specific color palette array with dtype np.uint8.
     """
 
     def __init__(self) -> None:
@@ -334,44 +333,6 @@ class Annotator:
                     lineType=cv2.LINE_AA,
                 )
 
-    # def masks(self, masks: torch.Tensor, colors, im_gpu, alpha=0.5, retina_masks=False):
-    #     """
-    #     Plot masks on image.
-
-    #     Args:
-    #         masks (tensor): Predicted masks on cuda, shape: [n, h, w]
-    #         colors (List[List[Int]]): Colors for predicted masks, [[r, g, b] * n]
-    #         im_gpu (tensor): Image is in cuda, shape: [3, h, w], range: [0, 1]
-    #         alpha (float): Mask transparency: 0.0 fully transparent, 1.0 opaque
-    #         retina_masks (bool): Whether to use high resolution masks or not. Defaults to False.
-    #     """
-    #     if self.pil:
-    #         # Convert to numpy first
-    #         self.im = np.asarray(self.im).copy()
-    #     if len(masks) == 0:
-    #         self.im[:] = im_gpu.permute(1, 2, 0).contiguous().cpu().numpy() * 255
-    #     if im_gpu.device != masks.device:
-    #         im_gpu = im_gpu.to(masks.device)
-    #     colors = (
-    #         torch.tensor(colors, device=masks.device, dtype=torch.float32) / 255.0
-    #     )  # shape(n,3)
-    #     colors = colors[:, None, None]  # shape(n,1,1,3)
-    #     masks = masks.unsqueeze(3)  # shape(n,h,w,1)
-    #     masks_color = masks * (colors * alpha)  # shape(n,h,w,3)
-
-    #     inv_alpha_masks = (1 - masks * alpha).cumprod(0)  # shape(n,h,w,1)
-    #     mcs = masks_color.max(dim=0).values  # shape(n,h,w,3)
-
-    #     im_gpu = im_gpu.flip(dims=[0])  # flip channel
-    #     im_gpu = im_gpu.permute(1, 2, 0).contiguous()  # shape(h,w,3)
-    #     im_gpu = im_gpu * inv_alpha_masks[-1] + mcs
-    #     im_mask = im_gpu * 255
-    #     im_mask_np = im_mask.byte().cpu().numpy()
-    #     self.im[:] = im_mask_np if retina_masks else ops.scale_image(im_mask_np, self.im.shape)
-    #     if self.pil:
-    #         # Convert im back to PIL and update draw
-    #         self.fromarray(self.im)
-
     def rectangle(self, xy, fill=None, outline=None, width: int = 1) -> None:
         """Add rectangle to image (PIL-only)."""
         self.draw.rectangle(xy, fill, outline, width)
@@ -605,22 +566,16 @@ def plot_images(
 def plot_results(
     file: Path | str | None = "path/to/results.csv",
     dir: Path | str = "",
-    # segment: bool = False,
 ):
     """Plot training results from a results CSV file.
 
-    The function supports various types of data including segmentation, pose estimation, and
-    classification. Plots are saved as 'results.png' in the directory where the CSV is located.
+    Plots are saved as 'results.png' in the directory where the CSV is located.
 
     Args:
         file (str, optional): Path to the CSV file containing the training results. Defaults to
             'path/to/results.csv'.
         dir (str, optional): Directory where the CSV file is located if 'file' is not provided.
             Defaults to ''.
-        segment (bool, optional): Flag to indicate if the data is for segmentation.
-            Defaults to False.
-        on_plot (callable, optional): Callback function to be executed after plotting. Takes
-            filename as an argument. Defaults to None.
 
     Example:
         ```python
