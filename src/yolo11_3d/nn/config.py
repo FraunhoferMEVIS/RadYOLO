@@ -39,7 +39,6 @@ class ModelConfig(BaseModel):
 class DefaultConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
-    task: str
     mode: str
 
     # Train settings
@@ -55,7 +54,6 @@ class DefaultConfig(BaseModel):
     normalization: Literal["none", "zScore", "255_to_01"] = "255_to_01" # Normalization to be applied during image loading
     save: bool = True  # save train checkpoints and predict results
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
-    cache: bool = False  # True/ram, disk or False. use cache for data loading
     device: str = ""  # device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
     workers: int = 8  # number of worker threads for data loading (per RANK if DDP)
     project: str = ""  # project name
@@ -67,30 +65,11 @@ class DefaultConfig(BaseModel):
     verbose: bool = True  # whether to print verbose output
     seed: int = 0  # random seed for reproducibility
     deterministic: bool = True  # whether to enable deterministic mode
-    single_cls: bool = False  # train multi-class data as single-class
-    rect: bool = (
-        False  # rectangular training if mode='train' or rectangular validation if mode='val'
-    )
-    close_mosaic: int = 10  # disable mosaic augmentation for final epochs (0 to disable)
     resume: bool | FilePath = False  # resume training from last checkpoint
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
-    fraction: float = 1.0  # dataset fraction to train on
-    profile: bool = False  # profile ONNX and TensorRT speeds during training for loggers
-    freeze: int | list[int] | None = (
-        None  # freeze first n layers, or freeze list of layer indices during training
-    )
-    multi_scale: bool = False  # Whether to use multiscale during training
-    # Segmentation
-    # overlap_mask: bool = (
-    #     True  # merge object masks into a single image mask during training (segment train only)
-    # )
-    # mask_ratio: int = 4 # mask downsample ratio (segment train only)
-    # Classification
-    # dropout: float = 0.0 # use dropout regularization
 
     # Val/Test Settings
     val: bool = True  # validate/test during training
-    split: str = "val"  # dataset split to use for validation, i.e. 'val', 'test' or 'train'
     save_json: bool = False  # save results to JSON file
     save_hybrid: bool = False  # save hybrid version of labels (labels+additional predictions)
     conf: float | None = (

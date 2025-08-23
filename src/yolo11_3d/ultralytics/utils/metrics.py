@@ -146,11 +146,10 @@ def bbox_iou(
 
 
 class ConfusionMatrix:
-    """A class for calculating and updating a confusion matrix for object detection and classification tasks.
+    """A class for calculating and updating a confusion matrix for object detection tasks.
 
     Attributes:
-        task (str): The type of task, either 'detect' or 'classify'.
-        matrix (np.ndarray): The confusion matrix, with dimensions depending on the task.
+        matrix (np.ndarray): The confusion matrix.
         nc (int): The number of classes.
         conf (float): The confidence threshold for detections.
         iou_thres (float): The Intersection over Union threshold.
@@ -161,14 +160,10 @@ class ConfusionMatrix:
         nc: int,
         conf: float = 0.25,
         iou_thres: float = 0.45,
-        task: Literal["detect", "classify"] = "detect",
     ):
         """Initialize attributes for the YOLO model."""
-        self.task = task
         self.matrix_: npt.NDArray[np.float32] = (
             np.zeros((nc + 1, nc + 1), dtype=np.float32)
-            if self.task == "detect"
-            else np.zeros((nc, nc), dtype=np.float32)
         )
         self.nc = nc  # number of classes
         self.conf = (
@@ -240,11 +235,9 @@ class ConfusionMatrix:
         fp = self.matrix_.sum(1) - tp  # false positives
         # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
         return (
-            (tp[:-1], fp[:-1]) if self.task == "detect" else (tp, fp)
-        )  # remove background class if task=detect
+            (tp[:-1], fp[:-1])
+        )  # remove background class
 
-    # @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
-    # @plt_settings()
     def plot(
         self,
         normalize: bool = True,
@@ -740,7 +733,6 @@ class DetMetrics:
             "loss": 0.0,
             "postprocess": 0.0,
         }
-        self.task = "detect"
         self.confusion_matrix: ConfusionMatrix | None = None
 
     def process(

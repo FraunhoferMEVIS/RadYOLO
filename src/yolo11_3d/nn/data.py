@@ -66,7 +66,6 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         pad: float = 0.5,
         fold: int = 0,
         group: Literal["train", "val", "test"] = "train",
-        fraction: float = 1.0,
         normalization: Literal["none", "zScore", "255_to_01"] = "255_to_01",
         load_masks: bool = True,
         **hyp: Any,
@@ -81,7 +80,6 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         self.pad = pad
         self.fold = fold
         self.group = group
-        self.fraction = fraction
         self.normalization = normalization
         self.hyp = hyp
         self.load_masks = load_masks

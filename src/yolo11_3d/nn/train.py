@@ -210,18 +210,9 @@ class Trainer:
             device=device,
         )
         model = model.to(device)
-        # self.set_model_attributes(model)
 
         # Freeze layers
-        freeze_list = (
-            args.freeze
-            if isinstance(args.freeze, list)
-            else range(args.freeze)
-            if isinstance(args.freeze, int)
-            else []
-        )
-        always_freeze_names = [".dfl"]
-        freeze_layer_names = [f"model.{x}" for x in freeze_list] + always_freeze_names
+        freeze_layer_names = [".dfl"]
         for layer_name, layer in model.named_parameters():
             if any(name in layer_name for name in freeze_layer_names):
                 LOGGER.info("Freezing layer '%s'", layer_name)
@@ -607,11 +598,6 @@ class Trainer:
             img_path=dataset_path, fold=fold, group=mode, model=model, batch=batch_size
         )
         shuffle = mode == "train"
-        if getattr(dataset, "rect", False) and shuffle:
-            LOGGER.warning(
-                "'rect=True' is incompatible with DataLoader shuffle, setting shuffle=False"
-            )
-            shuffle = False
         workers = self.args.workers if mode == "train" else self.args.workers * 2
         return build_dataloader(dataset, batch_size, workers, shuffle, device)
 
@@ -638,7 +624,6 @@ class Trainer:
                 model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
             ),
             pad=0.0 if group == "train" else 0.5,
-            fraction=self.args.fraction if group == "train" else 1.0,
             normalization=self.args.normalization,
             max_zoom=self.args.max_zoom,
             min_zoom=self.args.min_zoom,

@@ -68,7 +68,6 @@ class Validator():
         self.nt_per_class: npt.NDArray | None = None
         self.nt_per_image: npt.NDArray | None = None
         self.class_map: list[int] = list(range(1, len(self.names)))
-        self.args.task = "detect"
         self.metrics = DetMetrics(
             save_dir=self.save_dir,
             names=self.names,
@@ -231,7 +230,7 @@ class Validator():
             self.args.iou,
             labels=self.lb,
             multi_label=True,
-            agnostic=self.args.single_cls or self.args.agnostic_nms,
+            agnostic=self.args.agnostic_nms,
             max_det=self.args.max_det,
             nc=self.nc,
         )
@@ -297,8 +296,6 @@ class Validator():
                 continue
 
             # Predictions
-            if self.args.single_cls:
-                pred_with_scores_and_coefficients[:, 7] = 0
             predn = self._prepare_pred(pred_with_scores_and_coefficients, prepared_batch)
             stat["conf"] = predn[:, 6]
             stat["pred_cls"] = predn[:, 7]
@@ -506,8 +503,7 @@ class Validator():
         LOGGER.warning(pf, "all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results())
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(
-                "WARNING ⚠️ no labels found in %s set, can not compute metrics without labels",
-                self.args.task,
+                "WARNING ⚠️ no labels found in dataset, can not compute metrics without labels"
             )
 
         # Print results per class
