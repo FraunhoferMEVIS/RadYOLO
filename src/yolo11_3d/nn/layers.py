@@ -526,3 +526,33 @@ class Detect(nn.Module):
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
     ) -> torch.Tensor:
         return dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
+
+
+class PrototypeMasks(nn.Module):
+    """PrototypeMasks module for segmentation models."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        intermediate_channels: int = 256,
+        prototypes: int = 32,
+    ):
+        """
+        Initialize the PrototypeMasks module with specified number of prototypes.
+
+        Args:
+            input_channels (int): Input channels.
+            intermediate_channels (int): Intermediate channels.
+            prototypes (int): Output channels (number of protos).
+        """
+        super().__init__()
+        self.cv1 = Conv(input_channels, intermediate_channels, kernel_size=3)
+        self.upsample = nn.ConvTranspose3d(
+            intermediate_channels, intermediate_channels, 2, 2, 0, bias=True
+        )
+        self.cv2 = Conv(intermediate_channels, intermediate_channels, kernel_size=3)
+        self.cv3 = Conv(intermediate_channels, prototypes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Perform a forward pass through layers using an upsampled input image."""
+        return self.cv3(self.cv2(self.upsample(self.cv1(x))))
