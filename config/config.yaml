@@ -1,8 +1,6 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 # Default training settings and hyperparameters for medium-augmentation COCO training
 
-mode: train # (str) YOLO mode, i.e. train, val, predict, export
-
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11_3d.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
 data: "D:/datasets/AMOS22/yolov11_3d_merged_masks/dataset.yaml" # (str) path to data file

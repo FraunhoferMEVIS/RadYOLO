@@ -39,8 +39,6 @@ class ModelConfig(BaseModel):
 class DefaultConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
-    mode: str
-
     # Train settings
     model: FilePath | NewPath  # path to model file
     data: FilePath  # path to data file
