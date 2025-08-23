@@ -12,7 +12,8 @@ from yolo11_3d.nn.layers import (
     Concat,
     Conv,
     Detect,
-    PrototypeMasks
+    PrototypeMasks,
+    PrototypeMasksHighResolution
 )
 from yolo11_3d.nn.util import intersect_dicts, make_divisible
 from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss
@@ -35,6 +36,7 @@ class HardcodedModel(nn.Module):
         device: torch.device,
         enable_output_masks: bool = True,
         num_prototype_masks: int = 8,
+        higher_resolution_prototypes: bool = True,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -58,6 +60,7 @@ class HardcodedModel(nn.Module):
 
         self.enable_output_masks = enable_output_masks
         self.num_prototype_masks = num_prototype_masks
+        self.higher_resolution_prototypes = higher_resolution_prototypes
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
@@ -186,9 +189,18 @@ class HardcodedModel(nn.Module):
         output_channels.append(out_channels)
 
         if self.enable_output_masks:
-            self.prototype_layer = PrototypeMasks(
-                output_channels[16], num_prototype_masks * 4, num_prototype_masks
-            )
+            if self.higher_resolution_prototypes:
+                self.prototype_layer = PrototypeMasksHighResolution(
+                    output_channels[16],
+                    output_channels[1],
+                    output_channels[0],
+                    num_prototype_masks
+                )
+            else:
+                self.prototype_layer = PrototypeMasks(
+                    output_channels[16], num_prototype_masks * 4, num_prototype_masks
+                )
+
             c4 = max(output_channels[16] // 4, num_prototype_masks)
             self.mask_coefficient_layer = nn.ModuleList(
                 nn.Sequential(
@@ -265,8 +277,8 @@ class HardcodedModel(nn.Module):
         torch.Tensor | None,
     ]:
         # BACKBONE
-        x = self.l0(x)
-        x = self.l1(x)
+        x = o0 = self.l0(x)
+        x = o1 = self.l1(x)
         x = self.l2(x)
         x = self.l3(x)
         x = o4 = self.l4(x)
@@ -297,7 +309,10 @@ class HardcodedModel(nn.Module):
         detections = self.l23([o16, o19, o22])
 
         if self.enable_output_masks:
-            prototype_masks = self.prototype_layer(o16)
+            if self.higher_resolution_prototypes:
+                prototype_masks = self.prototype_layer(o16, o1, o0)
+            else:
+                prototype_masks = self.prototype_layer(o16)
             batch_size = prototype_masks.shape[0]
             mask_coefficients = torch.cat(
                 [
@@ -313,7 +328,6 @@ class HardcodedModel(nn.Module):
                 ],
                 2,
             )
-            # TODO: Check for proper inference handling of masks
             return detections, mask_coefficients, prototype_masks
         else:
             return detections, None, None

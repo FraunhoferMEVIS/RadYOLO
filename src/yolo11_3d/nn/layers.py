@@ -556,3 +556,66 @@ class PrototypeMasks(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through layers using an upsampled input image."""
         return self.cv3(self.cv2(self.upsample(self.cv1(x))))
+    
+
+class PrototypeMasksHighResolution(nn.Module):
+    """PrototypeMasks module for segmentation models."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        input_channels_skip_connection_low: int,
+        input_channels_skip_connection_high: int,
+        prototypes: int = 32,
+    ):
+        """
+        Initialize the PrototypeMasks module with specified number of prototypes.
+
+        Args:
+            input_channels (int): Input channels.
+            input_channels_skip_connection_low (int): Input channels of low resolution skip connection,
+            input_channels_skip_connection_high (int): Input channels of high resolution skip connection,
+            prototypes (int): Output channels (number of protos).
+        """
+        super().__init__()
+        self.cv1 = Conv(input_channels, prototypes*8, kernel_size=3)
+        self.upsample1 = nn.ConvTranspose3d(
+            prototypes*8, prototypes*8, 2, 2, 0, bias=True
+        )
+
+        self.cv_skip_low_1 = Conv(input_channels_skip_connection_low, prototypes*8, kernel_size=3)
+        self.cv_skip_low_2 = Conv(prototypes*8, prototypes*8, kernel_size=3)
+        
+        self.cv2 = Conv(prototypes*8, prototypes*4, kernel_size=3)
+        self.cv3 = Conv(prototypes*4, prototypes*4, kernel_size=3)
+        self.upsample2 = nn.ConvTranspose3d(
+            prototypes*4, prototypes*4, 2, 2, 0, bias=True
+        )
+
+        self.cv_skip_high_1 = Conv(input_channels_skip_connection_high, prototypes*4, kernel_size=3)
+        self.cv_skip_high_2 = Conv(prototypes*4, prototypes*4, kernel_size=3)
+
+        self.cv_out_1 = Conv(prototypes*4, prototypes*2, kernel_size=3)
+        self.cv_out_2 = Conv(prototypes*2, prototypes)
+
+    def forward(self, x: torch.Tensor,
+                skip_connection_low_res: torch.Tensor,
+                skip_connection_high_res: torch.Tensor) -> torch.Tensor:
+        """Perform a forward pass through layers using an upsampled input image."""
+        x = self.cv1(x)
+        x = self.upsample1(x)
+
+        skip_low = self.cv_skip_low_1(skip_connection_low_res)
+        skip_low = self.cv_skip_low_2(skip_low)
+        x = x + skip_low
+
+        x = self.cv2(x)
+        x = self.cv3(x)
+        x = self.upsample2(x)
+
+        skip_high = self.cv_skip_high_1(skip_connection_high_res)
+        skip_high = self.cv_skip_high_2(skip_high)
+
+        out = self.cv_out_1(x + skip_high)
+        out = self.cv_out_2(out)
+        return out

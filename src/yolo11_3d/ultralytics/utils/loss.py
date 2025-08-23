@@ -237,8 +237,10 @@ class v8DetectionLoss:  # noqa: N801
 
             # Mask loss
             if self.enable_mask_loss:
-                target_bboxes_grid = target_bboxes / 4
-                pred_bboxes_grid = pred_bboxes_image_coordinates / 4
+                # Downsample grid by factor of two to match prototype mask resolution
+                target_bboxes_grid = target_bboxes / 2
+                pred_bboxes_grid = pred_bboxes_image_coordinates / 2
+                
                 mask_loss_count = 0
                 mask_coefficients = preds[1]
                 mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
