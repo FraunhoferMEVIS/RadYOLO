@@ -142,12 +142,13 @@ def train(config: Path) -> int:
     ),
     metavar="DATASET_CONFIG",
 )
-def validate(model_path: Path, dataset_type: str, dataset_path: Path) -> int:
+@click.option("--fold", default=0, help="Fold from dataset splits file to use.")
+def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
     """Validate a yolo11-3d model.
 
     MODEL specifies the path to a model checkpoint.
-    DATASET_TYPE specifies the type of dataset to use.
     DATASET_CONFIG specifies the path to a dataset configuration.
+    fold specifies which fold to use from the data splits file.
     """
     try:
         if not model_path.exists():
@@ -174,8 +175,7 @@ def validate(model_path: Path, dataset_type: str, dataset_path: Path) -> int:
 
         dataset = NIfTIDatasetWithMasks(
             src_path=dataset_path,
-            # TODO: Add fold as argument
-            fold=0,
+            fold=fold,
             group="test",
             imgsz=tuple(train_args.imgsz),
             augment=False,
