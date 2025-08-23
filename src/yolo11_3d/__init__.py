@@ -17,7 +17,7 @@ from yolo11_3d.nn.data import NIfTIDatasetWithMasks
 from yolo11_3d.nn.train import Trainer
 from yolo11_3d.nn.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, export_model, select_device
-from yolo11_3d.ultralytics.data.build import build_dataloader
+from yolo11_3d.nn.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
 
 LOGGER = logging.getLogger(__name__)

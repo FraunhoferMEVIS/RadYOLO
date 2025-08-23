@@ -10,8 +10,8 @@ from typing import Any, Literal, TypedDict, cast
 import nibabel as nib
 import numpy as np
 import torch
-import torch.nn.functional as F  # noqa: N812
-from torch.utils.data import Dataset
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
 
 from yolo11_3d.nn.augmentations import (
     batch_generators_intensity_augmentations,
@@ -256,3 +256,23 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                 "masks": tuple(sample["masks"] for sample in batch),
             }
 
+
+def build_dataloader(
+    dataset: NIfTIDatasetWithMasks,
+    batch_size: int,
+    workers: int,
+    shuffle: bool = True,
+    device: torch.device | str = "cpu",
+) -> DataLoader:
+    """Return an DataLoader for training or validation set."""
+    batch_size = min(batch_size, len(dataset))
+    number_workers = min(os.cpu_count() or 1, workers)
+    return DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=number_workers,
+        pin_memory=(device.type if isinstance(device, torch.device) else device) != "cpu",
+        collate_fn=getattr(dataset, "collate_fn", None),
+        persistent_workers=True
+    )

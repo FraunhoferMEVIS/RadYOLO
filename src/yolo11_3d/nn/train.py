@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import tqdm_loggable
 import tqdm_loggable.utils
 import yaml
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
-from yolo11_3d.ultralytics.data.build import InfiniteDataLoader, build_dataloader
+from yolo11_3d.nn.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results
 from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
@@ -632,7 +633,7 @@ class Trainer:
         fold: int = 0,
         mode: Literal["train", "val"] = "train",
         device: torch.device | str = "cpu",
-    ) -> InfiniteDataLoader:
+    ) -> DataLoader:
         assert mode in {"train", "val"}
         dataset = self.build_dataset(
             img_path=dataset_path, fold=fold, group=mode, model=model, batch=batch_size
@@ -644,7 +645,7 @@ class Trainer:
             )
             shuffle = False
         workers = self.args.workers if mode == "train" else self.args.workers * 2
-        return build_dataloader(dataset, batch_size, workers, shuffle, rank, device)
+        return build_dataloader(dataset, batch_size, workers, shuffle, device)
 
     def build_dataset(
         self,
@@ -723,7 +724,7 @@ class Trainer:
 
     def get_validator(
         self,
-        test_loader: InfiniteDataLoader,
+        test_loader: DataLoader,
         save_dir: Path,
         names: dict[int, str],
     ) -> Validator:
