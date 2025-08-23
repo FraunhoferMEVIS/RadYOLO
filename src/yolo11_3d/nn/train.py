@@ -241,11 +241,6 @@ class Trainer:
 
         # Check AMP
         amp = args.amp
-        if amp:
-            LOGGER.warning(
-                "Automatic Mixed Precision enabled. Please check if your system fully supports this."
-            )
-            # amp = check_amp(model) # TODO(lmg): implement check for stable amp support
         scaler = torch.GradScaler("cuda", enabled=amp)
         if world_size > 1:
             raise NotImplementedError

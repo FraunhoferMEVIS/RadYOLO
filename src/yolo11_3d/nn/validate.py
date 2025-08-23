@@ -20,13 +20,12 @@ from yolo11_3d.ultralytics.utils.metrics import (
 from yolo11_3d.ultralytics.utils.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
-    from yolo11_3d.ultralytics.data.build import InfiniteDataLoader
-
     from .config import DatasetConfig, DefaultConfig
     from .data import Batch
     from .model import HardcodedModel
     from .train import Trainer
     from .util import ModelEMA
+    from torch.utils.data import DataLoader
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)
@@ -35,14 +34,14 @@ LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 class Validator():
     def __init__(
         self,
-        dataloader: InfiniteDataLoader,
+        dataloader: DataLoader,
         save_dir: Path,
         args: DefaultConfig,
         names: dict[int, str],
     ) -> None:
         self.args = args
         self.dataloader = dataloader
-        self.stride = None  # TODO(muellergroh): determine type annotation
+        self.stride = None
         self.data: DatasetConfig | None = None
         self.device: torch.device | None = None
         self.batch_i: int | None = None
@@ -252,7 +251,6 @@ class Validator():
                 ops.xyzwhd2xyzxyz(bboxes)
                 * torch.tensor(imgsz, device=self.device)[[2, 1, 0, 2, 1, 0]]
             )  # target boxes
-            # TODO(muellergroh): check for 3D
             ops.scale_boxes(imgsz, bboxes, ori_shape, ratio_pad=ratio_pad)  # native-space labels
         return {
             "cls": classes,
@@ -265,7 +263,6 @@ class Validator():
     def _prepare_pred(self, pred: torch.Tensor, pbatch: dict[str, Any]) -> torch.Tensor:
         """Prepares a batch of images and annotations for validation."""
         predn = pred.clone()
-        # TODO(muellergroh): check for 3D
         ops.scale_boxes(
             pbatch["imgsz"], predn[:, :6], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
         )  # native-space pred
@@ -290,7 +287,7 @@ class Validator():
             stat["target_cls"] = classes
             stat["target_img"] = (
                 classes.unique()
-            )  # TODO(muellergroh): this seems wrong, since classes don't contain a reference to the image
+            )
             if num_predictions == 0:
                 if num_labels:
                     for k in self.stats:

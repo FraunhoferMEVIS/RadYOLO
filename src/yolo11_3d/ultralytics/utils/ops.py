@@ -20,7 +20,7 @@ def scale_boxes(
     img0_shape: tuple[int, ...],
     ratio_pad: tuple[tuple[float, float, float], tuple[int, int, int]] | None = None,
     padding: bool = True,
-    xywh: bool = False,
+    xyzwhd: bool = False,
 ) -> torch.Tensor:
     """Rescales bounding boxes (in the format of xyxy by default).
 
@@ -29,18 +29,18 @@ def scale_boxes(
 
     Args:
         img1_shape (tuple): The shape of the image that the bounding boxes are for, in the format of
-            (height, width).
+            (depth, width, height).
         boxes (torch.Tensor): the bounding boxes of the objects in the image, in the format of
-            (x1, y1, x2, y2)
-        img0_shape (tuple): the shape of the target image, in the format of (height, width).
+            (x1, y1, z1, x2, y2, z2)
+        img0_shape (tuple): the shape of the target image, in the format of (depth, width, height).
         ratio_pad (tuple): a tuple of (ratio, pad) for scaling the boxes. If not provided, the ratio
             and pad will be calculated based on the size difference between the two images.
         padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If
             False then do regular rescaling.
-        xywh (bool): The box format is xywh or not, default=False.
+        xyzwhd (bool): The box format is xyzwhd or not, default=False.
 
     Returns:
-        boxes (torch.Tensor): The scaled bounding boxes, in the format of (x1, y1, x2, y2)
+        boxes (torch.Tensor): The scaled bounding boxes, in the format of (x1, y1, z1, x2, y2, z2)
     """
     if ratio_pad is None:  # calculate from img0_shape
         gain = (
@@ -61,14 +61,14 @@ def scale_boxes(
         boxes[..., 0] -= pad[0]  # x padding
         boxes[..., 1] -= pad[1]  # y padding
         boxes[..., 2] -= pad[2]  # z padding
-        if not xywh:
+        if not xyzwhd:
             boxes[..., 3] -= pad[0]  # x padding
             boxes[..., 4] -= pad[1]  # y padding
             boxes[..., 5] -= pad[2]  # z padding
     boxes[..., :6] /= torch.as_tensor(gain, device=boxes.device).tile(
         1, 2
-    )  # TODO(muellergroh): check indexing for 3D
-    return clip_boxes(boxes, img0_shape)  # TODO(muellergroh): check indexing for 3D
+    )
+    return clip_boxes(boxes, img0_shape)
 
 
 
@@ -263,7 +263,7 @@ def non_max_suppression(
 
 
 def clip_boxes(boxes: torch.Tensor, shape: tuple[int, ...]) -> torch.Tensor:
-    """Takes a list of bounding boxes and a shape (height, width) and clips the bounding boxes.
+    """Takes a list of bounding boxes and a shape (depth, width, height) and clips the bounding boxes.
 
     Args:
         boxes (torch.Tensor): The bounding boxes to clip.
