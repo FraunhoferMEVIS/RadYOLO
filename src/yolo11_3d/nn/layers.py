@@ -578,24 +578,24 @@ class PrototypeMasksHighResolution(nn.Module):
             prototypes (int): Output channels (number of protos).
         """
         super().__init__()
-        self.cv1 = Conv(input_channels, prototypes*8, kernel_size=3)
+        self.cv1 = Conv(input_channels, prototypes*4, kernel_size=3)
         self.upsample1 = nn.ConvTranspose3d(
-            prototypes*8, prototypes*8, 2, 2, 0, bias=True
-        )
-
-        self.cv_skip_low_1 = Conv(input_channels_skip_connection_low, prototypes*8, kernel_size=3)
-        self.cv_skip_low_2 = Conv(prototypes*8, prototypes*8, kernel_size=3)
-        
-        self.cv2 = Conv(prototypes*8, prototypes*4, kernel_size=3)
-        self.cv3 = Conv(prototypes*4, prototypes*4, kernel_size=3)
-        self.upsample2 = nn.ConvTranspose3d(
             prototypes*4, prototypes*4, 2, 2, 0, bias=True
         )
 
-        self.cv_skip_high_1 = Conv(input_channels_skip_connection_high, prototypes*4, kernel_size=3)
-        self.cv_skip_high_2 = Conv(prototypes*4, prototypes*4, kernel_size=3)
+        self.cv_skip_low_1 = Conv(input_channels_skip_connection_low, prototypes*4, kernel_size=3)
+        self.cv_skip_low_2 = Conv(prototypes*4, prototypes*4, kernel_size=3)
+        
+        self.cv2 = Conv(prototypes*4, prototypes*2, kernel_size=3)
+        self.cv3 = Conv(prototypes*2, prototypes*2, kernel_size=3)
+        self.upsample2 = nn.ConvTranspose3d(
+            prototypes*2, prototypes*2, 2, 2, 0, bias=True
+        )
 
-        self.cv_out_1 = Conv(prototypes*4, prototypes*2, kernel_size=3)
+        self.cv_skip_high_1 = Conv(input_channels_skip_connection_high, prototypes*2, kernel_size=3)
+        self.cv_skip_high_2 = Conv(prototypes*2, prototypes*2, kernel_size=3)
+
+        self.cv_out_1 = Conv(prototypes*2, prototypes*2, kernel_size=3)
         self.cv_out_2 = Conv(prototypes*2, prototypes)
 
     def forward(self, x: torch.Tensor,
