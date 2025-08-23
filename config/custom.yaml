@@ -6,7 +6,7 @@ mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmar
 
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
-data: "D:/datasets/AMOS22/yolov11_3d_new_format/dataset.yaml" # (str) path to data file
+data: "D:/datasets/AMOS22/yolov11_3d_merged_masks/dataset.yaml" # (str) path to data file
 fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
@@ -99,7 +99,7 @@ warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) cls loss gain (scale with pixels)
 dfl: 1.5 # (float) dfl loss gain
-mask_gain: 10 # (float) mask loss gain
+mask_gain: 5 # (float) mask loss gain
 pose: 12.0 # (float) pose loss gain
 kobj: 1.0 # (float) keypoint obj loss gain
 nbs: 64 # (int) nominal batch size
@@ -121,7 +121,7 @@ copy_paste_mode: "flip" # (str) the method to do copy_paste augmentation (flip, 
 auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)
 erasing: 0.4 # (float) probability of random erasing during classification training (0-0.9), 0 means no erasing, must be less than 1.0.
 crop_fraction: 1.0 # (float) image crop fraction for classification (0.1-1), 1.0 means no crop, must be greater than 0.
-do_batchgenerators_intensity_augmentation: True
+do_batchgenerators_intensity_augmentation: False
 
 # Custom config.yaml ---------------------------------------------------------------------------------------------------
 cfg: # (str, optional) for overriding defaults.yaml

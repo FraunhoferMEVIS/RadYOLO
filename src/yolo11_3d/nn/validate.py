@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import numpy.typing as npt
 import torch
+import torch.nn.functional as F
 from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.ultralytics.utils import ops
@@ -77,6 +78,8 @@ class Validator():
         self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 10)  # IoU vector for mAP@0.1:0.95
         self.niou = self.iouv.numel()
         self.lb = []  # for autolabelling
+        self.dice_sum = 0.0
+        self.dice_count = 0
         if self.args.save_hybrid:
             LOGGER.warning(
                 "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
@@ -131,11 +134,11 @@ class Validator():
                     "tuple[torch.Tensor, torch.Tensor]", model.loss(batch, raw_preds)
                 )[1]
 
-            # Postprocess
+            # Postprocess and metrics
             pred_class_box, pred_mask_coeff, pred_prototype_masks = raw_preds
-            preds = self.postprocess(pred_class_box)
+            preds = self.postprocess(pred_class_box, pred_mask_coeff)
 
-            self.update_metrics(preds, batch)
+            self.update_metrics(preds, batch, pred_prototype_masks)
             if self.args.plots and batch_i < 3:
                 self.plot_val_samples(batch, batch_i)
                 self.plot_predictions(batch, preds, batch_i)
@@ -168,6 +171,9 @@ class Validator():
         self.seen = 0
         self.jdict = []
         self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+        # reset Dice accumulators
+        self.dice_sum = 0.0
+        self.dice_count = 0
 
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
@@ -205,17 +211,32 @@ class Validator():
         return batch
 
     def postprocess(
-        self, preds: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
+        self,
+        prediction,
+        mask_coefficients
     ) -> list[torch.Tensor]:
-        """Apply Non-maximum suppression to prediction outputs."""
+        """Apply Non-maximum suppression to prediction outputs, concatenating mask coefficients if present."""
+
+        # Unpack detection outputs (inference_out, loss_out)
+        if isinstance(prediction, (list, tuple)):
+            prediction = prediction[0]
+
+        # Attach mask coefficients to predictions if available
+        if isinstance(mask_coefficients, torch.Tensor):
+            if prediction.shape[0] != mask_coefficients.shape[0] or prediction.shape[-1] != mask_coefficients.shape[-1]:
+                LOGGER.warning("Mask coefficients shape mismatch with predictions; ignoring mask coefficients for NMS.")
+            else:
+                prediction = torch.cat((prediction, mask_coefficients), dim=1)
+
         return ops.non_max_suppression(
-            preds,
+            prediction,
             self.args.conf,
             self.args.iou,
             labels=self.lb,
             multi_label=True,
             agnostic=self.args.single_cls or self.args.agnostic_nms,
             max_det=self.args.max_det,
+            nc=self.nc,
         )
 
     def _prepare_batch(self, si: int, batch: Batch) -> dict[str, Any]:
@@ -250,11 +271,13 @@ class Validator():
         )  # native-space pred
         return predn
 
-    def update_metrics(self, preds: list[torch.Tensor], batch: Batch) -> None:
+    def update_metrics(
+        self, preds: list[torch.Tensor], batch: Batch, prototype_masks: torch.Tensor | None
+    ) -> None:
         """Metrics."""
-        for si, pred in enumerate(preds):
+        for si, pred_with_scores_and_coefficients in enumerate(preds):
             self.seen += 1
-            num_predictions = len(pred)
+            num_predictions = len(pred_with_scores_and_coefficients)
             stat = {
                 "conf": torch.zeros(0, device=self.device),
                 "pred_cls": torch.zeros(0, device=self.device),
@@ -262,6 +285,7 @@ class Validator():
             }
             prepared_batch = self._prepare_batch(si, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
+            orignal_shape = prepared_batch["ori_shape"]
             num_labels = len(classes)
             stat["target_cls"] = classes
             stat["target_img"] = (
@@ -279,14 +303,25 @@ class Validator():
 
             # Predictions
             if self.args.single_cls:
-                pred[:, 7] = 0
-            predn = self._prepare_pred(pred, prepared_batch)
+                pred_with_scores_and_coefficients[:, 7] = 0
+            predn = self._prepare_pred(pred_with_scores_and_coefficients, prepared_batch)
             stat["conf"] = predn[:, 6]
             stat["pred_cls"] = predn[:, 7]
 
             # Evaluate
             if num_labels:
                 stat["tp"] = self._process_batch(predn, bboxes, classes)
+                # Compute Dice for matched instances if masks are available
+                if prototype_masks is not None:
+                    self._update_dice_for_image(
+                        predn,
+                        pred_with_scores_and_coefficients,
+                        bboxes,
+                        classes,
+                        prototype_masks[si],
+                        batch["masks"][si],
+                        orignal_shape
+                    )
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bboxes, classes)
             for k in self.stats:
@@ -326,6 +361,105 @@ class Validator():
         """
         iou = box_iou(gt_bboxes, detections[:, :6])
         return self.match_predictions(detections[:, 7], gt_cls, iou)
+
+    def _get_matches(
+        self,
+        detections: torch.Tensor,
+        gt_bboxes: torch.Tensor,
+        iou_thres: float,
+        gt_classes: torch.Tensor,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return matched indices (gt_index, det_index) using IoU threshold and class equality."""
+        if gt_bboxes.shape[0] == 0 or detections.shape[0] == 0:
+            return np.zeros((0,), dtype=int), np.zeros((0,), dtype=int)
+        iou = box_iou(gt_bboxes, detections[:, :6])
+        # zero-out pairs with different classes
+        class_equal = gt_classes[:, None] == detections[:, 7]
+        iou = iou * class_equal
+        x = torch.where(iou > iou_thres)
+        if x[0].shape[0]:
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+            if x[0].shape[0] > 1:
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+        else:
+            matches = np.zeros((0, 3))
+        if matches.shape[0] == 0:
+            return np.zeros((0,), dtype=int), np.zeros((0,), dtype=int)
+        m0, m1 = matches[:, 0].astype(int), matches[:, 1].astype(int)
+        return m0, m1
+
+    def _update_dice_for_image(
+        self,
+        predn: torch.Tensor,
+        pred_with_coeffs: torch.Tensor,
+        gt_bboxes: torch.Tensor,
+        gt_cls: torch.Tensor,
+        prototypes: torch.Tensor,
+        gt_masks_list: list[torch.Tensor | None],
+        orignal_shape
+    ) -> None:
+        """Compute and accumulate Dice for matched instances in a single image."""
+        # Require mask coefficients appended after class column
+        nm = pred_with_coeffs.shape[1] - 8
+        if len(gt_masks_list) == 0:
+            return
+        predn_f = predn.to(device=prototypes.device, dtype=prototypes.dtype)
+        gt_bboxes_f = gt_bboxes.to(device=prototypes.device, dtype=prototypes.dtype)
+        # Match detections to gt by IoU threshold from confusion matrix
+        gt_idx, det_idx = self._get_matches(
+            predn_f, gt_bboxes_f, self.confusion_matrix.iou_thres, gt_cls
+        )
+        if gt_idx.size == 0:
+            return
+        # Prepare shapes (H, W, D)
+        proto_hwd = prototypes.shape[1:]
+        for g_i, d_i in zip(gt_idx, det_idx, strict=True):
+            gt_mask = gt_masks_list[g_i]
+            if gt_mask is None:
+                continue
+            # Downsample GT mask to prototype resolution
+            gt_mask_d = F.interpolate(
+                gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype), proto_hwd, mode="nearest-exact"
+            )[0, 0]
+            # Reconstruct predicted mask logits from coefficients and prototypes
+            coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(device=prototypes.device, dtype=prototypes.dtype)
+            # prototypes shape: (n_proto, H, W, D) -> logits (H, W, D), match training loss
+            pred_logits = torch.einsum("n,nhwd->hwd", coeff, prototypes)
+            pred_prob = pred_logits.sigmoid()
+            # Compute cropping box in prototype grid (approx. stride 4 like in loss)
+            gt_box = gt_bboxes_f[g_i]
+            gt_box[[0, 3]] = gt_box[[0, 3]] / orignal_shape[2] * proto_hwd[2]
+            gt_box[[1, 4]] = gt_box[[1, 4]] / orignal_shape[1] * proto_hwd[1]
+            gt_box[[2, 5]] = gt_box[[2, 5]] / orignal_shape[0] * proto_hwd[0]
+            pr_box = predn_f[d_i, :6]
+            pr_box[[0, 3]] = pr_box[[0, 3]] / orignal_shape[2] * proto_hwd[2]
+            pr_box[[1, 4]] = pr_box[[1, 4]] / orignal_shape[1] * proto_hwd[1]
+            pr_box[[2, 5]] = pr_box[[2, 5]] / orignal_shape[0] * proto_hwd[0]
+            # [x1,y1,z1,x2,y2,z2]
+            xyz1 = torch.minimum(gt_box[:3], pr_box[:3])
+            xyz2 = torch.maximum(gt_box[3:], pr_box[3:])
+            xyz1 = torch.floor(xyz1).clamp_min(0)
+            xyz2 = torch.ceil(xyz2)
+            xyz2[0] = xyz2[0].clamp(max=proto_hwd[0])
+            xyz2[1] = xyz2[1].clamp(max=proto_hwd[1])
+            xyz2[2] = xyz2[2].clamp(max=proto_hwd[2])
+            x0, y0, z0 = xyz1.to(torch.int)
+            x1, y1, z1 = xyz2.to(torch.int)
+            if (x1 <= x0) or (y1 <= y0) or (z1 <= z0):
+                continue
+            p_region = pred_prob[x0:x1, y0:y1, z0:z1]
+            g_region = gt_mask_d[x0:x1, y0:y1, z0:z1].to(dtype=p_region.dtype)
+            if not g_region.any():
+                continue
+            # Soft Dice
+            intersection = (p_region * g_region).sum().item()
+            denom = (p_region.sum() + g_region.sum()).item()
+            dice = (2.0 * intersection) / (denom + 1e-7)
+            self.dice_sum += float(dice)
+            self.dice_count += 1
 
     def match_predictions(
         self,
@@ -385,7 +519,9 @@ class Validator():
         stats.pop("target_img", None)
         if stats and stats["tp"].any():
             self.metrics.process(**stats)
-        return self.metrics.results_dict
+        # Add Dice metric
+        dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
+        return {**self.metrics.results_dict, "metrics/dice(M)": dice_avg}
 
     def finalize_metrics(self, *args, **kwargs) -> None:
         """Set final values for metrics speed and confusion matrix."""
@@ -421,6 +557,9 @@ class Validator():
                     names=self.names.values(),
                     normalize=normalize,
                 )
+        # Print Dice metric summary
+        dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
+        LOGGER.warning("%22s%11.3g", "Mask Dice(M)", dice_avg)
 
     def plot_val_samples(self, batch: Batch, ni: int) -> None:
         """Plot validation image samples."""
