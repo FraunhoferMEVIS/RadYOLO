@@ -28,7 +28,7 @@ LOGGER = logging.getLogger(__name__)
 class Sample(TypedDict):
     image: torch.Tensor
     shape: tuple[int, int, int]
-    original_shape: tuple[int, int] | tuple[int, int, int]
+    original_shape: tuple[int, int, int]
     ratio_pad: (
         tuple[tuple[float, float, float], tuple[int, int, int]]
         | None
@@ -39,15 +39,15 @@ class Sample(TypedDict):
 
 class Batch(TypedDict):
     img: torch.Tensor
-    ori_shape: tuple[tuple[int, int] | tuple[int, int, int], ...]
+    ori_shape: tuple[tuple[int, int, int], ...]
     ratio_pad: tuple[
         tuple[
-            tuple[float, float] | tuple[float, float, float], tuple[int, int] | tuple[int, int, int]
+            tuple[float, float, float], tuple[int, int, int]
         ]
         | None,
         ...,
     ]
-    shape: tuple[tuple[int, int] | tuple[int, int, int], ...]
+    shape: tuple[tuple[int, int, int], ...]
     cls: torch.Tensor
     bboxes: torch.Tensor
     batch_idx: torch.Tensor

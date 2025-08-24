@@ -234,14 +234,17 @@ class v8DetectionLoss:  # noqa: N801
 
             # Mask loss
             if self.enable_mask_loss:
-                # Downsample grid by factor of two to match prototype mask resolution
-                target_bboxes_grid = target_bboxes / 2
-                pred_bboxes_grid = pred_bboxes_image_coordinates / 2
-                
                 mask_loss_count = 0
                 mask_coefficients = preds[1]
                 mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
                 prototype_masks = preds[2]
+
+                # Downsample cell grid by factor between image resolution and prototype mask resolution 
+                image_shape = batch['shape'][0]
+                downsampling_rate = int(image_shape[-1] / prototype_masks.shape[-1])
+                target_bboxes_grid = target_bboxes / downsampling_rate
+                pred_bboxes_grid = pred_bboxes_image_coordinates / downsampling_rate
+
                 for batch_index, masks in enumerate(batch["masks"]):
                     target_gt_idx_batch = target_gt_idx[batch_index]
                     fg_mask_batch = fg_mask[batch_index]

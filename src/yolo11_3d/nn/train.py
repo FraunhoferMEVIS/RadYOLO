@@ -163,6 +163,9 @@ class Trainer:
             dfl=self.args.dfl,
             mask_gain=self.args.mask_gain,
             device=device,
+            enable_output_masks=self.args.segmentation_output,
+            num_prototype_masks=self.args.prototype_masks,
+            higher_resolution_prototypes=self.args.higher_resolution_prototypes,
         )
         if weights_ema:
             model.load(weights_ema)
