@@ -163,7 +163,7 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
 
-        dataset_path = dataset_config.path
+        data_folder = dataset_path.parent
 
         checkpoint = model_checkpoint_from_torch(model_path)
         model = checkpoint["ema"]
@@ -174,7 +174,7 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
         ema = ModelEMA(model)
 
         dataset = NIfTIDatasetWithMasks(
-            src_path=dataset_path,
+            src_path=data_folder,
             fold=fold,
             group="test",
             imgsz=tuple(train_args.imgsz),

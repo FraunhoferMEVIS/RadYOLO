@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import datetime
 import gc
+import io
 import logging
-import math
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -238,11 +238,11 @@ class Trainer:
 
         # Dataloaders
         train_loader = self.get_dataloader(
-            self.data.path, model, batch_size=batch_size, rank=-1, fold=args.fold, mode="train", device=device
+            self.args.data, model, batch_size=batch_size, rank=-1, fold=args.fold, mode="train", device=device
         )
         if self.args.val:
             val_loader = self.get_dataloader(
-                self.data.path, model, batch_size=batch_size * 2, rank=-1, fold=args.fold, mode="val", device=device
+                self.args.data, model, batch_size=batch_size * 2, rank=-1, fold=args.fold, mode="val", device=device
             )
             validator = self.get_validator(
                 val_loader,
@@ -575,9 +575,10 @@ class Trainer:
 
     @staticmethod
     def get_dataset_config(
-        dataset_config_path: Path,
+        dataset_folder: Path,
     ) -> DatasetConfig:
         """Reduction of get_dataset(), check_det_dataset(), check_file() and validation included in Pydantic model."""
+        dataset_config_path = dataset_folder / "dataset.yaml"
         with Path(dataset_config_path).open() as f:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
@@ -647,11 +648,7 @@ class Trainer:
         train_args: DefaultConfig,
         metrics: dict[str, float],
         fitness: float,
-        # results: dict | None = None,
-        # model: torch.nn.Module | None = None,
     ):
-        import io
-
         buffer = io.BytesIO()
         checkpoint = ModelCheckpoint(
             epoch=epoch,

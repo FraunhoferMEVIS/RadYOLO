@@ -41,7 +41,7 @@ class DefaultConfig(BaseModel):
 
     # Train settings
     model: FilePath | NewPath  # path to model file
-    data: FilePath  # path to data file
+    data: DirectoryPath  # path to data folder containing dataset.yaml
     fold: int
     epochs: int = 100  # number of epochs to train for
     patience: int = (
@@ -121,16 +121,8 @@ class DefaultConfig(BaseModel):
 
 
 class DatasetConfig(BaseModel):
-    path: Path
     names: dict[NonNegativeInt, str] | None = None
     nc: NonNegativeInt = 0
-
-    @model_validator(mode="after")
-    def validate_paths(self) -> Self:
-        self.path = (DATASETS_DIR / self.path).resolve()
-        if not self.path.is_dir():
-            raise ValueError
-        return self
 
     @model_validator(mode="after")
     def validate_classes(self) -> Self:
