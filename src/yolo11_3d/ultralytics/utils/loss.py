@@ -251,7 +251,6 @@ class v8DetectionLoss:  # noqa: N801
                     prototype_masks_batch = prototype_masks[batch_index]
                     if masks is not None and masks.shape[0] >= 1:
                         masks = F.interpolate(masks[None, :], prototype_masks_batch.shape[1:], mode="nearest-exact")[0]
-                        masks = masks.to(self.device)
                         for mask_index, gt_mask in enumerate(masks):
                             if not gt_mask.any():
                                 LOGGER.warning("Empty mask after downsampling. Skipping this mask.")
@@ -266,7 +265,7 @@ class v8DetectionLoss:  # noqa: N801
                             predicted_boxes = pred_bboxes_grid[batch_index, grid_cell_indices]
                             predicted_box = torch.cat([predicted_boxes[:,:3].amin(dim=0), predicted_boxes[:,3:].amax(dim=0)])
                             cropping_box = torch.cat([torch.amin(torch.cat([target_box[:3, None], predicted_box[:3, None]], dim=1), dim=1),
-                                                    torch.amax(torch.cat([target_box[3:, None], predicted_box[3:, None]], dim=1), dim=1)])
+                                                      torch.amax(torch.cat([target_box[3:, None], predicted_box[3:, None]], dim=1), dim=1)])
                             cropping_box[:3] = cropping_box[:3].floor()
                             cropping_box[3:] = cropping_box[3:].ceil()
                             cropping_box[:3] = cropping_box[:3].clamp(min=0)

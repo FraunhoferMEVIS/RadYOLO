@@ -184,9 +184,12 @@ class Validator():
         )
 
     def preprocess(self, batch: Batch) -> Batch:
-        """Preprocesses batch of images for YOLO training."""
+        """Preprocesses batch of images for YOLO validation."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
         batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()  # / 255
+        batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
+                               for masks in batch["masks"])
+
         for k in ["batch_idx", "cls", "bboxes"]:
             batch[k] = batch[k].to(self.device)
 

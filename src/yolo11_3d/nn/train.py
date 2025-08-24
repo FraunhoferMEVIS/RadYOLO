@@ -184,7 +184,6 @@ class Trainer:
         device: torch.device,
         args: DefaultConfig,
         batch_size: int,
-        epochs: int,
         start_epoch: int = 0,
     ) -> tuple[
         HardcodedModel,
@@ -321,7 +320,6 @@ class Trainer:
             device=self.device,
             args=self.args,
             batch_size=self.batch_size,
-            epochs=self.epochs,
         )
 
         self._train_loop(
@@ -368,7 +366,6 @@ class Trainer:
         num_warmup_iterations = (
             max(round(args.warmup_epochs * num_batches), 100) if args.warmup_epochs > 0 else -1
         )
-        epoch_time_start = time.time()
         train_time_start = time.time()
         self.epoch = start_epoch
         last_opt_step = num_batches * self.epoch
@@ -381,7 +378,6 @@ class Trainer:
                 "Epoch",
                 "GPU_mem",
                 *self.loss_names,
-                # "Instances",
                 "Size",
             )
             pbar = tqdm(
@@ -428,8 +424,10 @@ class Trainer:
 
                     # Forward
                     with torch.autocast(amp_device_type):
-                        # batch = self.preprocess_batch(batch)
                         batch["img"] = batch["img"].to(self.device, non_blocking=True)
+                        if self.args.segmentation_output:
+                            batch["masks"] = tuple(masks.to(self.device, non_blocking=True) for masks in batch["masks"])
+                        
                         loss, self.loss_items = cast(
                             "tuple[torch.Tensor, torch.Tensor]", model(batch)
                         )
