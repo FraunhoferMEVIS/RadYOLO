@@ -440,18 +440,19 @@ class Detect(nn.Module):
     anchors = torch.empty(0)
     strides = torch.empty(0)
 
-    def __init__(self, num_classes: int = 80, ch: Sequence[int] = ()) -> None:
+    def __init__(self, num_classes: int = 80, ch: Sequence[int] = (), *, separate_objectness_head: bool = False) -> None:
         super().__init__()
         self.nc = num_classes  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
-        self.no = num_classes + self.reg_max * 6  # number of outputs per anchor
+        self.separate_objectness_head = separate_objectness_head
+        self.no = (num_classes + 1 if self.separate_objectness_head else num_classes) + self.reg_max * 6  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = (
             max((16, ch[0] // 4, self.reg_max * 6)),
             max(ch[0], min(self.nc, 100)),
         )  # channels
-        self.cv2 = nn.ModuleList(
+        self.cv_boxes = nn.ModuleList(
             nn.Sequential(
                 Conv(x, c2, 3),
                 Conv(c2, c2, 3),
@@ -459,7 +460,7 @@ class Detect(nn.Module):
             )
             for x in ch
         )
-        self.cv3 = nn.ModuleList(
+        self.cv_classes = nn.ModuleList(
             nn.Sequential(
                 nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
                 nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
@@ -467,13 +468,28 @@ class Detect(nn.Module):
             )
             for x in ch
         )
+        if self.separate_objectness_head:
+            self.cv_obj = nn.ModuleList(
+                nn.Sequential(
+                    nn.Sequential(DWConv(x, x, 3), Conv(x, x, 1)),
+                    nn.Sequential(DWConv(x, x, 3), Conv(x, x, 1)),
+                    nn.Conv3d(x, 1, 1),
+                )
+                for x in ch
+            )
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     def forward(
         self, x: list[torch.Tensor]
     ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         for i in range(self.nl):
-            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+            reg = self.cv_boxes[i](x[i])
+            cls = self.cv_classes[i](x[i])
+            if self.separate_objectness_head:
+                obj = self.cv_obj[i](x[i])
+                x[i] = torch.cat((reg, cls, obj), 1)
+            else:
+                x[i] = torch.cat((reg, cls), 1)
         if self.training:
             return x
         y = self._inference(x)
@@ -489,35 +505,54 @@ class Detect(nn.Module):
             )
             self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
-        box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
-        dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-
-        return torch.cat((dbox, cls.sigmoid()), 1)
+        if self.separate_objectness_head:
+            box, cls, obj = x_cat.split((self.reg_max * 6, self.nc, 1), 1)
+            dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+            cls_prob = cls.softmax(1)
+            obj_prob = obj.sigmoid()
+            # Return separate tensors: boxes, class probabilities, objectness
+            return (dbox, cls_prob, obj_prob)
+        else:
+            box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
+            dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+            return torch.cat((dbox, cls.sigmoid()), 1)
 
     def bias_init(self) -> None:
-        for a, b, s in zip(self.cv2, self.cv3, self.stride, strict=True):
-            if not isinstance(a, nn.Sequential):
-                raise TypeError
-            if not isinstance(b, nn.Sequential):
-                raise TypeError
+        for idx, (a, b, s) in enumerate(zip(self.cv_boxes, self.cv_classes, self.stride, strict=True)):
+            if not self.separate_objectness_head:
+                if not isinstance(a, nn.Sequential):
+                    raise TypeError
+                if not isinstance(b, nn.Sequential):
+                    raise TypeError
 
-            a_last = a[-1]
-            if not isinstance(a_last, nn.Conv3d):
-                raise TypeError
+                a_last = a[-1]
+                if not isinstance(a_last, nn.Conv3d):
+                    raise TypeError
 
-            b_last = b[-1]
-            if not isinstance(b_last, nn.Conv3d):
-                raise TypeError
+                b_last = b[-1]
+                if not isinstance(b_last, nn.Conv3d):
+                    raise TypeError
 
-            a_bias = a_last.bias
-            if a_bias is None:
-                raise ValueError
-            a_bias.data[:] = 1.0
+                a_bias = a_last.bias
+                if a_bias is None:
+                    raise ValueError
+                a_bias.data[:] = 1.0
 
-            b_bias = b_last.bias
-            if b_bias is None:
-                raise ValueError
-            b_bias.data[: self.nc] = math.log(5 / self.nc / (256 / s) ** 3)
+                b_bias = b_last.bias
+                if b_bias is None:
+                    raise ValueError
+                b_bias.data[: self.nc] = math.log(5 / self.nc / (256 / s) ** 3)
+            else:
+                obj_seq = self.cv_obj[idx]
+                if not isinstance(obj_seq, nn.Sequential):
+                    raise TypeError
+                obj_last = obj_seq[-1]
+                if not isinstance(obj_last, nn.Conv3d):
+                    raise TypeError
+                obj_bias = obj_last.bias
+                if obj_bias is None:
+                    raise ValueError
+                obj_bias.data[:] = math.log(5 / (256 / s) ** 3)
 
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True

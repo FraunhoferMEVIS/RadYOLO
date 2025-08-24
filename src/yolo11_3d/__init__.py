@@ -186,7 +186,8 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
             min_stride=int(model.stride.min().item())
             if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
             else 8,
-            normalization=train_args.normalization
+            normalization=train_args.normalization,
+            load_masks = train_args.segmentation_output,
         )
 
         dataloader = build_dataloader(

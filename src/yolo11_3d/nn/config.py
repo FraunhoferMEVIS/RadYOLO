@@ -96,9 +96,13 @@ class DefaultConfig(BaseModel):
     dfl: float = 1.5  # dfl loss gain
     mask_gain: float = 1.0  # mask loss gain
     nbs: int = 64  # nominal batch size
+
+    # Optional Segmentation Head
     segmentation_output: bool = True # add segmentation output to model
     prototype_masks: int = 8 # number of prototype masks for segmentation output
     higher_resolution_prototypes: bool = True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
+    # Detection head options
+    separate_objectness_head: bool = False  # if True, add a separate objectness output and use CE for class logits
 
     # Augmentation
     max_zoom: float = Field(1.5, ge=0)

@@ -111,18 +111,21 @@ class v8DetectionLoss:  # noqa: N801
         tal_alpha: float = 0.5,
         tal_beta: float = 6.0,
         tal_fallback: bool = True,
-        enable_mask_loss: bool = False
+        enable_mask_loss: bool = False,
+        separate_objectness_head: bool = False,
     ) -> None:  # model must be de-paralleled
         """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
         m = detect_layer
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        self.ce = nn.CrossEntropyLoss(reduction="none")
         self.box_gain = box
         self.classification_gain = cls
         self.dfl_gain = dfl
         self.mask_gain = mask_gain
         self.stride: torch.Tensor = m.stride  # model strides
         self.num_classes: int = m.nc  # number of classes
-        self.no: int = m.nc + m.reg_max * 6
+        self.separate_objectness_head: bool = separate_objectness_head
+        self.no: int = (m.nc + 1 if self.separate_objectness_head else m.nc) + m.reg_max * 6
         self.reg_max: int = m.reg_max
         self.device: torch.device = device
 
@@ -177,15 +180,20 @@ class v8DetectionLoss:  # noqa: N801
         loss = torch.zeros(4, device=self.device)  # box, cls, dfl, mask
         feats = preds[0]
         feats = feats[1] if isinstance(feats, tuple) else feats # Handling of inference pass
-        pred_distri, pred_scores = torch.cat(
+        flat = torch.cat(
             [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2
-        ).split((self.reg_max * 6, self.num_classes), 1)
-
-        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        )
+        if self.separate_objectness_head:
+            pred_distri, pred_cls_logits, pred_obj_logit = flat.split((self.reg_max * 6, self.num_classes, 1), 1)
+            pred_class_logits = pred_cls_logits.permute(0, 2, 1).contiguous()  # (B, A, C) logits
+            pred_objectness_logit = pred_obj_logit.permute(0, 2, 1).contiguous()  # (B, A, 1) logit
+        else:
+            pred_distri, pred_class_logits = flat.split((self.reg_max * 6, self.num_classes), 1)
+            pred_class_logits = pred_class_logits.permute(0, 2, 1).contiguous()  # (B, A, C) logits for BCE-with-logits
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
 
-        dtype = pred_scores.dtype
-        batch_size = pred_scores.shape[0]
+        dtype = pred_class_logits.dtype
+        batch_size = pred_class_logits.shape[0]
         imgsz = (
             torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
         )  # image size (d,h,w)
@@ -205,8 +213,15 @@ class v8DetectionLoss:  # noqa: N801
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyzxyz, (b, h*w*d, 6)
         pred_bboxes_image_coordinates = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
 
+        # For assignment: use objectness when available so a prediction score exists even if no class selected
+        if self.separate_objectness_head:
+            assign_scores = pred_objectness_logit.detach().squeeze(-1).sigmoid()  # (B, A)
+            # Expand to (B, A, C) so assigner API stays the same
+            assign_scores = assign_scores.unsqueeze(-1).expand(-1, -1, self.num_classes)
+        else:
+            assign_scores = pred_class_logits.detach().sigmoid()
         _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
-            pred_scores.detach().sigmoid(),
+            assign_scores,
             pred_bboxes_image_coordinates,
             anchor_points * stride_tensor,
             gt_labels,
@@ -216,8 +231,34 @@ class v8DetectionLoss:  # noqa: N801
 
         target_scores_sum = max(target_scores.sum(), 1)
 
-        # Cls loss
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        # Cls/Objectness loss
+        if self.separate_objectness_head:
+            # For classification loss, build targets and ignore unknown class (-1)
+            # target_scores here is one-hot (0/1) per class for fg anchors
+            target_labels = target_scores.argmax(-1)  # (B, A)
+            # Determine unknown mask from gt_labels and assigned gt indices
+            B, A, C = target_scores.shape
+            per_anchor_gt = gt_labels.gather(1, target_gt_idx.unsqueeze(-1).clamp_min(0))  # (B, A, 1)
+            unknown_mask = (per_anchor_gt.squeeze(-1) < 0) & fg_mask.bool()
+            # Cross entropy expects class indices and can take ignore_index
+            ce_loss = self.ce(
+                pred_class_logits.view(-1, C),
+                target_labels.view(-1)
+            )
+            # Mask out ignored positions (unknown class)
+            ce_loss = ce_loss.view(B, A)
+            ce_loss = ce_loss.masked_fill(unknown_mask, 0.0)
+            # Only count fg anchors
+            ce_loss = (ce_loss * fg_mask).sum() / fg_mask.sum()
+            loss[1] = ce_loss
+            # Objectness targets: 1 for fg, 0 for bg
+            obj_target = fg_mask.float().unsqueeze(-1)
+            loss_obj = self.bce(pred_objectness_logit, obj_target)
+            loss_obj = loss_obj.sum() / target_scores_sum
+            loss[1] += loss_obj  # combine; keep same gain scaling
+        else:
+            # BCE-with-logits on multi-label scores as in YOLO
+            loss[1] = self.bce(pred_class_logits, target_scores.to(dtype)).sum() / target_scores_sum
 
         # Bbox loss
         if fg_mask.sum():

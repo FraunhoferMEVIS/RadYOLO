@@ -37,6 +37,7 @@ class HardcodedModel(nn.Module):
         enable_output_masks: bool = True,
         num_prototype_masks: int = 8,
         higher_resolution_prototypes: bool = True,
+        separate_objectness_head: bool = False,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -61,6 +62,7 @@ class HardcodedModel(nn.Module):
         self.enable_output_masks = enable_output_masks
         self.num_prototype_masks = num_prototype_masks
         self.higher_resolution_prototypes = higher_resolution_prototypes
+        self.separate_objectness_head = separate_objectness_head
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
@@ -211,7 +213,9 @@ class HardcodedModel(nn.Module):
                 for x in [16, 19, 22]
             )
 
-        self.l23 = Detect(num_classes, [output_channels[x] for x in [16, 19, 22]])
+        self.l23 = Detect(num_classes,
+                          [output_channels[x] for x in [16, 19, 22]],
+                          separate_objectness_head=self.separate_objectness_head)
         s = 256
         self.l23.stride = torch.tensor(
             [
@@ -224,7 +228,7 @@ class HardcodedModel(nn.Module):
 
         self.criterion = v8DetectionLoss(
             self, box, cls, dfl, mask_gain, self.l23, device, tal_beta=1.0, tal_fallback=True,
-            enable_mask_loss=enable_output_masks
+            enable_mask_loss=enable_output_masks, separate_objectness_head=self.separate_objectness_head
         )
 
     @overload

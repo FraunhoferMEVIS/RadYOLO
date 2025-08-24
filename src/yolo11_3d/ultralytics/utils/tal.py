@@ -293,7 +293,8 @@ class TaskAlignedAssigner(nn.Module):
         ind[0] = (
             torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)
         )  # b, max_num_obj
-        ind[1] = ground_truth_labels.squeeze(-1)  # b, max_num_obj
+        # Clamp unknown class (-1) to 0 only to avoid indexing errors; loss handles unknown classes (class -1)
+        ind[1] = ground_truth_labels.squeeze(-1).clamp_min(0)  # b, max_num_obj
         # Get the scores of each grid for each gt cls
         bbox_scores[ground_truth__mask] = pred_scores[ind[0], :, ind[1]][
             ground_truth__mask

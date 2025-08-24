@@ -220,6 +220,13 @@ class Validator():
         if isinstance(prediction, (list, tuple)):
             prediction = prediction[0]
 
+        # If model returns separate boxes, class probs, and objectness, fold for NMS
+        if isinstance(prediction, tuple) and len(prediction) == 3:
+            dbox, cls_prob, obj_prob = prediction
+            # Multiply class probabilities with objectness for NMS
+            combined = torch.cat((dbox, cls_prob * obj_prob), 1)
+            prediction = combined
+
         # Attach mask coefficients to predictions if available
         if isinstance(mask_coefficients, torch.Tensor):
             if prediction.shape[0] != mask_coefficients.shape[0] or prediction.shape[-1] != mask_coefficients.shape[-1]:

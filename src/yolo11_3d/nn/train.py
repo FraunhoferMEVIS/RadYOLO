@@ -166,6 +166,7 @@ class Trainer:
             enable_output_masks=self.args.segmentation_output,
             num_prototype_masks=self.args.prototype_masks,
             higher_resolution_prototypes=self.args.higher_resolution_prototypes,
+            separate_objectness_head=self.args.separate_objectness_head,
         )
         if weights_ema:
             model.load(weights_ema)
@@ -627,6 +628,7 @@ class Trainer:
             ),
             pad=0.0 if group == "train" else 0.5,
             normalization=self.args.normalization,
+            load_masks=self.args.segmentation_output,
             max_zoom=self.args.max_zoom,
             min_zoom=self.args.min_zoom,
             out_zoom_padding=self.args.out_zoom_padding,
