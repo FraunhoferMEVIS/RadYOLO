@@ -58,7 +58,18 @@ class Trainer:
         if not run_dir.is_dir():
             msg = f"{run_dir} does not exist or is not a directory!"
             raise RuntimeError(msg)
-        self.check_resume(run_dir)
+        
+        self.save_dir = run_dir / (str(self.args.name) or time_now.strftime("%Y_%m_%d-%H_%M_%S"))
+        self.wdir = self.save_dir / "weights"
+        self.save_dir.mkdir(exist_ok=self.args.exist_ok)
+        self.wdir.mkdir(exist_ok=self.args.exist_ok)
+        self.last_model_path = self.wdir / "last.pt"
+        self.best_model_path = self.wdir / "best.pt"
+        self.save_period = self.args.save_period
+        self.csv_path = self.save_dir / "results.csv"
+
+        self.check_resume()
+
         self.device = select_device(self.args.device)
 
         init_seeds(self.args.seed, deterministic=self.args.deterministic)
@@ -82,13 +93,6 @@ class Trainer:
 
         time_now = datetime.datetime.now(tz=datetime.UTC)
 
-        self.save_dir = run_dir / (str(self.args.name) or time_now.strftime("%Y_%m_%d-%H_%M_%S"))
-
-        self.wdir = self.save_dir / "weights"
-
-        self.save_dir.mkdir(exist_ok=self.args.exist_ok)
-        self.wdir.mkdir(exist_ok=self.args.exist_ok)
-
         file_handler = logging.FileHandler(
             str(self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(".log")),
             encoding="utf-8",
@@ -102,34 +106,29 @@ class Trainer:
         file_handler.addFilter(YoloFilter())
         logging.root.addHandler(file_handler)
 
-        self.last_model_path = self.wdir / "last.pt"
-        self.best_model_path = self.wdir / "best.pt"
-        self.save_period = self.args.save_period
-        self.csv_path = self.save_dir / "results.csv"
-
         self.plot_idx = [0, 1, 2]
         # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
         self.ewa_mAP1095 = None
         self.ewa_alpha = 0.6
 
-    def check_resume(self, run_dir: Path) -> None:
+    def check_resume(self) -> None:
         resume = self.args.resume
         if resume:
             try:
-                last = max(
-                    run_dir.rglob("**/last.pt"), key=lambda p: p.stat().st_ctime, default=None
-                )
-                if last is None:
+                if not self.last_model_path.exists():
                     self.resume = False
                     return
 
-                ckpt_args = model_checkpoint_from_torch(last)["train_args"]
+                ckpt_args = model_checkpoint_from_torch(self.last_model_path)["train_args"]
                 if not Path(ckpt_args.data).exists():
                     ckpt_args.data = self.args.data
 
+                message = f"Resuming from model checkpoint {self.last_model_path}..."
+                print(message)
+                LOGGER.info(message)
                 resume = True
                 self.args = ckpt_args
-                self.args.model = self.args.resume = last
+                self.args.model = self.args.resume = self.last_model_path
 
             except Exception as e:
                 msg = "Resume checkpoint not found, please pass a valid checkpoint to resume from."
