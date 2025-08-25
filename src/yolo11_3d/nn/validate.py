@@ -408,15 +408,15 @@ class Validator():
         )
         if gt_idx.size == 0:
             return
-        # Prepare shapes (H, W, D)
-        proto_hwd = prototypes.shape[1:]
+        # Prepare shapes (D, W, H)
+        proto_dhw = prototypes.shape[1:]
         for g_i, d_i in zip(gt_idx, det_idx, strict=True):
             gt_mask = gt_masks_list[g_i]
             if gt_mask is None:
                 continue
             # Downsample GT mask to prototype resolution
             gt_mask_d = F.interpolate(
-                gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype), proto_hwd, mode="nearest-exact"
+                gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype), proto_dhw, mode="nearest-exact"
             )[0, 0]
             # Reconstruct predicted mask logits from coefficients and prototypes
             coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(device=prototypes.device, dtype=prototypes.dtype)
@@ -425,27 +425,27 @@ class Validator():
             pred_prob = pred_logits.sigmoid()
             # Compute cropping box in prototype grid (approx. stride 4 like in loss)
             gt_box = gt_bboxes_f[g_i]
-            gt_box[[0, 3]] = gt_box[[0, 3]] / orignal_shape[2] * proto_hwd[2]
-            gt_box[[1, 4]] = gt_box[[1, 4]] / orignal_shape[1] * proto_hwd[1]
-            gt_box[[2, 5]] = gt_box[[2, 5]] / orignal_shape[0] * proto_hwd[0]
+            gt_box[[0, 3]] = gt_box[[0, 3]] / orignal_shape[2] * proto_dhw[2]
+            gt_box[[1, 4]] = gt_box[[1, 4]] / orignal_shape[1] * proto_dhw[1]
+            gt_box[[2, 5]] = gt_box[[2, 5]] / orignal_shape[0] * proto_dhw[0]
             pr_box = predn_f[d_i, :6]
-            pr_box[[0, 3]] = pr_box[[0, 3]] / orignal_shape[2] * proto_hwd[2]
-            pr_box[[1, 4]] = pr_box[[1, 4]] / orignal_shape[1] * proto_hwd[1]
-            pr_box[[2, 5]] = pr_box[[2, 5]] / orignal_shape[0] * proto_hwd[0]
+            pr_box[[0, 3]] = pr_box[[0, 3]] / orignal_shape[2] * proto_dhw[2]
+            pr_box[[1, 4]] = pr_box[[1, 4]] / orignal_shape[1] * proto_dhw[1]
+            pr_box[[2, 5]] = pr_box[[2, 5]] / orignal_shape[0] * proto_dhw[0]
             # [x1,y1,z1,x2,y2,z2]
             xyz1 = torch.minimum(gt_box[:3], pr_box[:3])
             xyz2 = torch.maximum(gt_box[3:], pr_box[3:])
             xyz1 = torch.floor(xyz1).clamp_min(0)
             xyz2 = torch.ceil(xyz2)
-            xyz2[0] = xyz2[0].clamp(max=proto_hwd[0])
-            xyz2[1] = xyz2[1].clamp(max=proto_hwd[1])
-            xyz2[2] = xyz2[2].clamp(max=proto_hwd[2])
+            xyz2[0] = xyz2[0].clamp(max=proto_dhw[2])
+            xyz2[1] = xyz2[1].clamp(max=proto_dhw[1])
+            xyz2[2] = xyz2[2].clamp(max=proto_dhw[0])
             x0, y0, z0 = xyz1.to(torch.int)
             x1, y1, z1 = xyz2.to(torch.int)
             if (x1 <= x0) or (y1 <= y0) or (z1 <= z0):
                 continue
-            p_region = pred_prob[x0:x1, y0:y1, z0:z1]
-            g_region = gt_mask_d[x0:x1, y0:y1, z0:z1].to(dtype=p_region.dtype)
+            p_region = pred_prob[z0:z1, y0:y1, x0:x1]
+            g_region = gt_mask_d[z0:z1, y0:y1, x0:x1].to(dtype=p_region.dtype)
             if not g_region.any():
                 continue
             # Soft Dice
