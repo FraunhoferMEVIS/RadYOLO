@@ -103,6 +103,7 @@ class DefaultConfig(BaseModel):
     higher_resolution_prototypes: bool = True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
     # Detection head options
     separate_objectness_head: bool = False  # if True, add a separate objectness output and use CE for class logits
+    include_stride4_output: bool = False  # add P2 detection head at stride 4
 
     # Augmentation
     max_zoom: float = Field(1.5, ge=0)

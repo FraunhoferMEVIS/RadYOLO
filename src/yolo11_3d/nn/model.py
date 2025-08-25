@@ -38,6 +38,7 @@ class HardcodedModel(nn.Module):
         num_prototype_masks: int = 8,
         higher_resolution_prototypes: bool = True,
         separate_objectness_head: bool = False,
+        include_stride4_output: bool = False,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -63,6 +64,7 @@ class HardcodedModel(nn.Module):
         self.num_prototype_masks = num_prototype_masks
         self.higher_resolution_prototypes = higher_resolution_prototypes
         self.separate_objectness_head = separate_objectness_head
+        self.include_stride4_output = include_stride4_output
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
@@ -160,6 +162,19 @@ class HardcodedModel(nn.Module):
         self.l16 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
+        # Optional P2 (stride-4) output branch: upsample P3 and fuse with stride-4 backbone (l2)
+        # Channel sizes used across pyramid
+        c_p2 = make_divisible_(128)
+        c_p3 = make_divisible_(256)
+        c_p4 = make_divisible_(512)
+        c_p5 = make_divisible_(1024)
+        if self.include_stride4_output:
+            # These layers operate on feature maps produced in forward; we define them here
+            self.p2_upsample = nn.Upsample(None, 2, "nearest")
+            # Concat of upsampled P3 (c_p3) with stride-4 backbone feature (from l2, c_p3)
+            self.p2_concat = Concat(1)
+            self.p2_c3k2 = C3k2(c_p3 + c_p3, c_p2, num_repeats_(2), c3k2_use_c3k)
+
         in_channels = output_channels[-1]
         out_channels = make_divisible_(256)
         self.l17 = Conv(in_channels, out_channels, 3, 2)
@@ -204,17 +219,27 @@ class HardcodedModel(nn.Module):
                 )
 
             c4 = max(output_channels[16] // 4, num_prototype_masks)
+            # Build coefficient heads dynamically for 3 or 4 detection levels
+            detect_chs: list[int]
+            if self.include_stride4_output:
+                detect_chs = [c_p2, c_p3, c_p4, c_p5]
+            else:
+                detect_chs = [c_p3, c_p4, c_p5]
             self.mask_coefficient_layer = nn.ModuleList(
                 nn.Sequential(
-                    Conv(output_channels[x], c4, 3),
+                    Conv(ch, c4, 3),
                     Conv(c4, c4, 3),
                     nn.Conv3d(c4, num_prototype_masks, 1),
                 )
-                for x in [16, 19, 22]
+                for ch in detect_chs
             )
 
+        # Detect head: order from highest resolution to lowest
+        detect_chs = [c_p3, c_p4, c_p5]
+        if self.include_stride4_output:
+            detect_chs = [c_p2] + detect_chs
         self.l23 = Detect(num_classes,
-                          [output_channels[x] for x in [16, 19, 22]],
+                          detect_chs,
                           separate_objectness_head=self.separate_objectness_head)
         s = 256
         self.l23.stride = torch.tensor(
@@ -283,7 +308,7 @@ class HardcodedModel(nn.Module):
         # BACKBONE
         x = o0 = self.l0(x)
         x = o1 = self.l1(x)
-        x = self.l2(x)
+        x = o2 = self.l2(x)
         x = self.l3(x)
         x = o4 = self.l4(x)
         x = self.l5(x)
@@ -302,6 +327,10 @@ class HardcodedModel(nn.Module):
         x = self.l15([x, o4])
         x = o16 = self.l16(x)
 
+        # Optional P2 (stride-4) feature from upsampled P3 fused with stride-4 backbone feature
+        if self.include_stride4_output:
+            p2 = self.p2_c3k2(self.p2_concat([self.p2_upsample(o16), o2]))
+
         x = self.l17(x)
         x = self.l18([x, o13])
         x = o19 = self.l19(x)
@@ -310,7 +339,10 @@ class HardcodedModel(nn.Module):
         x = self.l21([x, o10])
         x = o22 = self.l22(x)
 
-        detections = self.l23([o16, o19, o22])
+        if self.include_stride4_output:
+            detections = self.l23([p2, o16, o19, o22])
+        else:
+            detections = self.l23([o16, o19, o22])
 
         if self.enable_output_masks:
             if self.higher_resolution_prototypes:
@@ -318,20 +350,39 @@ class HardcodedModel(nn.Module):
             else:
                 prototype_masks = self.prototype_layer(o16)
             batch_size = prototype_masks.shape[0]
-            mask_coefficients = torch.cat(
-                [
-                    self.mask_coefficient_layer[0](o16).view(
-                        batch_size, self.num_prototype_masks, -1
-                    ),
-                    self.mask_coefficient_layer[1](o19).view(
-                        batch_size, self.num_prototype_masks, -1
-                    ),
-                    self.mask_coefficient_layer[2](o22).view(
-                        batch_size, self.num_prototype_masks, -1
-                    ),
-                ],
-                2,
-            )
+            if self.include_stride4_output:
+                mask_coefficients = torch.cat(
+                    [
+                        self.mask_coefficient_layer[0](p2).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                        self.mask_coefficient_layer[1](o16).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                        self.mask_coefficient_layer[2](o19).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                        self.mask_coefficient_layer[3](o22).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                    ],
+                    2,
+                )
+            else:
+                mask_coefficients = torch.cat(
+                    [
+                        self.mask_coefficient_layer[0](o16).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                        self.mask_coefficient_layer[1](o19).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                        self.mask_coefficient_layer[2](o22).view(
+                            batch_size, self.num_prototype_masks, -1
+                        ),
+                    ],
+                    2,
+                )
             return detections, mask_coefficients, prototype_masks
         else:
             return detections, None, None

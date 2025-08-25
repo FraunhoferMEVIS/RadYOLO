@@ -53,12 +53,13 @@ mask_gain: 5 # (float) mask loss gain
 nbs: 64 # (int) nominal batch size
 
 # Optional Segmentation Head
-segmentation_output: True # (bool) add segmentation output to model
+segmentation_output: False # (bool) add segmentation output to model
 prototype_masks: 8 # (int) number of prototype masks for segmentation output
 higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
 
 # Detection Head Options
 separate_objectness_head: False  # (bool) if True, add a separate objectness output and use CCE loss for class logits
+include_stride4_output: True
 
 # Data Augmentation
 max_zoom: 1.5

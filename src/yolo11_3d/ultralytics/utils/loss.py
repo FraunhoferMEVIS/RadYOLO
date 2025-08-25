@@ -132,8 +132,12 @@ class v8DetectionLoss:  # noqa: N801
         self.use_dfl: bool = m.reg_max > 1
 
         self.assigner = TaskAlignedAssigner(
-            topk=tal_topk, num_classes=self.num_classes, alpha=tal_alpha, beta=tal_beta,
-            use_fallback_if_alignment_zero=tal_fallback
+            topk=tal_topk,
+            num_classes=self.num_classes,
+            alpha=tal_alpha,
+            beta=tal_beta,
+            use_fallback_if_alignment_zero=tal_fallback,
+            anchor_inclusion_distance= -2 if model.include_stride4_output else -4
         )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)

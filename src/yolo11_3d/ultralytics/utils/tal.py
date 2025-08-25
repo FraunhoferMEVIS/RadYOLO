@@ -25,6 +25,7 @@ class TaskAlignedAssigner(nn.Module):
         metric.
         beta (float): The beta parameter for the localization component of the task-aligned metric.
         eps (float): A small value to prevent division by zero.
+        anchor_inclusion_distance (float): Allow to match anchors that are slightly outside the gt_box. Should be set to half mininum model stride.
     """
 
     def __init__(
@@ -35,6 +36,7 @@ class TaskAlignedAssigner(nn.Module):
         beta: float = 6.0,
         eps: float = 1e-9,
         use_fallback_if_alignment_zero: bool = True,
+        anchor_inclusion_distance: float = -2
     ) -> None:
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
@@ -45,6 +47,7 @@ class TaskAlignedAssigner(nn.Module):
         self.beta = beta
         self.eps = eps
         self.use_fallback_if_alignment_zero = use_fallback_if_alignment_zero
+        self.anchor_inclusion_distance = anchor_inclusion_distance
 
     @torch.no_grad()
     def forward(
@@ -207,7 +210,7 @@ class TaskAlignedAssigner(nn.Module):
         """Get anchors_in_gts mask, (b, max_num_obj, num_anchors)."""
         # Create mask which contains for each ground truth bounding box all anchor points that are
         # included in respective bbox area. (b, max_num_obj, num_anchors)
-        anchors_in_gts__mask = self.select_candidates_in_gts(anchor_points, ground_truth_bboxes)
+        anchors_in_gts__mask = self.select_candidates_in_gts(anchor_points, ground_truth_bboxes, self.anchor_inclusion_distance)
 
         # Get anchor align_metric, (b, max_num_obj, num_anchors)
         align_metric, overlaps = self.get_box_metrics(
@@ -404,7 +407,7 @@ class TaskAlignedAssigner(nn.Module):
 
     @staticmethod
     def select_candidates_in_gts(
-        xy_centers: torch.Tensor, gt_bboxes: torch.Tensor, anchor_inclusion_distance: float = -4
+        xy_centers: torch.Tensor, gt_bboxes: torch.Tensor, anchor_inclusion_distance: float
     ) -> torch.Tensor:
         """Select positive anchor centers within ground truth bounding boxes.
            The anchor_inclusion_distance ensures that there are also anchor candidates
