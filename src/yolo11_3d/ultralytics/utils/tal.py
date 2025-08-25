@@ -89,7 +89,8 @@ class TaskAlignedAssigner(nn.Module):
                 torch.zeros_like(pd_bboxes),
                 torch.zeros_like(pd_scores),
                 torch.zeros_like(pd_scores[..., 0]),
-                torch.zeros_like(pd_scores[..., 0]),
+                # Indices tensor must be int64 for downstream gather/index ops
+                torch.zeros_like(pd_scores[..., 0], dtype=torch.int64),
             )
 
         try:

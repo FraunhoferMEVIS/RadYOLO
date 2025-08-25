@@ -228,6 +228,8 @@ class v8DetectionLoss:  # noqa: N801
             gt_bboxes,
             mask_gt,
         )
+        # Ensure indices used for gathering are int64
+        target_gt_idx = target_gt_idx.to(torch.int64)
 
         target_scores_sum = max(target_scores.sum(), 1)
 
@@ -249,7 +251,8 @@ class v8DetectionLoss:  # noqa: N801
             ce_loss = ce_loss.view(B, A)
             ce_loss = ce_loss.masked_fill(unknown_mask, 0.0)
             # Only count fg anchors
-            ce_loss = (ce_loss * fg_mask).sum() / fg_mask.sum()
+            denom = fg_mask.sum().clamp_min(1)
+            ce_loss = (ce_loss * fg_mask).sum() / denom
             loss[1] = ce_loss
             # Objectness targets: 1 for fg, 0 for bg
             obj_target = fg_mask.float().unsqueeze(-1)
