@@ -53,7 +53,7 @@ mask_gain: 5 # (float) mask loss gain
 nbs: 64 # (int) nominal batch size
 
 # Optional Segmentation Head
-segmentation_output: False # (bool) add segmentation output to model
+segmentation_output: True # (bool) add segmentation output to model
 prototype_masks: 8 # (int) number of prototype masks for segmentation output
 higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
 
@@ -64,8 +64,8 @@ separate_objectness_head: False  # (bool) if True, add a separate objectness out
 max_zoom: 1.5
 min_zoom: 0.7
 out_zoom_padding: "constant"
-prob_zoom: 0.5
-prob_cutout: 0.5
+prob_zoom: 0.4
+prob_cutout: 0.2
 prob_mirroring: 0.5
 mirror_axes: ["x", "y", "z"]
 do_batchgenerators_intensity_augmentation: True

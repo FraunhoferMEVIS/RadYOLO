@@ -115,8 +115,6 @@ class DefaultConfig(BaseModel):
             (0.5, 1),
             (0.25, 2),
             (0.125, 4),
-            (0.0625, 8),
-            (0.03125, 16),
         ]
     )
     prob_mirroring: float = Field(0.5, ge=0, le=1.0)
