@@ -13,7 +13,8 @@ from yolo11_3d.nn.layers import (
     Conv,
     Detect,
     PrototypeMasks,
-    PrototypeMasksHighResolution
+    PrototypeMasksHighResolution,
+    PrototypeMasksHighResolutionOneSkip,
 )
 from yolo11_3d.nn.util import intersect_dicts, make_divisible
 from yolo11_3d.ultralytics.utils.loss import v8DetectionLoss
@@ -223,6 +224,11 @@ class HardcodedModel(nn.Module):
             detect_chs: list[int]
             if self.include_stride4_output:
                 detect_chs = [c_p2, c_p3, c_p4, c_p5]
+                self.prototype_layer = PrototypeMasksHighResolutionOneSkip(
+                    c_p2,
+                    output_channels[0],
+                    num_prototype_masks
+                )
             else:
                 detect_chs = [c_p3, c_p4, c_p5]
             self.mask_coefficient_layer = nn.ModuleList(
@@ -345,7 +351,9 @@ class HardcodedModel(nn.Module):
             detections = self.l23([o16, o19, o22])
 
         if self.enable_output_masks:
-            if self.higher_resolution_prototypes:
+            if self.include_stride4_output:
+                prototype_masks = self.prototype_layer(p2, o0)
+            elif self.higher_resolution_prototypes:
                 prototype_masks = self.prototype_layer(o16, o1, o0)
             else:
                 prototype_masks = self.prototype_layer(o16)
