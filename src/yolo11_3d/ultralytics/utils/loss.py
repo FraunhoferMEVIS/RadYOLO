@@ -244,8 +244,13 @@ class v8DetectionLoss:  # noqa: N801
             target_labels = target_scores.argmax(-1)  # (B, A)
             # Determine unknown mask from gt_labels and assigned gt indices
             B, A, C = target_scores.shape
-            per_anchor_gt = gt_labels.gather(1, target_gt_idx.unsqueeze(-1).clamp_min(0))  # (B, A, 1)
-            unknown_mask = (per_anchor_gt.squeeze(-1) < 0) & fg_mask.bool()
+            # If there are no GT labels in this batch (e.g., empty images), avoid invalid gather on size-0 dim
+            if gt_labels.shape[1] > 0:
+                safe_indices = target_gt_idx.unsqueeze(-1).clamp_min(0).clamp_max(gt_labels.shape[1] - 1)
+                per_anchor_gt = gt_labels.gather(1, safe_indices)  # (B, A, 1)
+                unknown_mask = (per_anchor_gt.squeeze(-1) < 0) & fg_mask.bool()
+            else:
+                unknown_mask = torch.zeros((B, A), dtype=torch.bool, device=fg_mask.device)
             # Cross entropy expects class indices and can take ignore_index
             ce_loss = self.ce(
                 pred_class_logits.view(-1, C),
@@ -337,7 +342,8 @@ class v8DetectionLoss:  # noqa: N801
                             mask_loss = self.mask_dice_loss(pred_masks_average, gt_mask_cropped)
                             loss[3] += mask_loss
                             mask_loss_count += 1
-                loss[3] = loss[3] / mask_loss_count
+                if mask_loss_count > 0:
+                    loss[3] = loss[3] / mask_loss_count
 
         loss[0] *= self.box_gain
         loss[1] *= self.classification_gain
