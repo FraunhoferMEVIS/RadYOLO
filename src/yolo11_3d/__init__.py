@@ -322,10 +322,28 @@ def plot_results(result_path: Path) -> int:
 )
 @click.option("--seed", default=42, show_default=True, help="RNG seed for shuffling before splitting.")
 @click.option("--k", default=5, show_default=True, help="Number of folds to generate. Must be >=3.")
-def create_data_splits(dataset_path: Path, seed: int, k: int) -> int:
+@click.option(
+    "--group-by-prefix/--no-group-by-prefix",
+    default=False,
+    show_default=True,
+    help="If enabled, keep all cases sharing the same prefix in the same fold.",
+)
+@click.option(
+    "--prefix-sep",
+    default="_",
+    show_default=True,
+    help="Separator used to extract the prefix (text before first occurrence).",
+)
+def create_data_splits(dataset_path: Path, seed: int, k: int, group_by_prefix: bool, prefix_sep: str) -> int:
     """Create k-fold data splits from DATASET_PATH/images and write data_splits.json."""
     try:
-        out_path = k_fold_data_splits(dataset_path=dataset_path, seed=seed, k=k)
+        out_path = k_fold_data_splits(
+            dataset_path=dataset_path,
+            seed=seed,
+            k=k,
+            group_by_prefix=group_by_prefix,
+            prefix_sep=prefix_sep,
+        )
         LOGGER.info("Data splits written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to create data splits", exc_info=e)

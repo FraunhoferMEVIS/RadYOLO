@@ -66,7 +66,22 @@ def _build_folds(cases: list[str], k: int = 5, seed: int = 42) -> list[dict[str,
     return folds
 
 
-def k_fold_data_splits(dataset_path: Path, seed: int = 42, k: int = 5) -> Path:
+def _group_cases_by_prefix(cases: list[str], sep: str) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for c in cases:
+        key = c.split(sep, 1)[0] if sep else c
+        groups.setdefault(key, []).append(c)
+    return groups
+
+
+def k_fold_data_splits(
+    dataset_path: Path,
+    seed: int = 42,
+    k: int = 5,
+    *,
+    group_by_prefix: bool = False,
+    prefix_sep: str = "_",
+) -> Path:
     """Create k-fold data splits from DATASET_PATH/images and write data_splits.json.
 
     The output is a JSON list with k items. Each item is a dict with keys
@@ -75,7 +90,26 @@ def k_fold_data_splits(dataset_path: Path, seed: int = 42, k: int = 5) -> Path:
     try:
         images_dir = dataset_path / "images"
         cases = _find_case_names(images_dir)
-        folds = _build_folds(cases, k=k, seed=seed)
+        if not group_by_prefix:
+            folds = _build_folds(cases, k=k, seed=seed)
+        else:
+            # Group cases by prefix and split on group level so that all cases
+            # with the same prefix end up in the same fold.
+            groups = _group_cases_by_prefix(cases, sep=prefix_sep)
+            group_keys = list(groups.keys())
+            group_chunks = _kfold_chunks(group_keys, k=k, seed=seed)
+
+            folds = []
+            for i in range(k):
+                test_groups = group_chunks[i]
+                val_groups = group_chunks[(i + 1) % k]
+                train_groups = [g for j, ch in enumerate(group_chunks) if j not in (i, (i + 1) % k) for g in ch]
+
+                test = [c for g in test_groups for c in groups[g]]
+                val = [c for g in val_groups for c in groups[g]]
+                train = [c for g in train_groups for c in groups[g]]
+
+                folds.append({"train": train, "val": val, "test": test})
 
         out_path = dataset_path / "data_splits.json"
         with out_path.open("w", encoding="utf-8") as f:
