@@ -59,9 +59,9 @@ def _build_folds(cases: list[str], k: int = 5, seed: int = 42) -> list[dict[str,
     chunks = _kfold_chunks(cases, k=k, seed=seed)
     folds: list[dict[str, list[str]]] = []
     for i in range(k):
-        test = list(chunks[i])
-        val = list(chunks[(i + 1) % k])
-        train = [c for j, chunk in enumerate(chunks) if j not in (i, (i + 1) % k) for c in chunk]
+        test = sorted(list(chunks[i]))
+        val = sorted(list(chunks[(i + 1) % k]))
+        train = sorted([c for j, chunk in enumerate(chunks) if j not in (i, (i + 1) % k) for c in chunk])
         folds.append({"train": train, "val": val, "test": test})
     return folds
 
@@ -105,9 +105,9 @@ def k_fold_data_splits(
                 val_groups = group_chunks[(i + 1) % k]
                 train_groups = [g for j, ch in enumerate(group_chunks) if j not in (i, (i + 1) % k) for g in ch]
 
-                test = [c for g in test_groups for c in groups[g]]
-                val = [c for g in val_groups for c in groups[g]]
-                train = [c for g in train_groups for c in groups[g]]
+                test = sorted([c for g in test_groups for c in groups[g]])
+                val = sorted([c for g in val_groups for c in groups[g]])
+                train = sorted([c for g in train_groups for c in groups[g]])
 
                 folds.append({"train": train, "val": val, "test": test})
 
