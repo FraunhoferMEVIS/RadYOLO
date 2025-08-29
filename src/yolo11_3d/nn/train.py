@@ -71,6 +71,8 @@ class Trainer:
         self.check_resume()
 
         self.device = select_device(self.args.device)
+        if self.args.use_cudnn_benchmark:
+            torch.backends.cudnn.benchmark = True
 
         init_seeds(self.args.seed, deterministic=self.args.deterministic)
 

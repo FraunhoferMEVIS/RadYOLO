@@ -65,6 +65,7 @@ class DefaultConfig(BaseModel):
     deterministic: bool = True  # whether to enable deterministic mode
     resume: bool | FilePath = False  # resume training from last checkpoint
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
+    use_cudnn_benchmark: bool = True # Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
 
     # Val/Test Settings
     val: bool = True  # validate/test during training
