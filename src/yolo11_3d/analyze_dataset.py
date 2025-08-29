@@ -16,12 +16,15 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ImageStats(NamedTuple):
-    # Per-channel statistics for an image, includes running sum/sumsq/count for exact global mean/std aggregation
-    per_channel: list[dict[str, float]]  # contains: min,max,p00_5,p99_5,sum,sumsq,count
-    # image size in voxels (z, y, x) or (c, z, y, x) depending on data
+    # Per-channel statistics for an image, within FOREGROUND only.
+    # Contains: min,max,sum,sumsq,count (no per-image percentiles anymore)
+    per_channel: list[dict[str, float]]
+    # image size in voxels (z, y, x)
     shape: tuple[int, ...]
     # voxel spacing in mm (z, y, x)
     spacing: tuple[float, float, float]
+    # foreground intensity samples per channel (1D float arrays, up to sample_cap per image)
+    samples_per_channel: list[np.ndarray]
 
 
 class LabelStats(NamedTuple):
@@ -33,7 +36,7 @@ class LabelStats(NamedTuple):
 @dataclass
 class DatasetFingerprint:
     # Per-channel stats aggregated
-    channel_stats: list[dict[str, float]]
+    foreground_channel_stats: list[dict[str, float]]
     median_image_size: list[int]
     median_voxel_size_mm: list[float]
     # Box stats per class
@@ -44,22 +47,44 @@ class DatasetFingerprint:
     n_masks_available: int
 
 
-def _image_channel_stats(arr: np.ndarray) -> dict[str, float]:
-    arr = arr.astype(np.float32, copy=False)
-    # compute basic stats and accumulation values for exact global mean/std
-    s = float(arr.sum())
-    ss = float((arr.astype(np.float64) ** 2).sum())
-    n = float(arr.size)
-    p005, p995 = np.percentile(arr, [0.5, 99.5])
-    return {
-        "min": float(np.min(arr)),
-        "p00_5": float(p005),
-        "p99_5": float(p995),
+def _foreground_channel_stats_and_samples(
+    arr: np.ndarray, foreground_mask: np.ndarray, sample_cap: int = 10_000
+) -> tuple[dict[str, float], np.ndarray]:
+    """Compute stats and foreground samples for one channel.
+
+    Args:
+        arr: channel array in (X, Y, Z) order, any numeric dtype.
+        mask: boolean array (X, Y, Z), True for foreground voxels.
+        sample_cap: max number of intensities to sample from foreground for percentiles.
+
+    Returns:
+        (stats dict, samples 1D float32 array)
+    """
+    if foreground_mask is None or not np.any(foreground_mask):
+        return {"min": np.nan, "max": np.nan, "sum": 0.0, "sumsq": 0.0, "count": 0.0}, np.array([], dtype=np.float32)
+
+    # Extract foreground intensities
+    fg = arr[foreground_mask].astype(np.float32, copy=False)
+    n = int(fg.size)
+    # Stats
+    s = float(fg.sum(dtype=np.float64))
+    ss = float(np.square(fg, dtype=np.float64).sum(dtype=np.float64))
+    foreground_stats = {
+        "min": float(np.min(fg)),
+        "max": float(np.max(fg)),
         "sum": s,
         "sumsq": ss,
-        "count": n,
-        "max": float(np.max(arr)),
+        "count": float(n),
     }
+
+    # Sampling for global percentiles
+    if n <= sample_cap:
+        samples = fg
+    else:
+        # uniform random sample without replacement
+        idx = np.random.default_rng().choice(n, size=sample_cap, replace=False)
+        samples = fg[idx]
+    return foreground_stats, samples
 
 
 def _load_nifti(path: Path) -> tuple[np.ndarray, tuple[float, float, float]]:
@@ -78,30 +103,87 @@ def _load_nifti(path: Path) -> tuple[np.ndarray, tuple[float, float, float]]:
     return data, spacing_xyz
 
 
-def _image_stats(image_path: Path) -> ImageStats:
+def _labels_to_mask(
+    entries: list[tuple[int, float, float, float, float, float, float]],
+    shape_xyz: tuple[int, int, int],
+) -> np.ndarray:
+    """Create a boolean union mask of all boxes on a grid of shape (X, Y, Z).
+
+    Label format: class x y z w h d (normalized to [0,1] relative to X,Y,Z).
+    """
+    X, Y, Z = shape_xyz
+    mask = np.zeros((X, Y, Z), dtype=bool)
+    if not entries:
+        return mask
+    for _cls, x, y, z, w, h, d in entries:
+        # Convert normalized center/size to voxel indices (half-open slices)
+        cx = x * X
+        cy = y * Y
+        cz = z * Z
+        wx = max(w * X, 0.0)
+        hy = max(h * Y, 0.0)
+        dz = max(d * Z, 0.0)
+
+        x0 = int(np.floor(cx - wx / 2.0))
+        x1 = int(np.ceil(cx + wx / 2.0))
+        y0 = int(np.floor(cy - hy / 2.0))
+        y1 = int(np.ceil(cy + hy / 2.0))
+        z0 = int(np.floor(cz - dz / 2.0))
+        z1 = int(np.ceil(cz + dz / 2.0))
+
+        # clamp to bounds and skip empty
+        x0 = max(0, min(X, x0))
+        x1 = max(0, min(X, x1))
+        y0 = max(0, min(Y, y0))
+        y1 = max(0, min(Y, y1))
+        z0 = max(0, min(Z, z0))
+        z1 = max(0, min(Z, z1))
+        if x1 <= x0 or y1 <= y0 or z1 <= z0:
+            continue
+        mask[x0:x1, y0:y1, z0:z1] = True
+    return mask
+
+
+def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) -> ImageStats:
     data, spacing_zyx = _load_nifti(image_path)
+
+    # Build per-channel arrays in (X, Y, Z) order
     if data.ndim == 3:
-        # single channel
-        data_per_channel = [data]
-        shape = (data.shape[2], data.shape[1], data.shape[0])  # (z,y,x)
+        data_per_channel = [data]  # (X, Y, Z)
+        shape_zyx = (data.shape[2], data.shape[1], data.shape[0])  # (z,y,x)
+        shape_xyz = (data.shape[0], data.shape[1], data.shape[2])  # (X,Y,Z)
     elif data.ndim == 4:
         # either (X,Y,Z,C) or (C,X,Y,Z); heuristic: if first dim small (<10) treat as channels-first
         if data.shape[0] <= 5 and data.shape[0] < data.shape[-1]:
             # (C,X,Y,Z)
             data_per_channel = [data[c, ...] for c in range(data.shape[0])]
-            shape = (data.shape[3], data.shape[2], data.shape[1])  # (z,y,x)
+            shape_zyx = (data.shape[3], data.shape[2], data.shape[1])  # (z,y,x)
+            shape_xyz = (data.shape[1], data.shape[2], data.shape[3])  # (X,Y,Z)
         else:
             # (X,Y,Z,C)
             data_per_channel = [data[..., c] for c in range(data.shape[-1])]
-            shape = (data.shape[2], data.shape[1], data.shape[0])
+            shape_zyx = (data.shape[2], data.shape[1], data.shape[0])
+            shape_xyz = (data.shape[0], data.shape[1], data.shape[2])
     else:
         raise ValueError(f"Unsupported image ndim {data.ndim} at {image_path}")
 
-    per_channel_stats = []
-    for channel in data_per_channel:
-        per_channel_stats.append(_image_channel_stats(channel))
+    # Foreground mask from labels (in XYZ order)
+    entries = _labels_for_case(labels_path)
+    mask = _labels_to_mask(entries, shape_xyz) if entries else np.zeros(shape_xyz, dtype=bool)
 
-    return ImageStats(per_channel=per_channel_stats, shape=shape, spacing=spacing_zyx)
+    per_channel_stats: list[dict[str, float]] = []
+    samples_per_channel: list[np.ndarray] = []
+    for channel in data_per_channel:
+        stats, samples = _foreground_channel_stats_and_samples(channel, mask, sample_cap=sample_cap)
+        per_channel_stats.append(stats)
+        samples_per_channel.append(samples)
+
+    return ImageStats(
+        per_channel=per_channel_stats,
+        shape=shape_zyx,
+        spacing=spacing_zyx,
+        samples_per_channel=samples_per_channel,
+    )
 
 
 def _parse_label_line(
@@ -209,7 +291,7 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         for case_id, image_path in cases:
             label_path = labels_dir / f"{case_id}.txt"
             mask_path = masks_dir / f"{case_id}.nii.gz"
-            future = executor.submit(_image_stats, image_path)
+            future = executor.submit(_image_stats, image_path, label_path)
             futures[future] = (case_id, image_path, label_path, mask_path)
         for future in as_completed(futures):
             case_id, image_path, label_path, mask_path = futures[future]
@@ -257,31 +339,35 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
 
     n_channels = max(len(stats.per_channel) for stats in image_stats_results)
 
-    # Prepare accumulators
+    # Prepare accumulators (foreground-only)
     aggregated = [
         {
             "min": np.inf,
-            "p00_5": [],
-            "p99_5": [],
+            "max": -np.inf,
             "sum": 0.0,
             "sumsq": 0.0,
             "count": 0.0,
-            "max": -np.inf,
+            "samples": [],  # list of np.ndarray
         }
         for _ in range(n_channels)
     ]
 
     for stats in image_stats_results:
         for ch_idx, ch_stats in enumerate(stats.per_channel):
-            aggregated[ch_idx]["min"] = min(aggregated[ch_idx]["min"], ch_stats["min"])  # type: ignore[index]
-            aggregated[ch_idx]["max"] = max(aggregated[ch_idx]["max"], ch_stats["max"])  # type: ignore[index]
-            for cls in ("p00_5", "p99_5"):
-                aggregated[ch_idx][cls].append(ch_stats[cls])  # type: ignore[index]
+            count = ch_stats.get("count", 0.0)
+            if count and np.isfinite(ch_stats.get("min", np.nan)):
+                aggregated[ch_idx]["min"] = min(aggregated[ch_idx]["min"], ch_stats["min"])  # type: ignore[index]
+                aggregated[ch_idx]["max"] = max(aggregated[ch_idx]["max"], ch_stats["max"])  # type: ignore[index]
             aggregated[ch_idx]["sum"] += ch_stats.get("sum", 0.0)  # type: ignore[index]
             aggregated[ch_idx]["sumsq"] += ch_stats.get("sumsq", 0.0)  # type: ignore[index]
-            aggregated[ch_idx]["count"] += ch_stats.get("count", 0.0)  # type: ignore[index]
+            aggregated[ch_idx]["count"] += count  # type: ignore[index]
 
-    channel_stats: list[dict[str, float]] = []
+        # Collect global percentile samples per channel
+        for ch_idx, samples in enumerate(stats.samples_per_channel):
+            if samples.size:
+                aggregated[ch_idx]["samples"].append(samples)  # type: ignore[index]
+
+    foreground_channel_stats: list[dict[str, float]] = []
     for channel in aggregated:
         count = channel["count"] or 0.0
         if count > 0:
@@ -291,22 +377,27 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         else:
             mean = float("nan")
             std = float("nan")
-        channel_stats.append(
+        # Global percentiles from pooled foreground samples
+        if channel["samples"]:
+            pooled = np.concatenate(channel["samples"])  # type: ignore[index]
+            p005, p995 = np.percentile(pooled, [0.5, 99.5])
+            p005 = float(p005)
+            p995 = float(p995)
+        else:
+            p005 = float("nan")
+            p995 = float("nan")
+
+        ch_min = float(channel["min"]) if np.isfinite(channel["min"]) else float("nan")
+        ch_max = float(channel["max"]) if np.isfinite(channel["max"]) else float("nan")
+
+        foreground_channel_stats.append(
             {
-                "min": float(channel["min"]),
-                "p00_5": (
-                    float(np.median(channel["p00_5"]))
-                    if channel["p00_5"]
-                    else float("nan")
-                ),
-                "p99_5": (
-                    float(np.median(channel["p99_5"]))
-                    if channel["p99_5"]
-                    else float("nan")
-                ),
+                "min": ch_min,
+                "p00_5": p005,
+                "p99_5": p995,
                 "mean": float(mean),
                 "std": float(std),
-                "max": float(channel["max"]),
+                "max": ch_max,
             }
         )
 
@@ -342,7 +433,7 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         box_size_p10_mm[cls] = [float(p10[0]), float(p10[1]), float(p10[2])]
 
     finger_print = DatasetFingerprint(
-        channel_stats=channel_stats,
+        foreground_channel_stats=foreground_channel_stats,
         median_image_size=median_shape,
         median_voxel_size_mm=median_spacing,
         boxes_per_class=total_by_class,
