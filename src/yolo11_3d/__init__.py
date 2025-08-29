@@ -19,6 +19,7 @@ from yolo11_3d.nn.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, export_model, select_device
 from yolo11_3d.nn.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
+from yolo11_3d.data_splits import k_fold_data_splits
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +89,8 @@ def main(verbose: bool, debug: bool) -> None:
         LOGGER.debug("Debug logging enabled.")
     elif verbose:
         LOGGER.info("Verbose logging enabled.")
+
+    # Note: Do not register subcommands here; Click builds help before invoking this.
 
 
 @main.command("train")
@@ -299,6 +302,32 @@ def plot_results(result_path: Path) -> int:
         plot_results_(result_path)
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("create_data_splits")
+@click.argument(
+    "dataset_path",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option("--seed", default=42, show_default=True, help="RNG seed for shuffling before splitting.")
+@click.option("--k", default=5, show_default=True, help="Number of folds to generate. Must be >=3.")
+def create_data_splits(dataset_path: Path, seed: int, k: int) -> int:
+    """Create k-fold data splits from DATASET_PATH/images and write data_splits.json."""
+    try:
+        out_path = k_fold_data_splits(dataset_path=dataset_path, seed=seed, k=k)
+        LOGGER.info("Data splits written to %s", out_path)
+    except Exception as e:
+        LOGGER.exception("Failed to create data splits", exc_info=e)
         return 1
     else:
         return 0
