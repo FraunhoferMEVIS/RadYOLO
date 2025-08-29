@@ -7,6 +7,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, NamedTuple
+import time
+from tqdm.auto import tqdm
 
 import nibabel as nib
 import numpy as np
@@ -188,9 +190,13 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     label_stats_results: list[LabelStats] = []
     n_masks = 0
 
+    total_cases = len(cases)
+    LOGGER.info("Starting dataset analysis: %d cases, %d workers", total_cases, max_workers)
     # Run image and label/mask computations in parallel per case to minimize IO bottlenecks
     ex = ProcessPoolExecutor(max_workers=max_workers)
     futures = {}
+    processed = 0
+    pbar = tqdm(total=total_cases, desc="Analyzing", unit="case")
     try:
         for cid, img_p in cases:
             lbl_p = labels_dir / f"{cid}.txt"
@@ -204,17 +210,20 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
                 image_stats_results.append(img_stats)
             except Exception:
                 LOGGER.exception("Failed to read image %s", img_p)
-                continue
+            else:
+                # labels and masks can be computed locally (fast) based on already-loaded shape/spacing
+                try:
+                    label_stats = _label_stats_for_case(lbl_p, img_stats.shape[:3], img_stats.spacing)
+                    label_stats_results.append(label_stats)
+                except Exception:
+                    LOGGER.exception("Failed to read labels for %s", lbl_p)
 
-            # labels and masks can be computed locally (fast) based on already-loaded shape/spacing
-            try:
-                label_stats = _label_stats_for_case(lbl_p, img_stats.shape[:3], img_stats.spacing)
-                label_stats_results.append(label_stats)
-            except Exception:
-                LOGGER.exception("Failed to read labels for %s", lbl_p)
+                if _has_mask(msk_p):
+                    n_masks += 1
 
-            if _has_mask(msk_p):
-                n_masks += 1
+            # progress accounting (count both success and failures)
+            processed += 1
+            pbar.update(1)
     except KeyboardInterrupt:
         LOGGER.warning("Interrupted by user. Cancelling pending tasks...")
         for f in futures:
@@ -225,6 +234,10 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
             pass
         raise
     finally:
+        try:
+            pbar.close()
+        except Exception:
+            pass
         try:
             ex.shutdown(wait=False, cancel_futures=True)
         except Exception:
