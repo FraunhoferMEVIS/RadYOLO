@@ -182,7 +182,12 @@ class ConfusionMatrix:
             gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
             gt_cls (Array[M]): The class labels.
         """
-        if gt_cls.shape[0] == 0:  # Check if labels is empty
+        # Filter out ignored/invalid classes (e.g., -1)
+        if gt_cls.numel():
+            valid = gt_cls >= 0
+            gt_cls = gt_cls[valid]
+            gt_bboxes = gt_bboxes[valid]
+        if gt_cls.shape[0] == 0:  # Check if labels is empty after filtering
             if detections is not None:
                 detections = detections[detections[:, 6] > self.conf]
                 detection_classes = detections[:, 7].int()

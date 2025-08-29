@@ -289,12 +289,30 @@ class Validator():
             }
             prepared_batch = self._prepare_batch(si, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
+            # Filter out ignore labels (e.g., class == -1) and keep GT arrays aligned
+            if classes.numel():
+                valid_gt = classes >= 0
+                if not valid_gt.all():
+                    classes = classes[valid_gt]
+                    bboxes = bboxes[valid_gt]
+                    # Also filter masks if present for this image
+                    gt_masks_si = batch["masks"][si]
+                    if gt_masks_si is not None:
+                        try:
+                            # Tensor of shape [num_gt, D, H, W]
+                            batch["masks"] = tuple(
+                                gt_masks_si[valid_gt] if i == si else m for i, m in enumerate(batch["masks"])
+                            )
+                        except Exception:
+                            # Fallback for list-like masks
+                            keep_list = valid_gt.tolist()
+                            filtered = [m for m, keep in zip(gt_masks_si, keep_list) if keep]
+                            batch["masks"] = tuple(filtered if i == si else m for i, m in enumerate(batch["masks"]))
             orignal_shape = prepared_batch["ori_shape"]
             num_labels = len(classes)
             stat["target_cls"] = classes
-            stat["target_img"] = (
-                classes.unique()
-            )
+            # Count presence per class per-image; ignore negatives already filtered
+            stat["target_img"] = classes.unique()
             if num_predictions == 0:
                 if num_labels:
                     for k in self.stats:
@@ -315,14 +333,16 @@ class Validator():
                 stat["tp"] = self._process_batch(predn, bboxes, classes)
                 # Compute Dice for matched instances if masks are available
                 if prototype_masks is not None:
+                    # Use possibly filtered masks aligned to classes/bboxes
+                    gt_masks_si = batch["masks"][si]
                     self._update_dice_for_image(
                         predn,
                         pred_with_scores_and_coefficients,
                         bboxes,
                         classes,
                         prototype_masks[si],
-                        batch["masks"][si],
-                        orignal_shape
+                        gt_masks_si if gt_masks_si is not None else [],
+                        orignal_shape,
                     )
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bboxes, classes)
@@ -492,8 +512,19 @@ class Validator():
     def get_stats(self) -> dict[str, float]:
         """Returns metrics statistics and results dictionary."""
         stats = {k: torch.cat(v, 0).cpu().numpy() for k, v in self.stats.items()}  # to numpy
-        self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=self.nc)
-        self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=self.nc)
+        # Robust against negative classes (e.g., ignore label -1)
+        target_cls_np = stats.get("target_cls", np.array([], dtype=np.int64))
+        target_img_np = stats.get("target_img", np.array([], dtype=np.int64))
+        if target_cls_np.size:
+            pos = target_cls_np >= 0
+            self.nt_per_class = np.bincount(target_cls_np[pos].astype(int), minlength=self.nc)
+        else:
+            self.nt_per_class = np.zeros(self.nc, dtype=np.int64)
+        if target_img_np.size:
+            posi = target_img_np >= 0
+            self.nt_per_image = np.bincount(target_img_np[posi].astype(int), minlength=self.nc)
+        else:
+            self.nt_per_image = np.zeros(self.nc, dtype=np.int64)
         stats.pop("target_img", None)
         if stats and stats["tp"].any():
             self.metrics.process(**stats)
