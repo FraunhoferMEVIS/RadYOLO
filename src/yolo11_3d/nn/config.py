@@ -21,11 +21,6 @@ from pydantic import (
 if TYPE_CHECKING:
     import datetime
 
-ROOT = Path(__file__).resolve().parents[1]
-DATASETS_DIR = Path("datasets")  # Path(SETTINGS["datasets_dir"])
-# WEIGHTS_DIR = Path(SETTINGS["weights_dir"])
-# RUNS_DIR = Path(SETTINGS["runs_dir"])
-
 LOGGER = logging.getLogger(__name__)
 
 DimList = Annotated[list[int], annotated_types.Len(min_length=2, max_length=3)]
@@ -49,7 +44,7 @@ class DefaultConfig(BaseModel):
     )
     batch: int = 16  # number of images per batch (-1 for AutoBatch)
     imgsz: DimList  # input images size as int for train and val modes, or list[h,w] for predict and export modes
-    normalization: Literal["none", "zScore", "255_to_01"] = "255_to_01" # Normalization to be applied during image loading
+    normalization: dict | list[dict] = {"type": "none"}  # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
     save: bool = True  # save train checkpoints and predict results
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     device: str = ""  # device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
@@ -125,6 +120,33 @@ class DefaultConfig(BaseModel):
     do_intensity_augmentations_per_channel: bool = False
 
     save_dir: Path | None = None
+
+    @model_validator(mode="after")
+    def _validate_normalization(self) -> Self:
+        normalization = self.normalization
+        allowed = {"none", "zscore", "255_to_01", "ct"}
+        
+        def _validate_entry(entry: Any) -> dict:
+            if not isinstance(entry, dict):
+                raise ValueError("Invalid normalization; must be a dict with a 'type' field or list of such dicts")
+            if "type" not in entry:
+                raise ValueError("Each normalization entry must have a 'type' field")
+            if entry["type"] not in allowed:
+                raise ValueError(f"Unsupported normalization type '{entry["type"]}'. Allowed: {sorted(allowed)}")
+            if entry["type"] == "ct" and not ("mean" in entry.keys() and "std" in entry.keys() and "clip_min" in entry.keys() and "clip_max" in entry.keys()):
+                    raise ValueError(f"ct normalization needs to define type, mean, std, clip_min and clip_max, but only has keys {entry.keys()}")
+            return entry
+        
+        if isinstance(normalization, list):
+            if not normalization:
+                raise ValueError("normalization list must not be empty")
+            for entry in normalization:
+                _validate_entry(entry) 
+        elif isinstance(normalization, dict):
+            _validate_entry(normalization)
+        else:
+            raise ValueError("normalization must be a dict or a list of dicts")
+        return self
 
 
 class DatasetConfig(BaseModel):

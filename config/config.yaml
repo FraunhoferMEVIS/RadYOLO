@@ -2,13 +2,13 @@
 
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11_3d.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
-data: "D:/datasets/AMOS22/yolov11_3d_merged_masks" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/autoPETCT_MAST_track/yolov11_3d_wrong_image_extents" # (str) path to data folder containing dataset.yaml
 fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
-batch: 2 # (int) number of images per batch (-1 for AutoBatch)
+batch: 2 # (int) number of images per batch
 imgsz: [128, 128, 128] # (int | list) input images size as int for train and val modes, or list[h,w] for predict and export modes
-normalization: "none" # Normalization to be applied during image loading
+normalization: {type: "ct", mean: -698, std: 519, clip_min: -1024, clip_max: 516} # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 # device: "cpu" # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu

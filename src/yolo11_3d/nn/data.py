@@ -5,7 +5,7 @@ import logging
 import os
 from collections.abc import Sized
 from pathlib import Path
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast, NotRequired
 
 import nibabel as nib
 import numpy as np
@@ -53,6 +53,12 @@ class Batch(TypedDict):
     batch_idx: torch.Tensor
     masks: tuple[list[torch.Tensor | None]]
 
+class NormalizationConfig(TypedDict):
+    type: Literal["none", "zscore", "ct", "255_to_01"]
+    mean: NotRequired[float]
+    std: NotRequired[float]
+    clip_min: NotRequired[float]
+    clip_max: NotRequired[float]
 
 class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
     def __init__(
@@ -66,7 +72,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         pad: float = 0.5,
         fold: int = 0,
         group: Literal["train", "val", "test"] = "train",
-        normalization: Literal["none", "zScore", "255_to_01"] = "255_to_01",
+        normalization: NormalizationConfig | list[NormalizationConfig] = {"type": "none"},
         load_masks: bool = True,
         **hyp: Any,
     ) -> None:
@@ -191,17 +197,79 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             "torch.Tensor", F.interpolate(image.unsqueeze(0), self.imgsz, mode="trilinear")
         ).squeeze_(0)
 
-        if self.normalization == "255_to_01":
-            image_resampled = image_resampled.div_(255)
-            image_resampled = image_resampled.clamp_(0.0, 1.0)
-        elif self.normalization == "zScore":
-            image_resampled = (image_resampled - image_resampled.mean()) / image_resampled.std()
-        elif self.normalization == "none":
-            pass
-        else:
-            raise NotImplementedError(f"Unknown normalization scheme {self.normalization}")
+        image_resampled = self._apply_normalization(image_resampled)
 
         return image_resampled, image.shape[1:], image_resampled.shape[1:]
+
+    def _apply_normalization(self, image: torch.Tensor) -> torch.Tensor:
+        """Apply per-channel normalization according to self.normalization.
+
+        Supports:
+        - NormalizationConfig: {type: "ct"|"zScore"|"255_to_01"|"none", ...params}
+        - list[NormalizationConfig]: list of entries above (NormalizationConfig) for each input channel
+        """
+        if image.ndim != 4:
+            return image
+        C = image.shape[0]
+        normalization_cfg = self.normalization
+
+        eps = 1e-6
+        if isinstance(normalization_cfg, list):
+            if len(normalization_cfg) != C:
+                raise ValueError(
+                    f"Normalization config length ({len(normalization_cfg)}) does not match number of channels ({C})."
+                )
+            for c in range(C):
+                entry = normalization_cfg[c]
+                if not isinstance(entry, dict) or "type" not in entry:
+                    raise ValueError("Invalid normalization entry; expected dict with 'type'")
+
+                normalization_scheme = str(entry.get("type", "none"))
+
+                x = image[c]
+                if normalization_scheme == "none":
+                    pass
+                elif normalization_scheme == "255_to_01":
+                    x = x.div(255.0).clamp_(0.0, 1.0)
+                    image[c] = x
+                elif normalization_scheme == "zscore":
+                    mean = torch.mean(x)
+                    std = torch.std(x, unbiased=False).clamp_min(eps)
+                    image[c] = (x - mean) / std
+                elif normalization_scheme == "ct":
+                    clip_min = float(entry.get("clip_min", -1024.0))
+                    clip_max = float(entry.get("clip_max", 3071.0))
+                    mean = float(entry.get("mean", 0.0))
+                    std = float(entry.get("std", 1.0))
+                    std = max(std, eps)
+                    x = x.clamp(clip_min, clip_max)
+                    image[c] = (x - mean) / std
+                else:
+                    raise NotImplementedError(f"Unknown normalization scheme '{normalization_scheme}' for channel {c}")
+        elif isinstance(normalization_cfg, dict):
+            normalization_scheme = normalization_cfg["type"]
+            if normalization_scheme == "none":
+                pass
+            elif normalization_scheme == "255_to_01":
+                image = image.div(255.0).clamp_(0.0, 1.0)
+            elif normalization_scheme == "zscore":
+                mean = torch.mean(image)
+                std = torch.std(image, unbiased=False).clamp_min(eps)
+                image = (image - mean) / std
+            elif normalization_scheme == "ct":
+                clip_min = float(normalization_cfg.get("clip_min", -1024.0))
+                clip_max = float(normalization_cfg.get("clip_max", 3071.0))
+                mean = float(normalization_cfg.get("mean", 0.0))
+                std = float(normalization_cfg.get("std", 1.0))
+                std = max(std, eps)
+                image = image.clamp(clip_min, clip_max)
+                image = (image - mean) / std
+            else:
+                raise NotImplementedError(f"Unknown normalization scheme '{normalization_cfg}'")
+        else:
+            raise ValueError(f"Invalid normalization config; expected string or dict but got {normalization_cfg}")
+
+        return image
     
     def load_labels_and_masks(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None]]:
         label_path = os.path.join(self.src_path, "labels", f"{case_name}.txt")
