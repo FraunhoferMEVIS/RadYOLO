@@ -20,6 +20,7 @@ from yolo11_3d.nn.util import ModelEMA, export_model, select_device
 from yolo11_3d.nn.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
 from yolo11_3d.data_splits import k_fold_data_splits
+from yolo11_3d.analyze_dataset import analyze_dataset as analyze_dataset_fn
 
 LOGGER = logging.getLogger(__name__)
 
@@ -328,6 +329,34 @@ def create_data_splits(dataset_path: Path, seed: int, k: int) -> int:
         LOGGER.info("Data splits written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to create data splits", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("analyze_dataset")
+@click.argument(
+    "dataset_path",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option("--workers", default=0, show_default=True, help="Number of parallel workers to use (0 = CPU count).")
+def analyze_dataset(dataset_path: Path, workers: int) -> int:
+    """Analyze a dataset folder and write dataset_fingerprint.json with summary statistics.
+
+    DATASET_PATH should contain images/ (.nii.gz), labels/ (.txt) and optional masks/ (.nii.gz).
+    """
+    try:
+        out_path = analyze_dataset_fn(dataset_path=dataset_path, workers=workers)
+        LOGGER.info("Dataset fingerprint written to %s", out_path)
+    except Exception as e:
+        LOGGER.exception("Failed to analyze dataset", exc_info=e)
         return 1
     else:
         return 0
