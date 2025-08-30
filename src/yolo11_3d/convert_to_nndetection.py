@@ -14,6 +14,9 @@ import nibabel as nib
 import numpy as np
 import yaml
 from tqdm.auto import tqdm
+from collections import OrderedDict
+import pickle
+import csv
 
 LOGGER = logging.getLogger(__name__)
 
@@ -266,6 +269,7 @@ def convert_dataset_to_nndetection(
 
     processed_train = 0
     processed_test = 0
+    mapping_rows: list[dict[str, str]] = []
     if total_cases > 0:
         pbar = tqdm(total=total_cases, desc="Converting", unit="case")
         executor = ProcessPoolExecutor(max_workers=max_workers)
@@ -282,7 +286,7 @@ def convert_dataset_to_nndetection(
             for fut in as_completed(futures):
                 cid = futures[fut]
                 try:
-                    ok, split = fut.result()
+                    ok, split, src_image_name, dst_image_name, src_case_id, dst_case_id = fut.result()
                 except Exception:
                     LOGGER.exception("Failed to convert case %s", cid)
                 else:
@@ -291,6 +295,15 @@ def convert_dataset_to_nndetection(
                             processed_train += 1
                         elif split == "test":
                             processed_test += 1
+                        mapping_rows.append(
+                            {
+                                "yolo_case_id": src_case_id,
+                                "yolo_image": src_image_name,
+                                "nndet_case_id": dst_case_id,
+                                "nndet_image": dst_image_name,
+                                "split": split,
+                            }
+                        )
                 finally:
                     pbar.update(1)
         finally:
@@ -329,6 +342,50 @@ def convert_dataset_to_nndetection(
     with (task_dir / "dataset.yaml").open("w", encoding="utf-8") as f:
         yaml.safe_dump(dataset_yaml, f, sort_keys=False)
 
+    # Write mapping CSV at task root
+    if mapping_rows:
+        mapping_csv = task_dir / "mapping.csv"
+        with mapping_csv.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "yolo_case_id",
+                    "yolo_image",
+                    "nndet_case_id",
+                    "nndet_image",
+                    "split",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(mapping_rows)
+
+    # Write splits_final.pkl (list of 5 OrderedDicts with 'train' and 'val')
+    try:
+        with (dataset_dir / "data_splits.json").open("r", encoding="utf-8") as f:
+            all_splits = json.load(f)
+        if not isinstance(all_splits, list):
+            raise ValueError("data_splits.json malformed: expected a list")
+        n_folds = len(all_splits)
+        if n_folds < 5:
+            LOGGER.warning("Only %d folds found in data_splits.json; writing %d.", n_folds, n_folds)
+        result_list: list[OrderedDict[str, np.ndarray]] = []
+        for i, fold_entry in enumerate(all_splits[:5]):
+            train_list = [
+                _sanitize_name(cid) for cid in fold_entry.get("train", [])
+            ]
+            val_list = [
+                _sanitize_name(cid) for cid in fold_entry.get("val", [])
+            ]
+            # nnDetection/nnUNet expect numpy arrays of strings
+            train_arr = np.asarray(train_list, dtype=object).astype(str)
+            val_arr = np.asarray(val_list, dtype=object).astype(str)
+            result_list.append(OrderedDict([("train", train_arr), ("val", val_arr)]))
+        splits_pkl = task_dir / "splits_final.pkl"
+        with splits_pkl.open("wb") as f:
+            pickle.dump(result_list, f)
+    except Exception:
+        LOGGER.exception("Failed to write splits_final.pkl from data_splits.json")
+
     LOGGER.info(
         "nnDetection conversion done: %d train cases%s -> %s",
         n_tr,
@@ -341,7 +398,7 @@ def convert_dataset_to_nndetection(
 __all__ = ["convert_dataset_to_nndetection"]
 
 
-def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str) -> tuple[bool, str]:
+def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str) -> tuple[bool, str, str, str, str, str]:
     """Worker to convert a single case. Returns (success, split) where split is 'train' or 'test'.
 
     The split is inferred from target directory name.
@@ -350,7 +407,7 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
     out_img_dir = Path(out_img_dir_str)
     out_lbl_dir = Path(out_lbl_dir_str)
 
-    # Infer split from parent folder name
+    # Infer split from target images directory name
     split = "test" if out_img_dir.name.endswith("imagesTs") else "train"
 
     img_dir = dataset_dir / "images"
@@ -359,25 +416,26 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
 
     img_path = img_dir / f"{cid}.nii.gz"
     if not img_path.exists():
-        return (False, split)
+        return (False, split, f"{cid}.nii.gz", "", cid, _sanitize_name(cid))
 
     case_id = _sanitize_name(cid)
     try:
-        # Copy image
+        # Ensure output dirs and copy image
         _ensure_dir(out_img_dir)
         _ensure_dir(out_lbl_dir)
-        _copy_image_to_nndet(img_path, out_img_dir, case_id)
+        dst_img_path = _copy_image_to_nndet(img_path, out_img_dir, case_id)
 
-        # Reference image for header/affine and shape
+        # Load reference image for shape/affine
         ref_nii = nib.load(img_path)
         ref_shape = tuple(np.asanyarray(ref_nii.dataobj).shape)
 
+        # Gather labels
         labels_tuples = _labels_for_case(lbl_dir, cid)
         instance_classes = [c for c, *_ in labels_tuples]
         boxes = [(xc, yc, zc, sx, sy, sz) for _, xc, yc, zc, sx, sy, sz in labels_tuples]
 
+        # Compose labelmap from masks if possible, else from boxes
         labelmap: np.ndarray | None = None
-        # Prefer masks when available and matching
         mask_arr = _try_load_masks(msk_dir, cid)
         if mask_arr is not None and len(instance_classes) > 0:
             labelmap_candidate = _compose_instance_seg_from_masks(mask_arr, len(instance_classes))
@@ -388,7 +446,7 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
             labelmap = _compose_instance_seg_from_boxes(ref_shape, boxes)
 
         _write_label_files(out_lbl_dir, case_id, labelmap, instance_classes, ref_nii)
-        return (True, split)
+        return (True, split, img_path.name, dst_img_path.name, cid, case_id)
     except Exception:
         # Let caller log the exception if needed
-        return (False, split)
+        return (False, split, img_path.name, "", cid, case_id)
