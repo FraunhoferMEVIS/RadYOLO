@@ -20,8 +20,20 @@ Available commands are:
 - export
 - plot-results
 - onnx-compare
+- convert-to-nndetection
 
 For further details please refer to the respective `--help` invocation.
+
+### Convert YOLO11_3D dataset to nnDetection
+
+You can convert a dataset in this repo's format into nnDetection's Task structure:
+
+```
+pwsh
+uv run -m yolo11_3d convert-to-nndetection <path-to-yolo11_3d-dataset> --out-root <det_data_root> --task-id 100 --task-name MyDataset --fold 0
+```
+
+This creates `<det_data_root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, `labelsTr` and optional `imagesTs`, `labelsTs`, plus a `dataset.yaml`.
 
 ## Dataset Format
 

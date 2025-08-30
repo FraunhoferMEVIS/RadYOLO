@@ -21,6 +21,7 @@ from yolo11_3d.nn.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
 from yolo11_3d.data_splits import k_fold_data_splits
 from yolo11_3d.analyze_dataset import analyze_dataset as analyze_dataset_fn
+from yolo11_3d.convert_to_nndetection import convert_dataset_to_nndetection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -375,6 +376,72 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
         LOGGER.info("Dataset fingerprint written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to analyze dataset", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("convert-to-nndetection")
+@click.argument(
+    "dataset_path",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--out-root",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=Path.cwd(),
+    show_default=True,
+    help="Root folder containing TaskXXX_* folders (det_data).",
+)
+@click.option("--task-id", type=int, default=100, show_default=True, help="Task number (>=100 recommended).")
+@click.option("--task-name", type=str, default=None, help="Task name (defaults to dataset folder name).")
+@click.option("--fold", type=int, default=0, show_default=True, help="Fold index from data_splits.json.")
+@click.option(
+    "--include-val-in-train/--no-include-val-in-train",
+    default=True,
+    show_default=True,
+    help="Add validation cases to training set (imagesTr/labelsTr).",
+)
+@click.option(
+    "--modality",
+    type=str,
+    default="CT",
+    show_default=True,
+    help="Modality string for modalities mapping in dataset.yaml.",
+)
+@click.option(
+    "--workers",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Number of parallel processes (0 = use CPU count).",
+)
+def convert_to_nndetection(dataset_path: Path, out_root: Path, task_id: int, task_name: str | None, fold: int, include_val_in_train: bool, modality: str, workers: int) -> int:
+    """Convert a YOLO11_3D dataset to nnDetection Task folder structure.
+
+    DATASET_PATH must contain images/ (.nii.gz), labels/ (.txt) and optional masks/ (.nii.gz).
+    """
+    try:
+        task_dir = convert_dataset_to_nndetection(
+            dataset_dir=dataset_path,
+            out_root=out_root,
+            task_id=task_id,
+            task_name=task_name,
+            fold=fold,
+            include_val_in_train=include_val_in_train,
+            modality_name=modality,
+            workers=workers,
+        )
+        LOGGER.info("Created %s", task_dir)
+    except Exception as e:
+        LOGGER.exception("Failed to convert dataset", exc_info=e)
         return 1
     else:
         return 0
