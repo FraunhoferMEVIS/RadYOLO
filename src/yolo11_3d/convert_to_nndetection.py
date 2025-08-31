@@ -378,10 +378,7 @@ def convert_dataset_to_nndetection(
             val_list = [
                 _sanitize_name(cid) for cid in fold_entry.get("val", [])
             ]
-            # nnDetection/nnUNet expect numpy arrays of strings
-            train_arr = np.asarray(train_list, dtype=object).astype(str)
-            val_arr = np.asarray(val_list, dtype=object).astype(str)
-            result_list.append(OrderedDict([("train", train_arr), ("val", val_arr)]))
+            result_list.append(OrderedDict([("train", train_list), ("val", val_list)]))
         splits_pkl = task_dir / "splits_final.pkl"
         with splits_pkl.open("wb") as f:
             pickle.dump(result_list, f)
