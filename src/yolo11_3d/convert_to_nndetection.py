@@ -286,7 +286,7 @@ def convert_dataset_to_nndetection(
             for fut in as_completed(futures):
                 cid = futures[fut]
                 try:
-                    ok, split, src_image_name, dst_image_name, src_case_id, dst_case_id = fut.result()
+                    ok, split, src_image_name, dst_image_names, src_case_id, dst_case_id = fut.result()
                 except Exception:
                     LOGGER.exception("Failed to convert case %s", cid)
                 else:
@@ -295,15 +295,17 @@ def convert_dataset_to_nndetection(
                             processed_train += 1
                         elif split == "test":
                             processed_test += 1
-                        mapping_rows.append(
-                            {
-                                "yolo_case_id": src_case_id,
-                                "yolo_image": src_image_name,
-                                "nndet_case_id": dst_case_id,
-                                "nndet_image": dst_image_name,
-                                "split": split,
-                            }
-                        )
+                        # Write one row per nnDetection image (one per modality/channel)
+                        for dn in (dst_image_names or []):
+                            mapping_rows.append(
+                                {
+                                    "yolo_case_id": src_case_id,
+                                    "yolo_image": src_image_name,
+                                    "nndet_case_id": dst_case_id,
+                                    "nndet_image": dn,
+                                    "split": split,
+                                }
+                            )
                 finally:
                     pbar.update(1)
         finally:
@@ -398,7 +400,7 @@ def convert_dataset_to_nndetection(
 __all__ = ["convert_dataset_to_nndetection"]
 
 
-def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str) -> tuple[bool, str, str, str, str, str]:
+def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str) -> tuple[bool, str, str, list[str], str, str]:
     """Worker to convert a single case. Returns (success, split) where split is 'train' or 'test'.
 
     The split is inferred from target directory name.
@@ -416,18 +418,50 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
 
     img_path = img_dir / f"{cid}.nii.gz"
     if not img_path.exists():
-        return (False, split, f"{cid}.nii.gz", "", cid, _sanitize_name(cid))
+        return (False, split, f"{cid}.nii.gz", [], cid, _sanitize_name(cid))
 
     case_id = _sanitize_name(cid)
     try:
-        # Ensure output dirs and copy image
+        # Ensure output dirs
         _ensure_dir(out_img_dir)
         _ensure_dir(out_lbl_dir)
-        dst_img_path = _copy_image_to_nndet(img_path, out_img_dir, case_id)
 
-        # Load reference image for shape/affine
+        # Load source image once
         ref_nii = nib.load(img_path)
-        ref_shape = tuple(np.asanyarray(ref_nii.dataobj).shape)
+        ref_data = np.asanyarray(ref_nii.dataobj)
+        ref_shape = tuple(ref_data.shape)
+
+        # Write one nnDetection file per channel/modality
+        dst_names: list[str] = []
+        if ref_data.ndim == 3:
+            # Single channel
+            dst_name = f"{case_id}_0000.nii.gz"
+            nib.save(nib.Nifti1Image(ref_data.astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+            dst_names.append(dst_name)
+        elif ref_data.ndim == 4:
+            # Could be (C,X,Y,Z) or (X,Y,Z,C)
+            if ref_data.shape[0] <= 5 and ref_data.shape[0] < ref_data.shape[-1]:
+                # (C,X,Y,Z)
+                C = ref_data.shape[0]
+                for c in range(C):
+                    dst_name = f"{case_id}_{c:04d}.nii.gz"
+                    nib.save(nib.Nifti1Image(ref_data[c, ...].astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+                    dst_names.append(dst_name)
+                # Use spatial shape for labels
+                ref_shape = tuple(ref_data.shape[1:4])
+            else:
+                # (X,Y,Z,C)
+                C = ref_data.shape[-1]
+                for c in range(C):
+                    dst_name = f"{case_id}_{c:04d}.nii.gz"
+                    nib.save(nib.Nifti1Image(ref_data[..., c].astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+                    dst_names.append(dst_name)
+                ref_shape = tuple(ref_data.shape[0:3])
+        else:
+            # Unexpected dimensionality; copy as single channel fallback
+            dst_name = f"{case_id}_0000.nii.gz"
+            nib.save(nib.Nifti1Image(ref_data.astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+            dst_names.append(dst_name)
 
         # Gather labels
         labels_tuples = _labels_for_case(lbl_dir, cid)
@@ -446,7 +480,7 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
             labelmap = _compose_instance_seg_from_boxes(ref_shape, boxes)
 
         _write_label_files(out_lbl_dir, case_id, labelmap, instance_classes, ref_nii)
-        return (True, split, img_path.name, dst_img_path.name, cid, case_id)
+        return (True, split, img_path.name, dst_names, cid, case_id)
     except Exception:
         # Let caller log the exception if needed
-        return (False, split, img_path.name, "", cid, case_id)
+        return (False, split, img_path.name, [], cid, case_id)
