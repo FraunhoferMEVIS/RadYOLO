@@ -254,35 +254,6 @@ def export(model_path: Path) -> int:
         return 0
 
 
-@main.command("onnx-compare")
-@click.argument(
-    "model_a",
-    type=click.Path(
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-        path_type=Path,
-    ),
-)
-@click.argument(
-    "model_b",
-    type=click.Path(
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-        path_type=Path,
-    ),
-)
-def onnx_compare(model_a: Path, model_b: Path) -> int:
-    """Not implemented!"""
-    LOGGER.error("This command is not implemented yet.")
-    return 1
-
-
 @main.command("plot-results")
 @click.argument(
     "result_path",
@@ -309,7 +280,7 @@ def plot_results(result_path: Path) -> int:
         return 0
 
 
-@main.command("create_data_splits")
+@main.command("create-data-splits")
 @click.argument(
     "dataset_path",
     type=click.Path(
@@ -353,7 +324,7 @@ def create_data_splits(dataset_path: Path, seed: int, k: int, group_by_prefix: b
         return 0
 
 
-@main.command("analyze_dataset")
+@main.command("analyze-dataset")
 @click.argument(
     "dataset_path",
     type=click.Path(

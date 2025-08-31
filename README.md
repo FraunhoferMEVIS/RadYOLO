@@ -19,7 +19,8 @@ Available commands are:
 - validate
 - export
 - plot-results
-- onnx-compare
+- analyze-dataset
+- create-data-splits
 - convert-to-nndetection
 
 For further details please refer to the respective `--help` invocation.
