@@ -105,6 +105,7 @@ class v8DetectionLoss:  # noqa: N801
         cls: float,
         dfl: float,
         mask_gain: float,
+        class_separate_gain: float,
         detect_layer: Detect,
         device: torch.device,
         tal_topk: int = 10,
@@ -120,6 +121,7 @@ class v8DetectionLoss:  # noqa: N801
         self.ce = nn.CrossEntropyLoss(reduction="none")
         self.box_gain = box
         self.classification_gain = cls
+        self.class_separate_gain = class_separate_gain
         self.dfl_gain = dfl
         self.mask_gain = mask_gain
         self.stride: torch.Tensor = m.stride  # model strides
@@ -180,8 +182,8 @@ class v8DetectionLoss:  # noqa: N801
                      torch.Tensor | None],
         batch: Batch
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the sum of the loss for box, cls, dfl and mask multiplied by batch size."""
-        loss = torch.zeros(4, device=self.device)  # box, cls, dfl, mask
+        """Calculate the sum of the loss for box, cls / objectness, dfl, mask, class separate multiplied by batch size."""
+        loss = torch.zeros(5, device=self.device)  # box, cls_obj, dfl, mask, cls_sep
         feats = preds[0]
         feats = feats[1] if isinstance(feats, tuple) else feats # Handling of inference pass
         flat = torch.cat(
@@ -262,12 +264,11 @@ class v8DetectionLoss:  # noqa: N801
             # Only count fg anchors
             denom = fg_mask.sum().clamp_min(1)
             ce_loss = (ce_loss * fg_mask).sum() / denom
-            loss[1] = ce_loss
+            loss[4] = ce_loss
             # Objectness targets: 1 for fg, 0 for bg
             obj_target = fg_mask.float().unsqueeze(-1)
-            loss_obj = self.bce(pred_objectness_logit, obj_target)
-            loss_obj = loss_obj.sum() / target_scores_sum
-            loss[1] += loss_obj  # combine; keep same gain scaling
+            loss_obj = self.bce(pred_objectness_logit, obj_target).sum() / target_scores_sum
+            loss[1] = loss_obj
         else:
             # BCE-with-logits on multi-label scores as in YOLO
             loss[1] = self.bce(pred_class_logits, target_scores.to(dtype)).sum() / target_scores_sum
@@ -349,5 +350,6 @@ class v8DetectionLoss:  # noqa: N801
         loss[1] *= self.classification_gain
         loss[2] *= self.dfl_gain
         loss[3] *= self.mask_gain
+        loss[4] *= self.class_separate_gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask)

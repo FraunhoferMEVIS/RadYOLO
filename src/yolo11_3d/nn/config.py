@@ -91,6 +91,7 @@ class DefaultConfig(BaseModel):
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain
     mask_gain: float = 1.0  # mask loss gain
+    class_separate_gain: float = 0.5 # class loss gain for separate softmax classification loss
     nbs: int = 64  # nominal batch size
 
     # Optional Segmentation Head

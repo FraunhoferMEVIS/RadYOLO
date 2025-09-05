@@ -34,6 +34,7 @@ class HardcodedModel(nn.Module):
         cls: float,
         dfl: float,
         mask_gain: float,
+        class_separate_gain: float,
         device: torch.device,
         enable_output_masks: bool = True,
         num_prototype_masks: int = 8,
@@ -258,7 +259,7 @@ class HardcodedModel(nn.Module):
         self.l23.bias_init()
 
         self.criterion = v8DetectionLoss(
-            self, box, cls, dfl, mask_gain, self.l23, device, tal_beta=1.0, tal_fallback=True,
+            self, box, cls, dfl, mask_gain, class_separate_gain, self.l23, device, tal_beta=1.0, tal_fallback=True,
             enable_mask_loss=enable_output_masks, separate_objectness_head=self.separate_objectness_head
         )
 

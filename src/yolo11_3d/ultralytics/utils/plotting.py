@@ -583,38 +583,38 @@ def plot_results(
         plot_results("path/to/results.csv", segment=True)
         ```
     """
-    import pandas as pd  # scope for faster 'import ultralytics'
+    import pandas as pd  # scope for faster import of parent modules
 
     save_dir = Path(file).parent if file else Path(dir)
-    fig, ax = plt.subplots(2, 6, figsize=(16, 6), tight_layout=True)
-    index = [
-        2,  3,  4,  5,  6, 7,
-        11, 12, 13, 14, 8, 9,
+    fig, ax = plt.subplots(3, 5, figsize=(16, 7), tight_layout=True, sharex='col')
+    indices = [
+        2,  3,  4,  5,  6,
+        12, 13, 14, 15, 16,
+        7,  8,  9,  10, 11
     ]
 
     ax = ax.ravel()
     files = list(save_dir.glob("results*.csv"))
     assert files, f"No results.csv files found in {save_dir.resolve()}, nothing to plot."
     for f in files:
-        try:
-            data = pd.read_csv(f)
-            s = [x.strip() for x in data.columns]
-            x = data.values[:, 0]
-            for i, j in enumerate(index):
-                y = data.values[:, j].astype("float")
-                ax[i].plot(
-                    x, y, label=f.stem, linewidth=2, markersize=8
-                )
-                ax[i].set_title(s[j], fontsize=12)
-        except Exception as e:
-            LOGGER.warning("WARNING: Plotting error for %s: %s", f, e)
-        else:
-            ax[1].legend()
-            fname = save_dir / "results.png"
-            fig.savefig(fname, dpi=200)
-        finally:
-            plt.tight_layout()
-            plt.close()
+        data = pd.read_csv(f)
+        column_names = [name.strip() for name in data.columns]
+        epochs = data.values[:, 0]
+        for plot_index, csv_index in enumerate(indices):
+            try:
+                y = data.values[:, csv_index].astype("float")
+                ax[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
+                ax[plot_index].set_ylabel(column_names[csv_index])
+                if "metrics" in column_names[csv_index]:
+                    ax[plot_index].set_xlabel("Epochs")
+                if "loss" in column_names[csv_index]:
+                    ax[plot_index].set_ylim(np.min(y) - 0.1, np.percentile(y, 95) + 0.1)
+            except Exception as e:
+                LOGGER.warning(f"WARNING: Plotting error for {f} ({column_names[csv_index]}): {e}")
+        ax[0].legend()
+        fname = save_dir / "results.png"
+        fig.savefig(fname, dpi=200)
+        plt.close()
 
 
 def output_to_target(

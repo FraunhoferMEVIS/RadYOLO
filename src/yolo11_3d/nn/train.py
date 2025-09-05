@@ -163,6 +163,7 @@ class Trainer:
             cls=self.args.cls,
             dfl=self.args.dfl,
             mask_gain=self.args.mask_gain,
+            class_separate_gain=self.args.class_separate_gain,
             device=device,
             enable_output_masks=self.args.segmentation_output,
             num_prototype_masks=self.args.prototype_masks,
@@ -683,7 +684,7 @@ class Trainer:
         save_dir: Path,
         names: dict[int, str],
     ) -> Validator:
-        self.loss_names = "box_loss", "cls_loss", "dfl_loss", "mask_loss"
+        self.loss_names = "box_loss", "cls_obj_loss", "dfl_loss", "mask_loss", "cls_sep_loss"
         return Validator(
             test_loader,
             save_dir=save_dir,

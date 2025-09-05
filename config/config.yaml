@@ -2,13 +2,13 @@
 
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11_3d.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
-data: "D:/datasets/autoPETCT_MAST_track/yolov11_3d_wrong_image_extents" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/AMOS22/yolov11_3d" # (str) path to data folder containing dataset.yaml
 fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 2 # (int) number of images per batch
-imgsz: [128, 128, 128] # (list[int]) input images size as int for or list[d,w,h] for predict and export modes
-normalization: {type: "ct", mean: -698, std: 519, clip_min: -1024, clip_max: 516} # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
+imgsz: [96, 96, 96] # (list[int]) input images size as int for or list [d,w,h] for predict and export modes
+normalization: {type: "zscore"} # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 # device: "cpu" # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
@@ -51,15 +51,16 @@ box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) cls loss gain (scale with pixels)
 dfl: 1.5 # (float) dfl loss gain
 mask_gain: 5 # (float) mask loss gain
+class_separate_gain: 0.5 # (float) class loss gain for separate softmax classification
 nbs: 64 # (int) nominal batch size
 
 # Optional Segmentation Head
-segmentation_output: False # (bool) add segmentation output to model
+segmentation_output: True # (bool) add segmentation output to model
 prototype_masks: 8 # (int) number of prototype masks for segmentation output
 higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
 
 # Detection Head Options
-separate_objectness_head: False  # (bool) if True, add a separate objectness output and use CCE loss for class logits
+separate_objectness_head: True  # (bool) if True, add a separate objectness output and use CCE loss for class logits
 include_stride4_output: True
 
 # Data Augmentation
