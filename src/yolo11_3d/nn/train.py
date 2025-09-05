@@ -430,7 +430,8 @@ class Trainer:
                     with torch.autocast(amp_device_type):
                         batch["img"] = batch["img"].to(self.device, non_blocking=True)
                         if self.args.segmentation_output:
-                            batch["masks"] = tuple(masks.to(self.device, non_blocking=True) for masks in batch["masks"])
+                            batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
+                                                   for masks in batch["masks"])
                         
                         loss, self.loss_items = cast(
                             "tuple[torch.Tensor, torch.Tensor]", model(batch)
