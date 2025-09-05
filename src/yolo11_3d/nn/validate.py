@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -89,7 +89,6 @@ class Validator():
     ) -> dict[str, float]:
         """Executes validation process, running inference on dataloader and computing performance metrics."""
         self.training = trainer is not None
-        augment = self.args.augment and (not self.training)
         if self.training and trainer is not None:
             self.device = trainer.device
             self.data = trainer.data
@@ -110,7 +109,7 @@ class Validator():
 
 
         bar = tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
-        self.init_metrics(model)
+        self.init_metrics()
         self.jdict = []  # empty before each val
         for batch_i, raw_batch in enumerate(bar):
             self.batch_i = batch_i
@@ -160,7 +159,7 @@ class Validator():
             LOGGER.info("Results saved to %s", self.save_dir)
         return stats
 
-    def init_metrics(self, model) -> None:
+    def init_metrics(self) -> None:
         """Initialize evaluation metrics for YOLO."""
         self.metrics.names = self.names
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)

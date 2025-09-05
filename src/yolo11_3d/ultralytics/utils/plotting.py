@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import math
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -19,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 from . import ops
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -587,11 +586,11 @@ def plot_results(
     import pandas as pd  # scope for faster 'import ultralytics'
 
     save_dir = Path(file).parent if file else Path(dir)
-    # if segment:
-    #     fig, ax = plt.subplots(2, 8, figsize=(18, 6), tight_layout=True)
-    #     index = [2, 3, 4, 5, 6, 7, 10, 11, 14, 15, 16, 17, 8, 9, 12, 13]
-    fig, ax = plt.subplots(2, 5, figsize=(12, 6), tight_layout=True)
-    index = [2, 3, 4, 5, 6, 9, 10, 11, 7, 8]
+    fig, ax = plt.subplots(2, 6, figsize=(16, 6), tight_layout=True)
+    index = [
+        2,  3,  4,  5,  6, 7,
+        11, 12, 13, 14, 8, 9,
+    ]
 
     ax = ax.ravel()
     files = list(save_dir.glob("results*.csv"))
@@ -604,8 +603,8 @@ def plot_results(
             for i, j in enumerate(index):
                 y = data.values[:, j].astype("float")
                 ax[i].plot(
-                    x, y, marker=".", label=f.stem, linewidth=2, markersize=8
-                )  # actual results
+                    x, y, label=f.stem, linewidth=2, markersize=8
+                )
                 ax[i].set_title(s[j], fontsize=12)
         except Exception as e:
             LOGGER.warning("WARNING: Plotting error for %s: %s", f, e)
@@ -614,6 +613,7 @@ def plot_results(
             fname = save_dir / "results.png"
             fig.savefig(fname, dpi=200)
         finally:
+            plt.tight_layout()
             plt.close()
 
 

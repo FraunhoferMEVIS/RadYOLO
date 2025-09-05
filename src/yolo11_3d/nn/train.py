@@ -527,6 +527,9 @@ class Trainer:
                     fitness=fitness,
                 )
 
+            if args.plots:
+                plot_results(self.csv_path)
+
             self._clear_memory()
 
             if stop:
@@ -537,9 +540,6 @@ class Trainer:
         seconds = time.time() - train_time_start
         msg = f"\n{self.epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
         LOGGER.info(msg)
-
-        if args.plots:
-            self.plot_metrics()
 
         self._clear_memory()
 
@@ -789,10 +789,6 @@ class Trainer:
         with self.csv_path.open("a") as f:
             line = ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",")
             f.write(header + line + "\n")
-
-    def plot_metrics(self) -> None:
-        plot_results(self.csv_path)
-
 
     def build_optimizer(
         self,
