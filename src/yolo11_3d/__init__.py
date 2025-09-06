@@ -239,6 +239,7 @@ def export(model_path: Path) -> int:
     It exports the containing model to ONNX next to it.
     """
     try:
+        print(f"Exporting model {model_path} to onnx...")
         checkpoint = model_checkpoint_from_torch(model_path)
 
         model = checkpoint["ema"]

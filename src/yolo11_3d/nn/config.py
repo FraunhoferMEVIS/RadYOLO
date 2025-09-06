@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict
-
 import annotated_types
+import logging
+import pathlib
+import sys
 import torch
 import yaml
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -196,6 +198,8 @@ class ModelCheckpoint(TypedDict):
 
 
 def model_checkpoint_from_torch(checkpoint: Path) -> ModelCheckpoint:
+    if sys.platform == "win32":
+        pathlib.PosixPath = pathlib.WindowsPath
     ckpt = torch.load(checkpoint, map_location="cpu", weights_only=False)
     return ModelCheckpoint(
         epoch=ckpt["epoch"],
