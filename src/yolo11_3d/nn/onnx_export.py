@@ -34,13 +34,13 @@ def export_model(
     onnx_path = Path(dest).with_suffix(".onnx")
 
     if model.enable_output_masks and not model.separate_objectness_head:
-        output_names = ["boxes", "class_scores", "maskCoefficients", "prototypeMasks"]
+        output_names = ["boxes", "classScores", "maskCoefficients", "prototypeMasks"]
     elif not model.enable_output_masks and model.separate_objectness_head:
-        output_names = ["boxes", "class_scores", "objectness_scores"]
+        output_names = ["boxes", "classScores", "objectnessScores"]
     elif model.enable_output_masks and model.separate_objectness_head:
-        output_names = ["boxes", "class_scores", "objectness_scores", "maskCoefficients", "prototypeMasks"]
+        output_names = ["boxes", "classScores", "objectnessScores", "maskCoefficients", "prototypeMasks"]
     else:
-        output_names = ["boxes", "class_scores"]
+        output_names = ["boxes", "classScores"]
 
     torch.onnx.export(
         model,
