@@ -14,9 +14,10 @@ from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from yolo11_3d.nn.config import DatasetConfig, model_checkpoint_from_torch
 from yolo11_3d.nn.data import NIfTIDatasetWithMasks
+from yolo11_3d.nn.onnx_export import export_model
 from yolo11_3d.nn.train import Trainer
 from yolo11_3d.nn.validate import Validator
-from yolo11_3d.nn.util import ModelEMA, export_model, select_device
+from yolo11_3d.nn.util import ModelEMA, select_device
 from yolo11_3d.nn.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
 from yolo11_3d.data_splits import k_fold_data_splits
@@ -218,7 +219,7 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
         return 0
 
 
-@main.command("export")
+@main.command("onnx-export")
 @click.argument(
     "model_path",
     type=click.Path(
@@ -230,7 +231,7 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
         path_type=Path,
     ),
 )
-def export(model_path: Path) -> int:
+def onnx_export(model_path: Path) -> int:
     """Export a ModelCheckpoint to ONNX-Format.
 
     This command expects a PATH to a ModelCheckpoint loadable by `torch.load()`, usually

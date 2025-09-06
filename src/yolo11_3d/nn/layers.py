@@ -480,22 +480,22 @@ class Detect(nn.Module):
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     def forward(
-        self, x: list[torch.Tensor]
+        self, pred_raw: list[torch.Tensor]
     ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
         for i in range(self.nl):
-            reg = self.cv_boxes[i](x[i])
-            cls = self.cv_classes[i](x[i])
+            reg = self.cv_boxes[i](pred_raw[i])
+            cls = self.cv_classes[i](pred_raw[i])
             if self.separate_objectness_head:
-                obj = self.cv_obj[i](x[i])
-                x[i] = torch.cat((reg, cls, obj), 1)
+                obj = self.cv_obj[i](pred_raw[i])
+                pred_raw[i] = torch.cat((reg, cls, obj), 1)
             else:
-                x[i] = torch.cat((reg, cls), 1)
+                pred_raw[i] = torch.cat((reg, cls), 1)
         if self.training:
-            return x
-        y = self._inference(x)
+            return pred_raw
+        pred_with_final_layers = self._inference(pred_raw)
         if self.export:
-            return y
-        return (y, x)
+            return pred_with_final_layers
+        return (pred_with_final_layers, pred_raw)
 
     def _inference(self, x: list[torch.Tensor]) -> torch.Tensor:
         shape = x[0].shape
@@ -510,12 +510,12 @@ class Detect(nn.Module):
             dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
             cls_prob = cls.softmax(1)
             obj_prob = obj.sigmoid()
-            # Return separate tensors: boxes, class probabilities, objectness
             return (dbox, cls_prob, obj_prob)
         else:
             box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
             dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-            return torch.cat((dbox, cls.sigmoid()), 1)
+            cls_prob = cls.sigmoid()
+            return (dbox, cls_prob)
 
     def bias_init(self) -> None:
         for idx, (a, b, s) in enumerate(zip(self.cv_boxes, self.cv_classes, self.stride, strict=True)):

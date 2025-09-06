@@ -1,26 +1,18 @@
 from __future__ import annotations
 
-import contextlib
 import logging
 import math
 import os
 import platform
 import random
-from collections.abc import Collection
-from copy import deepcopy
-from pathlib import Path
-from typing import Any
-
 import numpy as np
 import torch
 import torch.nn.functional as F
+from collections.abc import Collection
+from copy import deepcopy
+from typing import Any
 from torch import nn
 
-from yolo11_3d.nn.layers import (
-    C2f,
-    Detect,
-    PrototypeMasks,
-)
 
 PYTHON_VERSION = platform.python_version()
 NUM_THREADS = min(8, max(1, (os.cpu_count() or 1) - 1))
@@ -84,51 +76,6 @@ def model_to_dict(model: nn.Module) -> dict:
         "parameters": {name: param.shape for name, param in model.named_parameters()},
         "children": [model_to_dict(child) for child in model.children()],
     }
-
-
-def export_model(
-    model: nn.Module, input_shape: tuple[int, ...], dest: Path | str, copy: bool = False
-) -> Path:
-    inputs = torch.randn((1, *input_shape)).to("cpu")
-    if copy:
-        model = deepcopy(model)
-    model.to("cpu")
-    for p in model.parameters():
-        p.requires_grad = False
-    model.eval()
-    model.float()
-
-    # TODO: Make export to float16 with input and output layers as float32
-
-    for _ in range(2):
-        model(inputs)
-
-    has_segmentation_output = False
-    for m in model.modules():
-        if isinstance(m, Detect):
-            m.export = True
-        if isinstance(m, C2f):
-            m.forward = m.forward_split
-        if isinstance(m, PrototypeMasks):
-            has_segmentation_output = True
-
-    onnx_path = Path(dest).with_suffix(".onnx")
-
-    if has_segmentation_output:
-        output_names = ["detections", "maskCoefficients", "prototypeMasks"]
-    else:
-        output_names = ["detections"]
-
-    torch.onnx.export(
-        model,
-        inputs,
-        onnx_path,
-        verbose=False,
-        input_names=["images"],
-        output_names=output_names,
-        dynamic_axes=None,
-    )
-    return onnx_path
 
 
 def select_device(

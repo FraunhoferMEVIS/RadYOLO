@@ -17,7 +17,7 @@ After installation this project provides a cli `yolo11-3d` with built-in help.
 Available commands are:
 - train
 - validate
-- export
+- onnx-export
 - plot-results
 - analyze-dataset
 - create-data-splits

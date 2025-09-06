@@ -185,7 +185,7 @@ class Validator():
     def preprocess(self, batch: Batch) -> Batch:
         """Preprocesses batch of images for YOLO validation."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
-        batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()  # / 255
+        batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()
         batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
                                for masks in batch["masks"])
 
@@ -224,6 +224,12 @@ class Validator():
             dbox, cls_prob, obj_prob = prediction
             # Multiply class probabilities with objectness for NMS
             combined = torch.cat((dbox, cls_prob * obj_prob), 1)
+            prediction = combined
+
+        # Combine boundig box and class prediction into one tensor
+        if isinstance(prediction, tuple) and len(prediction) == 2:
+            dbox, cls_prob = prediction
+            combined = torch.cat((dbox, cls_prob), 1)
             prediction = combined
 
         # Attach mask coefficients to predictions if available
