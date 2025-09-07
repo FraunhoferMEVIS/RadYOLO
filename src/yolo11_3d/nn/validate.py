@@ -166,7 +166,6 @@ class Validator():
         self.seen = 0
         self.jdict = []
         self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
-        # reset Dice accumulators
         self.dice_sum = 0.0
         self.dice_count = 0
 
@@ -439,8 +438,7 @@ class Validator():
             gt_mask = gt_masks_list[g_i]
             if gt_mask is None:
                 continue
-            # Downsample GT mask to prototype resolution
-            gt_mask_d = F.interpolate(
+            gt_mask_downsampled = F.interpolate(
                 gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype), proto_dhw, mode="nearest-exact"
             )[0, 0]
             # Reconstruct predicted mask logits from coefficients and prototypes
@@ -448,34 +446,11 @@ class Validator():
             # prototypes shape: (n_proto, H, W, D) -> logits (H, W, D), match training loss
             pred_logits = torch.einsum("n,nhwd->hwd", coeff, prototypes)
             pred_prob = pred_logits.sigmoid()
-            # Compute cropping box in prototype grid (approx. stride 4 like in loss)
-            gt_box = gt_bboxes_f[g_i]
-            gt_box[[0, 3]] = gt_box[[0, 3]] / orignal_shape[2] * proto_dhw[2]
-            gt_box[[1, 4]] = gt_box[[1, 4]] / orignal_shape[1] * proto_dhw[1]
-            gt_box[[2, 5]] = gt_box[[2, 5]] / orignal_shape[0] * proto_dhw[0]
-            pr_box = predn_f[d_i, :6]
-            pr_box[[0, 3]] = pr_box[[0, 3]] / orignal_shape[2] * proto_dhw[2]
-            pr_box[[1, 4]] = pr_box[[1, 4]] / orignal_shape[1] * proto_dhw[1]
-            pr_box[[2, 5]] = pr_box[[2, 5]] / orignal_shape[0] * proto_dhw[0]
-            # [x1,y1,z1,x2,y2,z2]
-            xyz1 = torch.minimum(gt_box[:3], pr_box[:3])
-            xyz2 = torch.maximum(gt_box[3:], pr_box[3:])
-            xyz1 = torch.floor(xyz1).clamp_min(0)
-            xyz2 = torch.ceil(xyz2)
-            xyz2[0] = xyz2[0].clamp(max=proto_dhw[2])
-            xyz2[1] = xyz2[1].clamp(max=proto_dhw[1])
-            xyz2[2] = xyz2[2].clamp(max=proto_dhw[0])
-            x0, y0, z0 = xyz1.to(torch.int)
-            x1, y1, z1 = xyz2.to(torch.int)
-            if (x1 <= x0) or (y1 <= y0) or (z1 <= z0):
+            pred_mask = pred_prob >= 0.5
+            if not gt_mask_downsampled.any():
                 continue
-            p_region = pred_prob[z0:z1, y0:y1, x0:x1]
-            g_region = gt_mask_d[z0:z1, y0:y1, x0:x1].to(dtype=p_region.dtype)
-            if not g_region.any():
-                continue
-            # Soft Dice
-            intersection = (p_region * g_region).sum().item()
-            denom = (p_region.sum() + g_region.sum()).item()
+            intersection = (pred_mask * gt_mask_downsampled).sum().item()
+            denom = (pred_mask.sum() + gt_mask_downsampled.sum()).item()
             dice = (2.0 * intersection) / (denom + 1e-7)
             self.dice_sum += float(dice)
             self.dice_count += 1

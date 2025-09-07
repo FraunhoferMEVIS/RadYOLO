@@ -51,9 +51,10 @@ class DFLoss(nn.Module):
 
 class DiceLoss:
     def __call__(self, pred: torch.Tensor, target: torch.Tensor, eps: float = 1):
-        intersection = (pred * target).sum()
-        summed = pred.sum() + target.sum()
-        dice = (2. * intersection + eps) / (summed + eps)
+        pred = torch.sigmoid(pred)
+        intersection = (pred * target).sum(dim=(1,2,3))
+        summed = pred.sum(dim=(1,2,3)) + target.sum(dim=(1,2,3))
+        dice = ((2. * intersection + eps) / (summed + eps)).mean()
         return 1 - dice
 
 class BboxLoss(nn.Module):
@@ -145,6 +146,7 @@ class v8DetectionLoss:  # noqa: N801
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
         self.enable_mask_loss = enable_mask_loss
         self.mask_dice_loss = DiceLoss()
+        self.mask_bce_loss = nn.BCEWithLogitsLoss()
 
     def preprocess(
         self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor
@@ -292,13 +294,6 @@ class v8DetectionLoss:  # noqa: N801
                 mask_coefficients = preds[1]
                 mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
                 prototype_masks = preds[2]
-
-                # Downsample cell grid by factor between image resolution and prototype mask resolution 
-                image_shape = batch['shape'][0]
-                downsampling_rate = int(image_shape[-1] / prototype_masks.shape[-1])
-                target_bboxes_grid = target_bboxes / downsampling_rate
-                pred_bboxes_grid = pred_bboxes_image_coordinates / downsampling_rate
-
                 for batch_index, masks in enumerate(batch["masks"]):
                     target_gt_idx_batch = target_gt_idx[batch_index]
                     fg_mask_batch = fg_mask[batch_index]
@@ -313,35 +308,13 @@ class v8DetectionLoss:  # noqa: N801
                             if not grid_cell_indices.any():
                                 LOGGER.warning("No assinged grid cells. Skipping this mask.")
                                 continue
-                            
-                            # Compute box for cropping
-                            target_box = target_bboxes_grid[batch_index, mask_index]
-                            predicted_boxes = pred_bboxes_grid[batch_index, grid_cell_indices]
-                            predicted_box = torch.cat([predicted_boxes[:,:3].amin(dim=0), predicted_boxes[:,3:].amax(dim=0)])
-                            cropping_box = torch.cat([torch.amin(torch.cat([target_box[:3, None], predicted_box[:3, None]], dim=1), dim=1),
-                                                      torch.amax(torch.cat([target_box[3:, None], predicted_box[3:, None]], dim=1), dim=1)])
-                            cropping_box[:3] = cropping_box[:3].floor()
-                            cropping_box[3:] = cropping_box[3:].ceil()
-                            cropping_box[:3] = cropping_box[:3].clamp(min=0)
-                            cropping_box[3] = cropping_box[3].clamp(max=prototype_masks.shape[2])
-                            cropping_box[4] = cropping_box[4].clamp(max=prototype_masks.shape[3])
-                            cropping_box[5] = cropping_box[5].clamp(max=prototype_masks.shape[4])
-                            cropping_box = cropping_box.to(torch.int)
-
-                            prototype_masks_batch_cropped = prototype_masks_batch[:,
-                                                                                  cropping_box[0].item():cropping_box[3].item(),
-                                                                                  cropping_box[1].item():cropping_box[4].item(),
-                                                                                  cropping_box[2].item():cropping_box[5].item()]
                             mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
-                            pred_masks = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch_cropped)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
-                            pred_masks = torch.sigmoid(pred_masks)
-                            pred_masks_average = pred_masks.mean(dim=0)
-                            gt_mask = gt_mask.to(pred_masks_average.dtype)
-                            gt_mask_cropped = gt_mask[cropping_box[0].item():cropping_box[3].item(),
-                                                      cropping_box[1].item():cropping_box[4].item(),
-                                                      cropping_box[2].item():cropping_box[5].item()]
-                            mask_loss = self.mask_dice_loss(pred_masks_average, gt_mask_cropped)
-                            loss[3] += mask_loss
+                            pred_masks_logits = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
+                            gt_mask = gt_mask.to(pred_masks_logits.dtype)
+                            gt_mask = gt_mask.expand(pred_masks_logits.shape[0], -1, -1, -1)
+                            mask_dice_loss = self.mask_dice_loss(pred_masks_logits, gt_mask)
+                            mask_bce_loss = self.mask_bce_loss(pred_masks_logits, gt_mask)
+                            loss[3] += mask_dice_loss + mask_bce_loss
                             mask_loss_count += 1
                 if mask_loss_count > 0:
                     loss[3] = loss[3] / mask_loss_count
