@@ -137,11 +137,11 @@ def train(config: Path) -> int:
     ),
 )
 @click.argument(
-    "dataset_path",
+    "dataset_folder",
     type=click.Path(
         exists=True,
-        file_okay=True,
-        dir_okay=False,
+        file_okay=False,
+        dir_okay=True,
         readable=True,
         resolve_path=True,
         path_type=Path,
@@ -149,27 +149,28 @@ def train(config: Path) -> int:
     metavar="DATASET_CONFIG",
 )
 @click.option("--fold", default=0, help="Fold from dataset splits file to use.")
-def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
+@click.option("--group", default="test", help="Group from datas splits to use. Can be train, val or test.")
+def validate(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
     """Validate a yolo11-3d model.
 
-    MODEL specifies the path to a model checkpoint.
-    DATASET_CONFIG specifies the path to a dataset configuration.
-    fold specifies which fold to use from the data splits file.
+    MODEL: specifies the path to a model checkpoint.
+    dataset_folder: specifies the path to a dataset folder.
+    fold: specifies which fold to use from the data splits file.
+    group: specifies which group from data split to use. Can be train, val or test.
     """
     try:
         if not model_path.exists():
             LOGGER.error(f"Model checkpoint {model_path} does not exist.")
             return 1
 
-        if not dataset_path.exists():
-            LOGGER.error(f"Dataset configuration {dataset_path} does not exist.")
+        if not dataset_folder.exists():
+            LOGGER.error(f"Dataset configuration {dataset_folder} does not exist.")
             return 1
 
+        dataset_path = dataset_folder / "dataset.yaml"
         with dataset_path.open() as f:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
-
-        data_folder = dataset_path.parent
 
         checkpoint = model_checkpoint_from_torch(model_path)
         model = checkpoint["ema"]
@@ -180,12 +181,11 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
         ema = ModelEMA(model)
 
         dataset = NIfTIDatasetWithMasks(
-            src_path=data_folder,
+            src_path=dataset_folder,
             fold=fold,
-            group="test",
+            group=group,
             imgsz=tuple(train_args.imgsz),
             augment=False,
-            batch_size=1,
             stride=int(model.stride.max().item())
             if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
             else 32,
@@ -198,15 +198,15 @@ def validate(model_path: Path, dataset_path: Path, fold: int) -> int:
 
         dataloader = build_dataloader(
             dataset=dataset,
-            batch=1,
-            workers=0,  # No workers for validation
+            batch_size=1,
+            workers=2,
             shuffle=False,
             device=device,
         )
 
         validator = Validator(
             dataloader=dataloader,
-            save_dir=model_path.parents[1] / "validation",
+            save_dir=model_path.parents[1] / "validation" / group,
             args=train_args,
             names=dataset_config.names,
         )

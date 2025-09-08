@@ -47,7 +47,7 @@ class DefaultConfig(BaseModel):
     batch: int = 16  # number of images per batch (-1 for AutoBatch)
     imgsz: DimList  # input images size as int for train and val modes, or list[h,w] for predict and export modes
     normalization: dict | list[dict] = {"type": "none"}  # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
-    save: bool = True  # save train checkpoints and predict results
+    save: bool = True  # save train checkpoints
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     device: str = ""  # device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
     workers: int = 8  # number of worker threads for data loading (per RANK if DDP)
@@ -67,10 +67,7 @@ class DefaultConfig(BaseModel):
     # Val/Test Settings
     val: bool = True  # validate/test during training
     save_json: bool = False  # save results to JSON file
-    save_hybrid: bool = False  # save hybrid version of labels (labels+additional predictions)
-    conf: float | None = (
-        None  # object confidence threshold for detection (default 0.25 predict, 0.001 val)
-    )
+    conf: float | None =  0.001 # object confidence threshold for detection during validation
     iou: float = 0.2  # intersection over union (IoU) threshold for NMS
     max_det: int = 300  # maximum number of detections per image
     half: bool = False  # use half precision (FP16)

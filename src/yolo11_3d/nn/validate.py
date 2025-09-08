@@ -41,10 +41,8 @@ class Validator():
     ) -> None:
         self.args = args
         self.dataloader = dataloader
-        self.stride = None
         self.data: DatasetConfig | None = None
         self.device: torch.device | None = None
-        self.batch_i: int | None = None
         self.training: bool = True
         self.names: dict[int, str] = names
         self.seen: int = 0
@@ -63,11 +61,9 @@ class Validator():
 
         self.save_dir: Path = save_dir
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.plots: dict[Path, Any] = {}
 
         self.nt_per_class: npt.NDArray | None = None
         self.nt_per_image: npt.NDArray | None = None
-        self.class_map: list[int] = list(range(1, len(self.names)))
         self.metrics = DetMetrics(
             save_dir=self.save_dir,
             names=self.names,
@@ -78,56 +74,39 @@ class Validator():
         self.lb = []  # for autolabelling
         self.dice_sum = 0.0
         self.dice_count = 0
-        if self.args.save_hybrid:
-            LOGGER.warning(
-                "WARNING ⚠️ 'save_hybrid=True' will append ground truth to predictions for autolabelling.\n"
-                "WARNING ⚠️ 'save_hybrid=True' will cause incorrect mAP.\n"
-            )
 
     def __call__(
         self, trainer: Trainer | None, ema: ModelEMA, amp: bool = False
     ) -> dict[str, float]:
         """Executes validation process, running inference on dataloader and computing performance metrics."""
+        model = cast("HardcodedModel", ema.ema)
         self.training = trainer is not None
         if self.training and trainer is not None:
             self.device = trainer.device
-            self.data = trainer.data
-            # force FP16 val during training
-            self.args.half = self.device.type != "cpu" and amp
-            model = cast("HardcodedModel", ema.ema)
-            model = model.half() if self.args.half else model.float()
-            self.loss = torch.zeros_like(trainer.loss_items, device=trainer.device)
-            model.eval()
+            validation_loss = torch.zeros_like(trainer.loss_items, device=trainer.device)
         else:
-            model = cast("HardcodedModel", ema.ema)
-            self.device = model.device  # update device
-            if self.device.type in {"cpu", "mps"}:
-                self.args.workers = (
-                    0  # faster CPU val as time dominated by inference, not dataloading
-                )
-            model.eval()
-
+            self.device = model.device
+        model.eval()
 
         bar = tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
         self.init_metrics()
         self.jdict = []  # empty before each val
         for batch_i, raw_batch in enumerate(bar):
-            self.batch_i = batch_i
-            # Preprocess
             batch: Batch = self.preprocess(raw_batch)
 
-            # Inference
-            raw_preds: (
-                list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
-            ) = model(batch["img"])
-            if isinstance(raw_preds, torch.Tensor):
-                raise TypeError(raw_preds)
+            with torch.autocast(self.device.type):
+                # Inference 
+                raw_preds: (
+                    list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
+                ) = model(batch["img"])
+                if isinstance(raw_preds, torch.Tensor):
+                    raise TypeError(raw_preds)
 
-            # Loss
-            if self.training:
-                self.loss += cast(
-                    "tuple[torch.Tensor, torch.Tensor]", model.loss(batch, raw_preds)
-                )[1]
+                # Loss
+                if self.training:
+                    validation_loss += cast(
+                        "tuple[torch.Tensor, torch.Tensor]", model.loss(batch, raw_preds)
+                    )[1]
 
             # Postprocess and metrics
             pred_class_box, pred_mask_coeff, pred_prototype_masks = raw_preds
@@ -145,7 +124,7 @@ class Validator():
             model.float()
             results = {
                 **stats,
-                **trainer.label_loss_items(self.loss.cpu() / len(self.dataloader), prefix="val"),
+                **trainer.label_loss_items(validation_loss.cpu() / len(self.dataloader), prefix="val"),
             }
             return {
                 k: round(float(v), 5) for k, v in results.items()
@@ -184,26 +163,12 @@ class Validator():
     def preprocess(self, batch: Batch) -> Batch:
         """Preprocesses batch of images for YOLO validation."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
-        batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()
+        #batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()
         batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
                                for masks in batch["masks"])
 
         for k in ["batch_idx", "cls", "bboxes"]:
             batch[k] = batch[k].to(self.device)
-
-        if self.args.save_hybrid:
-            height, width = batch["img"].shape[2:]
-            nb = len(batch["img"])
-            bboxes = batch["bboxes"] * torch.tensor(
-                (width, height, width, height), device=self.device
-            )
-            self.lb = [
-                torch.cat(
-                    [batch["classes"][batch["batch_idx"] == i], bboxes[batch["batch_idx"] == i]],
-                    dim=-1,
-                )
-                for i in range(nb)
-            ]
 
         return batch
 
