@@ -66,7 +66,6 @@ class DefaultConfig(BaseModel):
 
     # Val/Test Settings
     val: bool = True  # validate/test during training
-    save_json: bool = False  # save results to JSON file
     conf: float | None =  0.001 # object confidence threshold for detection during validation
     iou: float = 0.2  # intersection over union (IoU) threshold for NMS
     max_det: int = 300  # maximum number of detections per image

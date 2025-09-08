@@ -38,6 +38,7 @@ class Validator():
         save_dir: Path,
         args: DefaultConfig,
         names: dict[int, str],
+        save_predictions: bool = False
     ) -> None:
         self.args = args
         self.dataloader = dataloader
@@ -57,7 +58,8 @@ class Validator():
         if self.args.conf is None:
             self.args.conf = 0.001
         self.confusion_matrix: ConfusionMatrix = ConfusionMatrix(self.nc, self.args.conf)
-        self.jdict: list[dict[str, Any]] = []
+        self.predictions_for_saving: dict[str, list[dict[str, Any]]] = {}
+        self.save_predictions = save_predictions
 
         self.save_dir: Path = save_dir
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -90,7 +92,7 @@ class Validator():
 
         bar = tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
         self.init_metrics()
-        self.jdict = []  # empty before each val
+        self.predictions_for_saving = {}
         for batch_i, raw_batch in enumerate(bar):
             batch: Batch = self.preprocess(raw_batch)
 
@@ -130,11 +132,11 @@ class Validator():
                 k: round(float(v), 5) for k, v in results.items()
             }  # return results as 5 decimal place floats
 
-        if self.args.save_json and self.jdict:
+        if self.save_predictions and self.predictions_for_saving:
             with self.save_dir.joinpath("predictions.json").open("w") as f:
                 LOGGER.info("Saving %s...", f.name)
-                json.dump(self.jdict, f)  # flatten and save
-        if self.args.plots or self.args.save_json:
+                json.dump(self.predictions_for_saving, f, indent=4)  # flatten and save
+        if self.args.plots or self.save_predictions:
             LOGGER.info("Results saved to %s", self.save_dir)
         return stats
 
@@ -143,7 +145,7 @@ class Validator():
         self.metrics.names = self.names
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.seen = 0
-        self.jdict = []
+        self.predictions_for_saving = {}
         self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
         self.dice_sum = 0.0
         self.dice_count = 0
@@ -248,7 +250,7 @@ class Validator():
         self, preds: list[torch.Tensor], batch: Batch, prototype_masks: torch.Tensor | None
     ) -> None:
         """Metrics."""
-        for si, pred_with_scores_and_coefficients in enumerate(preds):
+        for sample_index, pred_with_scores_and_coefficients in enumerate(preds):
             self.seen += 1
             num_predictions = len(pred_with_scores_and_coefficients)
             stat = {
@@ -256,7 +258,7 @@ class Validator():
                 "pred_cls": torch.zeros(0, device=self.device),
                 "tp": torch.zeros(num_predictions, self.niou, dtype=torch.bool, device=self.device),
             }
-            prepared_batch = self._prepare_batch(si, batch)
+            prepared_batch = self._prepare_batch(sample_index, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
             # Filter out ignore labels (e.g., class == -1) and keep GT arrays aligned
             if classes.numel():
@@ -265,18 +267,18 @@ class Validator():
                     classes = classes[valid_gt]
                     bboxes = bboxes[valid_gt]
                     # Also filter masks if present for this image
-                    gt_masks_si = batch["masks"][si]
+                    gt_masks_si = batch["masks"][sample_index]
                     if gt_masks_si is not None:
                         try:
                             # Tensor of shape [num_gt, D, H, W]
                             batch["masks"] = tuple(
-                                gt_masks_si[valid_gt] if i == si else m for i, m in enumerate(batch["masks"])
+                                gt_masks_si[valid_gt] if i == sample_index else m for i, m in enumerate(batch["masks"])
                             )
                         except Exception:
                             # Fallback for list-like masks
                             keep_list = valid_gt.tolist()
                             filtered = [m for m, keep in zip(gt_masks_si, keep_list) if keep]
-                            batch["masks"] = tuple(filtered if i == si else m for i, m in enumerate(batch["masks"]))
+                            batch["masks"] = tuple(filtered if i == sample_index else m for i, m in enumerate(batch["masks"]))
             orignal_shape = prepared_batch["ori_shape"]
             num_labels = len(classes)
             stat["target_cls"] = classes
@@ -303,13 +305,13 @@ class Validator():
                 # Compute Dice for matched instances if masks are available
                 if prototype_masks is not None:
                     # Use possibly filtered masks aligned to classes/bboxes
-                    gt_masks_si = batch["masks"][si]
+                    gt_masks_si = batch["masks"][sample_index]
                     self._update_dice_for_image(
                         predn,
                         pred_with_scores_and_coefficients,
                         bboxes,
                         classes,
-                        prototype_masks[si],
+                        prototype_masks[sample_index],
                         gt_masks_si if gt_masks_si is not None else [],
                         orignal_shape,
                     )
@@ -319,9 +321,25 @@ class Validator():
                 self.stats[k].append(stat[k])
 
             # Save
-            if self.args.save_json:
-                raise NotImplementedError
-                self.pred_to_json(predn, batch["im_file"][si])
+            if self.save_predictions:
+                prediction_list = self._prediction_to_list(predn)
+                case_name = batch["case_names"][sample_index]
+                self.predictions_for_saving[case_name] = prediction_list
+
+    def _prediction_to_list(self, prediction: torch.Tensor) -> list[dict[str, Any]]:
+        prediction_list = []
+        for prediction_i in prediction:
+            box_i = prediction_i[:6].tolist()
+            box_i = [round(coordinate, 2) for coordinate in box_i]
+            confidence_i = round(prediction_i[6].item(), 6)
+            class_i = int(prediction_i[7].item())
+            #mask_coefficients = prediction_i[8:]
+            prediction_list.append({
+                "box": box_i,
+                "confidence": confidence_i,
+                "class": class_i
+            })
+        return prediction_list
 
     def _process_batch(
         self, detections: torch.Tensor, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor

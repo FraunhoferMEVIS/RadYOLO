@@ -209,6 +209,7 @@ def validate(model_path: Path, dataset_folder: Path, fold: int, group: str) -> i
             save_dir=model_path.parents[1] / "validation" / group,
             args=train_args,
             names=dataset_config.names,
+            save_predictions=True,
         )
 
         validator(trainer=None, ema=ema, amp=False)

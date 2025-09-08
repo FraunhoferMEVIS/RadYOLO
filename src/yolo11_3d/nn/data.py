@@ -36,6 +36,7 @@ class Sample(TypedDict):
     classes: torch.Tensor
     bboxes: torch.Tensor
     masks: list[torch.Tensor | None]
+    case_name: str
 
 class Batch(TypedDict):
     img: torch.Tensor
@@ -52,6 +53,7 @@ class Batch(TypedDict):
     bboxes: torch.Tensor
     batch_idx: torch.Tensor
     masks: tuple[list[torch.Tensor | None]]
+    case_names: tuple[str]
 
 class NormalizationConfig(TypedDict):
     type: Literal["none", "zscore", "ct", "255_to_01"]
@@ -173,7 +175,8 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             ratio_pad=(ratio, pad),
             classes=classes,
             bboxes=bboxes,
-            masks=masks
+            masks=masks,
+            case_name=case_name,
         )
 
     def load_image(self, case_name: str) -> torch.Tensor:
@@ -319,6 +322,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                     0,
                 ),
                 "masks": tuple(sample["masks"] for sample in batch),
+                "case_names": tuple(sample["case_name"] for sample in batch),
             }
 
 
