@@ -471,9 +471,9 @@ class Detect(nn.Module):
         if self.separate_objectness_head:
             self.cv_obj = nn.ModuleList(
                 nn.Sequential(
-                    nn.Sequential(DWConv(x, x, 3), Conv(x, x, 1)),
-                    nn.Sequential(DWConv(x, x, 3), Conv(x, x, 1)),
-                    nn.Conv3d(x, 1, 1),
+                    nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                    nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                    nn.Conv3d(c3, 1, 1),
                 )
                 for x in ch
             )
@@ -518,30 +518,30 @@ class Detect(nn.Module):
             return (dbox, cls_prob)
 
     def bias_init(self) -> None:
-        for idx, (a, b, s) in enumerate(zip(self.cv_boxes, self.cv_classes, self.stride, strict=True)):
+        for idx, (box_convolutions, class_convolutions, stride) in enumerate(zip(self.cv_boxes,
+                                                                                 self.cv_classes,
+                                                                                 self.stride,
+                                                                                 strict=True)):
+            if not isinstance(box_convolutions, nn.Sequential):
+                raise TypeError
+            box_last = box_convolutions[-1]
+            if not isinstance(box_last, nn.Conv3d):
+                raise TypeError
+            box_bias = box_last.bias
+            if box_bias is None:
+                raise ValueError
+            box_bias.data[:] = 1.0
             if not self.separate_objectness_head:
-                if not isinstance(a, nn.Sequential):
+                if not isinstance(class_convolutions, nn.Sequential):
                     raise TypeError
-                if not isinstance(b, nn.Sequential):
+                class_last = class_convolutions[-1]
+                if not isinstance(class_last, nn.Conv3d):
                     raise TypeError
-
-                a_last = a[-1]
-                if not isinstance(a_last, nn.Conv3d):
-                    raise TypeError
-
-                b_last = b[-1]
-                if not isinstance(b_last, nn.Conv3d):
-                    raise TypeError
-
-                a_bias = a_last.bias
-                if a_bias is None:
+                class_bias = class_last.bias
+                if class_bias is None:
                     raise ValueError
-                a_bias.data[:] = 1.0
-
-                b_bias = b_last.bias
-                if b_bias is None:
-                    raise ValueError
-                b_bias.data[: self.nc] = math.log(5 / self.nc / (256 / s) ** 3)
+                class_bias.data[: self.nc] = math.log(5 / self.nc / (256 / stride) ** 3)
+                pass
             else:
                 obj_seq = self.cv_obj[idx]
                 if not isinstance(obj_seq, nn.Sequential):
@@ -552,7 +552,7 @@ class Detect(nn.Module):
                 obj_bias = obj_last.bias
                 if obj_bias is None:
                     raise ValueError
-                obj_bias.data[:] = math.log(5 / (256 / s) ** 3)
+                obj_bias.data[:] = math.log(5 / (256 / stride) ** 3)
 
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
