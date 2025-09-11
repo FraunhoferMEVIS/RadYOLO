@@ -246,6 +246,7 @@ class v8DetectionLoss:  # noqa: N801
             # For classification loss, build targets and ignore unknown class (-1)
             target_labels = target_scores.argmax(-1)  # (B, A)
             target_objectness_scores = target_scores.amax(dim=-1, keepdim=True) # (B, A, 1)
+            target_objectness_scores_sum = max(target_objectness_scores.sum(), 1)
             # Determine unknown mask from gt_labels and assigned gt indices
             B, A, C = target_scores.shape
             # If there are no GT labels in this batch (e.g., empty images), avoid invalid gather on size-0 dim
@@ -268,7 +269,7 @@ class v8DetectionLoss:  # noqa: N801
             ce_loss = (ce_loss * fg_mask).sum() / denom
             loss[4] = ce_loss
             # BCE-with-logits on objectness score
-            loss[1] = self.bce(pred_objectness_logit, target_objectness_scores).sum() / target_objectness_scores
+            loss[1] = self.bce(pred_objectness_logit, target_objectness_scores).sum() / target_objectness_scores_sum
         else:
             # BCE-with-logits on multi-label scores as in YOLO
             loss[1] = self.bce(pred_class_logits, target_scores.to(dtype)).sum() / target_scores_sum
