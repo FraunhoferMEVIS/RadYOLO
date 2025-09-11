@@ -268,7 +268,7 @@ class v8DetectionLoss:  # noqa: N801
             ce_loss = (ce_loss * fg_mask).sum() / denom
             loss[4] = ce_loss
             # BCE-with-logits on objectness score
-            loss[1] = self.bce(pred_objectness_logit, target_objectness_scores).sum() / target_scores_sum
+            loss[1] = self.bce(pred_objectness_logit, target_objectness_scores).sum() / target_objectness_scores
         else:
             # BCE-with-logits on multi-label scores as in YOLO
             loss[1] = self.bce(pred_class_logits, target_scores.to(dtype)).sum() / target_scores_sum

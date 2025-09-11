@@ -541,7 +541,6 @@ class Detect(nn.Module):
                 if class_bias is None:
                     raise ValueError
                 class_bias.data[: self.nc] = math.log(5 / self.nc / (256 / stride) ** 3)
-                pass
             else:
                 obj_seq = self.cv_obj[idx]
                 if not isinstance(obj_seq, nn.Sequential):
