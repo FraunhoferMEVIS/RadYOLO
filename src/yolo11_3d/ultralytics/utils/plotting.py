@@ -428,7 +428,7 @@ def plot_images(
     max_size: int = 1920,
     max_subplots: int = 16,
     save: bool = True,
-    conf_thres: float = 0.25,
+    conf_thres: float = 0.1,
 ) -> np.ndarray | None:
     """Plot image grid with labels, bounding boxes, masks, and keypoints.
 

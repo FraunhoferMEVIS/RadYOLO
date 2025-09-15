@@ -122,8 +122,8 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torc
 
 def non_max_suppression(
     prediction: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
-    conf_thres: float = 0.25,
-    iou_thres: float = 0.45,
+    conf_thres: float = 0.1,
+    iou_thres: float = 0.2,
     classes: list[int] | torch.Tensor | None = None,
     agnostic: bool = False,
     multi_label: bool = False,
