@@ -6,7 +6,7 @@ import logging
 import math
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -158,8 +158,8 @@ class ConfusionMatrix:
     def __init__(
         self,
         nc: int,
-        conf: float = 0.25,
-        iou_thres: float = 0.45,
+        conf: float = 0.1,
+        iou_thres: float = 0.2,
     ):
         """Initialize attributes for the YOLO model."""
         self.matrix_: npt.NDArray[np.float32] = (
@@ -167,8 +167,8 @@ class ConfusionMatrix:
         )
         self.nc = nc  # number of classes
         self.conf = (
-            0.25 if conf in {None, 0.001} else conf
-        )  # apply 0.25 if default val conf is passed
+            0.1 if conf in {None, 0.001} else conf
+        )  # apply 0.1 if default val conf is passed
         self.iou_thres = iou_thres
 
     def process_batch(
