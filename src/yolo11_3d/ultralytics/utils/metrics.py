@@ -306,7 +306,6 @@ def smooth(y, f: float = 0.05):
     return np.convolve(yp, np.ones(nf) / nf, mode="valid")  # y-smoothed
 
 
-# @plt_settings()
 def plot_pr_curve(
     px: npt.NDArray,
     py: npt.NDArray,
@@ -343,7 +342,6 @@ def plot_pr_curve(
     plt.close(fig)
 
 
-# @plt_settings()
 def plot_mc_curve(
     px: npt.NDArray,
     py: npt.NDArray,
@@ -447,11 +445,15 @@ def ap_per_class(
         prec_values (np.ndarray): Precision values at mAP@0.1 for each class. Shape: (nc, 1000).
     """
     # Sort by objectness
-    i: npt.NDArray[np.intp] = np.argsort(-conf)
-    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+    indices_sorted: npt.NDArray[np.intp] = np.argsort(-conf)
+    tp, conf, pred_cls = tp[indices_sorted], conf[indices_sorted], pred_cls[indices_sorted]
 
     # Find unique classes
-    unique_classes, nt = np.unique(target_cls, return_counts=True)
+    unique_classes, counts = np.unique(target_cls, return_counts=True)
+    # If objects without class (class = -1) are present, don't compute mAP for class -1 as it is never predicted
+    if unique_classes[0] == -1:
+        unique_classes = unique_classes[1:]
+        counts = counts[1:]
     nc: int = unique_classes.shape[0]  # number of classes, number of detections
 
     # Create Precision-Recall curve and compute AP for each class
@@ -459,30 +461,30 @@ def ap_per_class(
 
     # Average precision, precision and recall curves
     ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
-    for ci, c in enumerate(unique_classes):
-        i = pred_cls == c
-        n_l = nt[ci]  # number of labels
-        n_p = i.sum()  # number of predictions
-        if n_p == 0 or n_l == 0:
+    for class_index, c in enumerate(unique_classes):
+        indices = pred_cls == c
+        number_of_labels = counts[class_index]
+        number_of_predictions = indices.sum()
+        if number_of_predictions == 0 or number_of_labels == 0:
             continue
 
         # Accumulate FPs and TPs
-        fpc = (1 - tp[i]).cumsum(0)
-        tpc = tp[i].cumsum(0)
+        fpc = (1 - tp[indices]).cumsum(0)
+        tpc = tp[indices].cumsum(0)
 
         # Recall
-        recall = tpc / (n_l + eps)  # recall curve
-        r_curve[ci] = np.interp(
-            -x, -conf[i], recall[:, 0], left=0
+        recall = tpc / (number_of_labels + eps)  # recall curve
+        r_curve[class_index] = np.interp(
+            -x, -conf[indices], recall[:, 0], left=0
         )  # negative x, xp because xp decreases
 
         # Precision
         precision = tpc / (tpc + fpc)  # precision curve
-        p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+        p_curve[class_index] = np.interp(-x, -conf[indices], precision[:, 0], left=1)  # p at pr_score
 
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
-            ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
+            ap[class_index, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
             if j == 0:
                 prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.1
 
@@ -530,7 +532,7 @@ def ap_per_class(
         r_curve[:, max_i],
         f1_curve[:, max_i],
     )  # max-F1 precision, recall, F1 values
-    tp = (r * nt).round()  # true positives
+    tp = (r * counts).round()  # true positives
     fp = (tp / (p + eps) - tp).round()  # false positives
     return (
         tp,

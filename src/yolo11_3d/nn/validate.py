@@ -71,7 +71,7 @@ class Validator():
             names=self.names,
             plot=self.args.plots,
         )
-        self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 10)  # IoU vector for mAP@0.1:0.95
+        self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
         self.niou = self.iouv.numel()
         self.lb = []  # for autolabelling
         self.dice_sum = 0.0
@@ -260,25 +260,6 @@ class Validator():
             }
             prepared_batch = self._prepare_batch(sample_index, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
-            # Filter out ignore labels (e.g., class == -1) and keep GT arrays aligned
-            if classes.numel():
-                valid_gt = classes >= 0
-                if not valid_gt.all():
-                    classes = classes[valid_gt]
-                    bboxes = bboxes[valid_gt]
-                    # Also filter masks if present for this image
-                    gt_masks_si = batch["masks"][sample_index]
-                    if gt_masks_si is not None:
-                        try:
-                            # Tensor of shape [num_gt, D, H, W]
-                            batch["masks"] = tuple(
-                                gt_masks_si[valid_gt] if i == sample_index else m for i, m in enumerate(batch["masks"])
-                            )
-                        except Exception:
-                            # Fallback for list-like masks
-                            keep_list = valid_gt.tolist()
-                            filtered = [m for m, keep in zip(gt_masks_si, keep_list) if keep]
-                            batch["masks"] = tuple(filtered if i == sample_index else m for i, m in enumerate(batch["masks"]))
             orignal_shape = prepared_batch["ori_shape"]
             num_labels = len(classes)
             stat["target_cls"] = classes
@@ -452,12 +433,12 @@ class Validator():
             iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
 
         Returns:
-            (torch.Tensor): Correct tensor of shape(N,10) for 10 IoU thresholds.
+            (torch.Tensor): Correct tensor of shape(N, 18) for 18 IoU thresholds.
         """
-        # Dx10 matrix, where D - detections, 10 - IoU thresholds
+        # Dx18 matrix, where D - detections, 18 - IoU thresholds
         correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
         # LxD matrix where L - labels (rows), D - detections (columns)
-        correct_class = true_classes[:, None] == pred_classes
+        correct_class = torch.logical_or(true_classes[:, None] == pred_classes, true_classes[:, None] == -1)
         iou = iou * correct_class  # zero out the wrong classes
         iou_np = iou.cpu().numpy()
         for i, threshold in enumerate(self.iouv.cpu().tolist()):
@@ -467,7 +448,6 @@ class Validator():
                 if matches.shape[0] > 1:
                     matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
                     matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                    # matches = matches[matches[:, 2].argsort()[::-1]]
                     matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
                 correct[matches[:, 1].astype(int), i] = True
         return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
