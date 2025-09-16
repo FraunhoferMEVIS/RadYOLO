@@ -260,7 +260,6 @@ class Validator():
             }
             prepared_batch = self._prepare_batch(sample_index, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
-            orignal_shape = prepared_batch["ori_shape"]
             num_labels = len(classes)
             stat["target_cls"] = classes
             # Count presence per class per-image; ignore negatives already filtered
@@ -294,7 +293,6 @@ class Validator():
                         classes,
                         prototype_masks[sample_index],
                         gt_masks_si if gt_masks_si is not None else [],
-                        orignal_shape,
                     )
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, bboxes, classes)
@@ -335,7 +333,7 @@ class Validator():
             gt_cls (torch.Tensor): Tensor of shape (M,) representing target class indices.
 
         Returns:
-            (torch.Tensor): Correct prediction matrix of shape (N, 10) for 10 IoU levels.
+            (torch.Tensor): Correct prediction matrix of shape (N, 18) for 18 IoU levels.
 
         Note:
             The function does not return any value directly usable for metrics calculation. Instead, it provides an
@@ -380,8 +378,7 @@ class Validator():
         gt_bboxes: torch.Tensor,
         gt_cls: torch.Tensor,
         prototypes: torch.Tensor,
-        gt_masks_list: list[torch.Tensor | None],
-        orignal_shape
+        gt_masks_list: list[torch.Tensor | None]
     ) -> None:
         """Compute and accumulate Dice for matched instances in a single image."""
         # Require mask coefficients appended after class column
@@ -428,29 +425,31 @@ class Validator():
         """Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
 
         Args:
-            pred_classes (torch.Tensor): Predicted class indices of shape(N,).
-            true_classes (torch.Tensor): Target class indices of shape(M,).
-            iou (torch.Tensor): An NxM tensor containing the pairwise IoU values for predictions and ground of truth
+            pred_classes (torch.Tensor): Predicted class indices of shape(P,).
+            true_classes (torch.Tensor): Target class indices of shape(T,).
+            iou (torch.Tensor): An PxT tensor containing the pairwise IoU values for predictions and ground of truth
 
         Returns:
-            (torch.Tensor): Correct tensor of shape(N, 18) for 18 IoU thresholds.
+            (torch.Tensor): Correct tensor of shape(P, 18) for 18 IoU thresholds.
         """
-        # Dx18 matrix, where D - detections, 18 - IoU thresholds
-        correct = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
-        # LxD matrix where L - labels (rows), D - detections (columns)
+        # shape(P, 18), P: predictions, 18: IoU thresholds
+        true_positives_np = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        # shape(T, P) T: true class, P: predicted
         correct_class = torch.logical_or(true_classes[:, None] == pred_classes, true_classes[:, None] == -1)
-        iou = iou * correct_class  # zero out the wrong classes
-        iou_np = iou.cpu().numpy()
-        for i, threshold in enumerate(self.iouv.cpu().tolist()):
-            matches = np.nonzero(iou_np >= threshold)  # IoU > threshold and classes match
-            matches = np.array(matches).T
-            if matches.shape[0]:
+        # TODO: Include same handling for false positives and hand false positives array to mAP computation
+        iou = iou * correct_class  # shape(T, P) zero out the wrong classes
+        iou_np = iou.cpu().numpy() # shape(T, P)
+        for i, iou_threshold in enumerate(self.iouv.cpu().tolist()):
+            matches = np.nonzero(iou_np >= iou_threshold)  # IoU >= threshold and classes match
+            matches = np.array(matches).T # shape(N, 2) N: number of matches
+            if matches.shape[0] > 0:
                 if matches.shape[0] > 1:
-                    matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]]
-                    matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                    matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-                correct[matches[:, 1].astype(int), i] = True
-        return torch.tensor(correct, dtype=torch.bool, device=pred_classes.device)
+                    sorted_matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]] # sort matches by IoU
+                    unique_matches = sorted_matches[np.unique(sorted_matches[:, 1], return_index=True)[1]] # select unique match with highest IoU for each true class
+                    unique_matches = unique_matches[np.unique(unique_matches[:, 0], return_index=True)[1]] # select unique match with highest IoU for each predicted class
+                true_positives_np[unique_matches[:, 1].astype(int), i] = True
+        true_positives = torch.tensor(true_positives_np, dtype=torch.bool, device=pred_classes.device)
+        return true_positives
 
     def get_stats(self) -> dict[str, float]:
         """Returns metrics statistics and results dictionary."""
