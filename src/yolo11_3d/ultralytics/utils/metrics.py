@@ -161,14 +161,19 @@ class ConfusionMatrix:
         conf: float = 0.1,
         iou_thres: float = 0.2,
     ):
-        """Initialize attributes for the YOLO model."""
-        self.matrix_: npt.NDArray[np.float32] = (
-            np.zeros((nc + 1, nc + 1), dtype=np.float32)
-        )
-        self.nc = nc  # number of classes
-        self.conf = (
-            0.1 if conf in {None, 0.001} else conf
-        )  # apply 0.1 if default val conf is passed
+        """Initialize a confusion matrix that always includes an 'unclassified' slot.
+
+        Layout (indices):
+            0..nc-1 : base classes
+            nc      : unclassified (for GT class == -1)
+            nc+1    : background (FP/FN)
+        """
+        self.nc = nc  # base class count
+        self.unclassified_index = nc
+        self.background_index = nc + 1
+        size = nc + 2
+        self.matrix_: npt.NDArray[np.float32] = np.zeros((size, size), dtype=np.float32)
+        self.conf = 0.1 if conf in {None, 0.001} else conf
         self.iou_thres = iou_thres
 
     def process_batch(
@@ -182,26 +187,36 @@ class ConfusionMatrix:
             gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
             gt_cls (Array[M]): The class labels.
         """
-        # Filter out ignored/invalid classes (e.g., -1)
+        # Keep -1 (unclassified) GT boxes if requested, else filter them out as before
         if gt_cls.numel():
-            valid = gt_cls >= 0
+            # Keep -1 (unclassified) labels; drop only values < -1
+            valid = gt_cls >= -1
             gt_cls = gt_cls[valid]
             gt_bboxes = gt_bboxes[valid]
-        if gt_cls.shape[0] == 0:  # Check if labels is empty after filtering
+
+        if gt_cls.shape[0] == 0:  # no ground-truth boxes after filtering
             if detections is not None:
                 detections = detections[detections[:, 6] > self.conf]
                 detection_classes = detections[:, 7].int()
                 for dc in detection_classes:
-                    self.matrix_[dc, self.nc] += 1  # false positives
+                    self.matrix_[dc, self.background_index] += 1  # false positives (background)
             return
-        if detections is None:
+
+        if detections is None:  # no detections: all GT become FN (background)
             gt_classes = gt_cls.int()
+            gt_classes = gt_classes.clone()
+            gt_classes[gt_classes == -1] = self.unclassified_index
             for gc in gt_classes:
-                self.matrix_[self.nc, gc] += 1  # background FN
+                self.matrix_[self.background_index, gc] += 1  # background FN
             return
 
         detections = detections[detections[:, 6] > self.conf]
         gt_classes = gt_cls.int()
+        # Map -1 to dedicated unclassified index
+        mask_unclassified = gt_classes == -1
+        if mask_unclassified.any():
+            gt_classes = gt_classes.clone()
+            gt_classes[mask_unclassified] = self.unclassified_index
         detection_classes = detections[:, 7].int()
         iou = box_iou(gt_bboxes, detections[:, :6])
 
@@ -221,27 +236,18 @@ class ConfusionMatrix:
         for i, gc in enumerate(gt_classes):
             j = m0 == i
             if n and sum(j) == 1:
-                self.matrix_[detection_classes[m1[j]], gc] += 1  # correct
+                self.matrix_[detection_classes[m1[j]], gc] += 1  # correct match
             else:
-                self.matrix_[self.nc, gc] += 1  # true background
+                self.matrix_[self.background_index, gc] += 1  # false negative (background)
 
         if n:
             for i, dc in enumerate(detection_classes):
                 if not any(m1 == i):
-                    self.matrix_[dc, self.nc] += 1  # predicted background
+                    self.matrix_[dc, self.background_index] += 1  # false positive (background)
 
     def matrix(self) -> npt.NDArray[np.float32]:
         """Returns the confusion matrix."""
         return self.matrix_
-
-    def tp_fp(self) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
-        """Returns true positives and false positives."""
-        tp = self.matrix_.diagonal()  # true positives
-        fp = self.matrix_.sum(1) - tp  # false positives
-        # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
-        return (
-            (tp[:-1], fp[:-1])
-        )  # remove background class
 
     def plot(
         self,
@@ -264,10 +270,17 @@ class ConfusionMatrix:
         array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
 
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
-        nc, nn = self.nc, len(names)  # number of classes, names
-        seaborn.set_theme(font_scale=1.0 if nc < 50 else 0.8)  # for label size
-        labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
-        ticklabels = ([*list(names), "background"]) if labels else "auto"
+        # Number of *display* classes excludes background but includes unclassified
+        display_nc = self.nc + 1  # include unclassified in display (exclude background)
+        seaborn.set_theme(font_scale=1.0 if display_nc < 50 else 0.8)
+        # Prepare tick labels
+        names_list = list(names)
+        # Append unclassified name if not supplied already (len check ensures backward compat)
+        if len(names_list) == self.nc:
+            names_list.append("unclassified")
+        nn = len(names_list)
+        labels = (0 < nn < 99) and (nn == display_nc)
+        ticklabels = ([*names_list, "background"]) if labels else "auto"
         with warnings.catch_warnings():
             warnings.simplefilter(
                 "ignore"
@@ -275,7 +288,7 @@ class ConfusionMatrix:
             seaborn.heatmap(
                 array,
                 ax=ax,
-                annot=nc < 30,
+                annot=display_nc < 30,
                 annot_kws={"size": 8},
                 cmap="Blues",
                 fmt=".2f" if normalize else ".0f",
@@ -293,8 +306,8 @@ class ConfusionMatrix:
         plt.close(fig)
 
     def print(self):
-        """Print the confusion matrix to the console."""
-        for i in range(self.nc + 1):
+        """Print the confusion matrix to the console (including unclassified and background)."""
+        for i in range(self.matrix_.shape[0]):
             LOGGER.info(" ".join(map(str, self.matrix_[i])))
 
 
@@ -408,6 +421,7 @@ def compute_ap(
 
 def ap_per_class(
     tp: npt.NDArray[np.floating],
+    fp: npt.NDArray[np.floating],
     conf: npt.NDArray[np.floating],
     pred_cls: npt.NDArray[np.integer],
     target_cls: npt.NDArray[np.integer],
@@ -421,9 +435,10 @@ def ap_per_class(
 
     Args:
         tp (np.ndarray): Binary array indicating whether the detection is correct (True) or not (False).
+        fp (np.ndarray): Binary array indicating whether the detection is a false positive (True) or not (False).
         conf (np.ndarray): Array of confidence scores of the detections.
         pred_cls (np.ndarray): Array of predicted classes of the detections.
-        target_cls (np.ndarray): Array of true classes of the detections.
+        target_cls (np.ndarray): Array of true classes of the references.
         plot (bool, optional): Whether to plot PR curves or not. Defaults to False.
         save_dir (Path, optional): Directory to save the PR curves. Defaults to an empty path.
         names (dict, optional): Dict of class names to plot PR curves. Defaults to an empty tuple.
@@ -446,7 +461,7 @@ def ap_per_class(
     """
     # Sort by objectness
     indices_sorted: npt.NDArray[np.intp] = np.argsort(-conf)
-    tp, conf, pred_cls = tp[indices_sorted], conf[indices_sorted], pred_cls[indices_sorted]
+    tp, fp, conf, pred_cls = tp[indices_sorted], fp[indices_sorted], conf[indices_sorted], pred_cls[indices_sorted]
 
     # Find unique classes
     unique_classes, counts = np.unique(target_cls, return_counts=True)
@@ -469,7 +484,7 @@ def ap_per_class(
             continue
 
         # Accumulate FPs and TPs
-        fpc = (1 - tp[indices]).cumsum(0)
+        fpc = fp[indices].cumsum(0)
         tpc = tp[indices].cumsum(0)
 
         # Recall
@@ -479,7 +494,7 @@ def ap_per_class(
         )  # negative x, xp because xp decreases
 
         # Precision
-        precision = tpc / (tpc + fpc)  # precision curve
+        precision = tpc / (tpc + fpc + eps)  # precision curve
         p_curve[class_index] = np.interp(-x, -conf[indices], precision[:, 0], left=1)  # p at pr_score
 
         # AP from recall-precision curve
@@ -745,6 +760,7 @@ class DetMetrics:
     def process(
         self,
         tp: npt.NDArray[np.floating],
+        fp: npt.NDArray[np.floating],
         conf: npt.NDArray[np.floating],
         pred_cls: npt.NDArray[np.integer],
         target_cls: npt.NDArray[np.integer],
@@ -752,6 +768,7 @@ class DetMetrics:
         """Process predicted results for object detection and update metrics."""
         results = ap_per_class(
             tp,
+            fp,
             conf,
             pred_cls,
             target_cls,

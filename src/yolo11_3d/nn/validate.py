@@ -49,6 +49,7 @@ class Validator():
         self.seen: int = 0
         self.stats: dict[str, list[torch.Tensor]] = {
             "tp": [],
+            "fp": [],
             "conf": [],
             "pred_cls": [],
             "target_cls": [],
@@ -146,7 +147,7 @@ class Validator():
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
         self.seen = 0
         self.predictions_for_saving = {}
-        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+        self.stats = {"tp": [], "fp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
         self.dice_sum = 0.0
         self.dice_count = 0
 
@@ -257,6 +258,7 @@ class Validator():
                 "conf": torch.zeros(0, device=self.device),
                 "pred_cls": torch.zeros(0, device=self.device),
                 "tp": torch.zeros(num_predictions, self.niou, dtype=torch.bool, device=self.device),
+                "fp": torch.zeros(num_predictions, self.niou, dtype=torch.bool, device=self.device),
             }
             prepared_batch = self._prepare_batch(sample_index, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
@@ -281,7 +283,7 @@ class Validator():
 
             # Evaluate
             if num_labels:
-                stat["tp"] = self._process_batch(predn, bboxes, classes)
+                stat["tp"], stat["fp"] = self._process_batch(predn, bboxes, classes)
                 # Compute Dice for matched instances if masks are available
                 if prototype_masks is not None:
                     # Use possibly filtered masks aligned to classes/bboxes
@@ -333,14 +335,16 @@ class Validator():
             gt_cls (torch.Tensor): Tensor of shape (M,) representing target class indices.
 
         Returns:
-            (torch.Tensor): Correct prediction matrix of shape (N, 18) for 18 IoU levels.
+            (torch.Tensor): True positive prediction matrix of shape (N, 18) for 18 IoU levels.
+            (torch.Tensor): False positive prediction matrix of shape (N, 18) for 18 IoU levels.
 
         Note:
             The function does not return any value directly usable for metrics calculation. Instead, it provides an
             intermediate representation used for evaluating predictions against ground truth.
         """
         iou = box_iou(gt_bboxes, detections[:, :6])
-        return self.match_predictions(detections[:, 7], gt_cls, iou)
+        true_positives, false_positives = self.match_predictions(detections[:, 7], gt_cls, iou)
+        return true_positives, false_positives
 
     def _get_matches(
         self,
@@ -430,26 +434,38 @@ class Validator():
             iou (torch.Tensor): An PxT tensor containing the pairwise IoU values for predictions and ground of truth
 
         Returns:
-            (torch.Tensor): Correct tensor of shape(P, 18) for 18 IoU thresholds.
+            (torch.Tensor): True positive tensor of shape(P, 18) for 18 IoU thresholds.
+            (torch.Tensor): False positive tensor of shape(P, 18) for 18 IoU thresholds.
         """
         # shape(P, 18), P: predictions, 18: IoU thresholds
         true_positives_np = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        true_positives_missing_np = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
         # shape(T, P) T: true class, P: predicted
-        correct_class = torch.logical_or(true_classes[:, None] == pred_classes, true_classes[:, None] == -1)
-        # TODO: Include same handling for false positives and hand false positives array to mAP computation
-        iou = iou * correct_class  # shape(T, P) zero out the wrong classes
-        iou_np = iou.cpu().numpy() # shape(T, P)
+        correct_class = true_classes[:, None] == pred_classes
+        missing_class = torch.logical_and(true_classes[:, None] != pred_classes, true_classes[:, None] == -1) # calculate false positives for class -1 (missing class label)
+        iou_tp = iou * correct_class  # shape(T, P) zero out the wrong classes
+        iou_missing_class = iou * missing_class  # shape(T, P) zero out the non-missing classes
+        iou_tp_np = iou_tp.cpu().numpy() # shape(T, P)
+        iou_missing_np = iou_missing_class.cpu().numpy() # shape(T, P)
         for i, iou_threshold in enumerate(self.iouv.cpu().tolist()):
-            matches = np.nonzero(iou_np >= iou_threshold)  # IoU >= threshold and classes match
-            matches = np.array(matches).T # shape(N, 2) N: number of matches
-            if matches.shape[0] > 0:
-                if matches.shape[0] > 1:
-                    sorted_matches = matches[iou_np[matches[:, 0], matches[:, 1]].argsort()[::-1]] # sort matches by IoU
-                    unique_matches = sorted_matches[np.unique(sorted_matches[:, 1], return_index=True)[1]] # select unique match with highest IoU for each true class
-                    unique_matches = unique_matches[np.unique(unique_matches[:, 0], return_index=True)[1]] # select unique match with highest IoU for each predicted class
-                true_positives_np[unique_matches[:, 1].astype(int), i] = True
+            matches_tp = np.nonzero(iou_tp_np >= iou_threshold)  # IoU >= threshold and classes match
+            matches_missing = np.nonzero(iou_missing_np >= iou_threshold)  # IoU >= threshold, classes do not match and true class -1
+            matches_tp = np.array(matches_tp).T # shape(N, 2) N: number of true positive matches
+            matches_missing = np.array(matches_missing).T # shape(M, 2) M: number of missing class matches
+            if matches_tp.shape[0] > 0:
+                sorted_matches_tp = matches_tp[iou_tp_np[matches_tp[:, 0], matches_tp[:, 1]].argsort()[::-1]] # sort matches by IoU
+                unique_matches_tp = sorted_matches_tp[np.unique(sorted_matches_tp[:, 1], return_index=True)[1]] # select unique match with highest IoU for each true class
+                unique_matches_tp = unique_matches_tp[np.unique(unique_matches_tp[:, 0], return_index=True)[1]] # select unique match with highest IoU for each predicted class
+                true_positives_np[unique_matches_tp[:, 1].astype(int), i] = True
+            if matches_missing.shape[0] > 0:
+                sorted_matches_missing = matches_missing[iou_missing_np[matches_missing[:, 0], matches_missing[:, 1]].argsort()[::-1]] # sort matches by IoU
+                unique_matches_missing = sorted_matches_missing[np.unique(sorted_matches_missing[:, 1], return_index=True)[1]] # select unique match with highest IoU for each true class
+                unique_matches_missing = unique_matches_missing[np.unique(unique_matches_missing[:, 0], return_index=True)[1]] # select unique match with highest IoU for each predicted class
+                true_positives_missing_np[unique_matches_missing[:, 1].astype(int), i] = True
         true_positives = torch.tensor(true_positives_np, dtype=torch.bool, device=pred_classes.device)
-        return true_positives
+        true_positives_missing = torch.tensor(true_positives_missing_np, dtype=torch.bool, device=pred_classes.device)
+        false_positives = torch.logical_and(torch.logical_not(true_positives), torch.logical_not(true_positives_missing))
+        return true_positives, false_positives
 
     def get_stats(self) -> dict[str, float]:
         """Returns metrics statistics and results dictionary."""
