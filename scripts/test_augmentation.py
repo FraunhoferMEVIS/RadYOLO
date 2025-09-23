@@ -20,6 +20,7 @@ from yolo11_3d.nn.augmentations import (  # type: ignore  # noqa: E402
     random_mirroring,
     random_zoom,
     tensor_cutout,
+    random_rotation,
 )
 from yolo11_3d.ultralytics.utils.plotting import plot_images  # type: ignore  # noqa: E402
 
@@ -204,6 +205,20 @@ def build_grid_for_augmentation(
         elif aug_name == "enlarge_bounding_boxes":
             stride = random.choice([4, 8, 12, 16, 24, 32])
             img_v, lab_v, mask_v = apply_enlarge(base_img.clone(), base_labels_abs_xyzxyz.clone(), base_masks.clone(), imgsz, stride)
+        elif aug_name == "random_rotation":
+            # choose angle ranges variant (wider sometimes)
+            if random.random() < 0.5:
+                angle_ranges = ((-15, 15), (-10, 10), (-20, 20))
+            else:
+                angle_ranges = ((-30, 30), (-5, 5), (-10, 10))
+            img_v, lab_v, mask_v = random_rotation(
+                base_img.clone(),
+                base_labels_abs_xyzxyz.clone(),
+                base_masks.clone(),
+                angle_ranges=angle_ranges,
+                p=1.0,
+                keep_box_volume=True,
+            )
         else:
             raise ValueError(f"Unknown augmentation name '{aug_name}'")
         images.append(img_v)
@@ -274,6 +289,7 @@ def main() -> None:
         "random_mirroring",
         "intensity",
         "enlarge_bounding_boxes",
+        "random_rotation",
     ]
 
     for aug in augmentations:

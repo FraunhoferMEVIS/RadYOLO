@@ -5,6 +5,7 @@ from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
 __author__ = "kgeissler"
 
 import random
+import math
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -268,6 +269,188 @@ def random_zoom(
         augmented_labels[:, 6].clamp_(0, d)  # z2
 
     return image, augmented_labels, masks
+
+
+def random_rotation(
+    image: torch.Tensor,
+    labels: torch.Tensor,
+    masks: torch.Tensor | None,
+    angle_ranges: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = ((-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0)),
+    p: float = 0.5,
+    mode: str = "bilinear",
+    keep_box_volume: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Randomly rotate the 3D volume about its center with independent angles per axis.
+
+    Args:
+        image: Tensor (C, D, H, W)
+        labels: Tensor (N, 7) with columns [cls, x1, y1, z1, x2, y2, z2] in absolute voxel coords.
+        masks: Optional tensor (M, D, H, W) of per-instance masks aligned with image.
+        angle_ranges: ((min_x,max_x),(min_y,max_y),(min_z,max_z)) in degrees for rotations about x,y,z axes.
+        p: Probability of applying the rotation.
+        mode: Interpolation mode for image ("bilinear" or "nearest"). Masks always rotated with nearest.
+
+    Returns:
+        Rotated (image, labels, masks).
+    """
+    if random.random() >= p or (labels.numel() == 0 and masks is None):
+        return image, labels, masks
+
+    device = image.device
+    dtype = image.dtype
+    C, D, H, W = image.shape
+
+    # Sample angles in radians
+    ax = random.uniform(*angle_ranges[0]) * math.pi / 180.0
+    ay = random.uniform(*angle_ranges[1]) * math.pi / 180.0
+    az = random.uniform(*angle_ranges[2]) * math.pi / 180.0
+
+    cx, cy, cz = (W - 1) / 2.0, (H - 1) / 2.0, (D - 1) / 2.0
+
+    # Rotation matrices (x,y,z axes) operating on [x,y,z]
+    Rx = torch.tensor([
+        [1, 0, 0],
+        [0, math.cos(ax), -math.sin(ax)],
+        [0, math.sin(ax), math.cos(ax)],
+    ], device=device, dtype=dtype)
+    Ry = torch.tensor([
+        [math.cos(ay), 0, math.sin(ay)],
+        [0, 1, 0],
+        [-math.sin(ay), 0, math.cos(ay)],
+    ], device=device, dtype=dtype)
+    Rz = torch.tensor([
+        [math.cos(az), -math.sin(az), 0],
+        [math.sin(az), math.cos(az), 0],
+        [0, 0, 1],
+    ], device=device, dtype=dtype)
+    R = Rz @ Ry @ Rx  # combined forward rotation
+
+    # For grid_sample we need inverse transform (maps output -> input)
+    R_inv = R.T  # rotation matrices are orthonormal so inverse = transpose
+
+    # Rotate image using affine_grid/grid_sample (normalized coordinates in [-1,1])
+    affine = torch.zeros(1, 3, 4, device=device, dtype=dtype)
+    affine[0, :, :3] = R_inv
+    grid = F.affine_grid(affine, size=(1, C, D, H, W), align_corners=True)
+    # grid coords order is (x,y,z); our rotation matrix acts about center (0,0,0) in normalized space already
+    image_rot = F.grid_sample(
+        image.unsqueeze(0),
+        grid,
+        mode=mode,
+        padding_mode="zeros",
+        align_corners=True,
+    ).squeeze(0)
+
+    masks_rot: torch.Tensor | None
+    if masks is not None:
+        mC = masks.shape[0]
+        masks_rot = F.grid_sample(
+            masks.unsqueeze(0).float(),
+            grid,
+            mode="nearest",
+            padding_mode="zeros",
+            align_corners=True,
+        ).squeeze(0)
+        # ensure binary nature retained
+        masks_rot = (masks_rot > 0.5).to(masks.dtype)
+    else:
+        masks_rot = None
+
+    if labels.shape[0] == 0:
+        return image_rot, labels, masks_rot
+
+    # Rotate bounding boxes: compute 8 corners, rotate, get new AABB
+    x1, y1, z1, x2, y2, z2 = (
+        labels[:, 1],
+        labels[:, 2],
+        labels[:, 3],
+        labels[:, 4],
+        labels[:, 5],
+        labels[:, 6],
+    )
+    # Corner combination indices
+    corner_bits = torch.tensor(
+        [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
+        device=device,
+        dtype=dtype,
+    )  # (8,3)
+    # Widths
+    w = (x2 - x1).unsqueeze(1)
+    h = (y2 - y1).unsqueeze(1)
+    d_ = (z2 - z1).unsqueeze(1)
+    # Build corner coords (N,8,3) in (x,y,z)
+    base = torch.stack([x1, y1, z1], 1).unsqueeze(1)  # (N,1,3)
+    extents = torch.stack([w, h, d_], 2)  # (N,1,3)
+    corners = base + corner_bits.unsqueeze(0) * extents  # broadcast
+
+    # Center, rotate, uncenter
+    corners_centered = corners.clone()
+    corners_centered[..., 0] -= cx
+    corners_centered[..., 1] -= cy
+    corners_centered[..., 2] -= cz
+    # Apply forward rotation (row-vector formulation p' = p * R^T)
+    rot_corners = torch.matmul(corners_centered, R.T)
+    rot_corners[..., 0] += cx
+    rot_corners[..., 1] += cy
+    rot_corners[..., 2] += cz
+
+    new_x1 = rot_corners[..., 0].min(dim=1).values.clamp_(0, W - 1)
+    new_y1 = rot_corners[..., 1].min(dim=1).values.clamp_(0, H - 1)
+    new_z1 = rot_corners[..., 2].min(dim=1).values.clamp_(0, D - 1)
+    new_x2 = rot_corners[..., 0].max(dim=1).values.clamp_(0, W - 1)
+    new_y2 = rot_corners[..., 1].max(dim=1).values.clamp_(0, H - 1)
+    new_z2 = rot_corners[..., 2].max(dim=1).values.clamp_(0, D - 1)
+
+    rotated_labels = labels.clone()
+    rotated_labels[:, 1] = new_x1
+    rotated_labels[:, 2] = new_y1
+    rotated_labels[:, 3] = new_z1
+    rotated_labels[:, 4] = new_x2
+    rotated_labels[:, 5] = new_y2
+    rotated_labels[:, 6] = new_z2
+
+    if keep_box_volume and rotated_labels.shape[0]:
+        # Original volumes
+        orig_vol = (labels[:, 4] - labels[:, 1]) * (labels[:, 5] - labels[:, 2]) * (labels[:, 6] - labels[:, 3])
+        new_vol = (rotated_labels[:, 4] - rotated_labels[:, 1]) * (rotated_labels[:, 5] - rotated_labels[:, 2]) * (rotated_labels[:, 6] - rotated_labels[:, 3])
+        eps = 1e-6
+        scale = ((orig_vol + eps) / (new_vol + eps)).clamp(min=0) ** (1.0 / 3.0)  # (N,)
+        # centers and half-sizes
+        cx_b = (rotated_labels[:, 1] + rotated_labels[:, 4]) / 2.0
+        cy_b = (rotated_labels[:, 2] + rotated_labels[:, 5]) / 2.0
+        cz_b = (rotated_labels[:, 3] + rotated_labels[:, 6]) / 2.0
+        hx = (rotated_labels[:, 4] - rotated_labels[:, 1]) / 2.0 * scale
+        hy = (rotated_labels[:, 5] - rotated_labels[:, 2]) / 2.0 * scale
+        hz = (rotated_labels[:, 6] - rotated_labels[:, 3]) / 2.0 * scale
+        # New coords
+        nx1 = cx_b - hx
+        nx2 = cx_b + hx
+        ny1 = cy_b - hy
+        ny2 = cy_b + hy
+        nz1 = cz_b - hz
+        nz2 = cz_b + hz
+        # Clamp to image bounds
+        nx1.clamp_(0, W - 1)
+        nx2.clamp_(0, W - 1)
+        ny1.clamp_(0, H - 1)
+        ny2.clamp_(0, H - 1)
+        nz1.clamp_(0, D - 1)
+        nz2.clamp_(0, D - 1)
+        # Write back
+        rotated_labels[:, 1] = nx1
+        rotated_labels[:, 2] = ny1
+        rotated_labels[:, 3] = nz1
+        rotated_labels[:, 4] = nx2
+        rotated_labels[:, 5] = ny2
+        rotated_labels[:, 6] = nz2
+
+    # Remove degenerate boxes
+    keep = (rotated_labels[:, 4] - rotated_labels[:, 1] > 1) & (rotated_labels[:, 5] - rotated_labels[:, 2] > 1) & (rotated_labels[:, 6] - rotated_labels[:, 3] > 1)
+    rotated_labels = rotated_labels[keep]
+    if masks_rot is not None:
+        masks_rot = masks_rot[keep] if keep.numel() == masks_rot.shape[0] else masks_rot
+
+    return image_rot, rotated_labels, masks_rot
 
 
 def random_mirroring(
