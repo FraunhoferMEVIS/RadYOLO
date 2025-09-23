@@ -116,6 +116,7 @@ def random_zoom(
     min_zoom: float = 0.7,
     p: float = 0.5,
     out_zoom_padding: str = "random",
+    uniform_zoom: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Randomly zooms in or out of a random part of the input image.
 
@@ -125,6 +126,10 @@ def random_zoom(
         max_zoom (float, optional): maximum edge length multiplier. Defaults to 1.5.
         min_zoom (float, optional): minimum edge length multiplier. Defaults to 0.7.
         p (float, optional): probability of zooming the input. Defaults to 0.5.
+        out_zoom_padding (str): Padding strategy when zooming out ("random" or "constant").
+        uniform_zoom (bool): If True (default) a single zoom factor is sampled and applied to all
+            spatial dimensions. If False, an independent zoom factor is sampled for each spatial
+            dimension (depth, height, width) uniformly from [min_zoom, max_zoom].
 
     Returns:
         image: Augmented tensor.
@@ -137,113 +142,130 @@ def random_zoom(
 
     # retrieve original image shape (this is resized to imgsz_z x imgsz_y x imgsz_x by this point in the dataloader)
     channels, d, h, w = image.shape
-
-    zoom_factor = random.uniform(min_zoom, max_zoom)
+    if uniform_zoom:
+        zoom_factors = (
+            random.uniform(min_zoom, max_zoom),
+        ) * 3  # (d, h, w) identical factors
+    else:
+        zoom_factors = (
+            random.uniform(min_zoom, max_zoom),  # depth
+            random.uniform(min_zoom, max_zoom),  # height
+            random.uniform(min_zoom, max_zoom),  # width
+        )
 
     # add batch dimension for functional interpolate
     image = torch.nn.functional.interpolate(
-        image.unsqueeze(0), scale_factor=zoom_factor, mode="trilinear", align_corners=False
+        image.unsqueeze(0), scale_factor=zoom_factors, mode="trilinear", align_corners=False
     ).squeeze_(0)
 
     if masks is not None:
         masks = masks.unsqueeze(0)
-        masks = F.interpolate(masks, scale_factor=zoom_factor, mode="nearest-exact").squeeze(0)
+        masks = F.interpolate(masks, scale_factor=zoom_factors, mode="nearest-exact").squeeze(0)
 
     # retrieve new image shape
     new_d, new_h, new_w = image.shape[1:]
 
-    # shrink/expand labels
-    augmented_labels[:, 1:7] = augmented_labels[:, 1:7] * zoom_factor
+    # scale labels per dimension (labels are in xyzxyz format after concatenation)
+    # order: x1 y1 z1 x2 y2 z2
+    zoom_w, zoom_h, zoom_d = zoom_factors[2], zoom_factors[1], zoom_factors[0]
+    augmented_labels[:, [1, 4]] *= zoom_w  # x coordinates
+    augmented_labels[:, [2, 5]] *= zoom_h  # y coordinates
+    augmented_labels[:, [3, 6]] *= zoom_d  # z coordinates
 
-    # crop/pad the zoomed image back to the input size and position it randomly relative to the new tensor
-    if zoom_factor >= 1.0:
-        # new side lengths longer than original side lengths
-        # crop to original im.shape (center needs at least original_length/2 distance to each edge to preserve original image)
-        zoom_center_d = random.randint(d // 2, new_d - d // 2)
-        zoom_center_h = random.randint(h // 2, new_h - h // 2)
-        zoom_center_w = random.randint(w // 2, new_w - w // 2)
+    # Generic crop/pad handling per dimension
+    orig_sizes = (d, h, w)
+    new_sizes = (new_d, new_h, new_w)
+    # For each dimension build slicing / padding indices
+    crop_starts: list[int] = []  # start index in resized image to take (if cropping)
+    pad_starts: list[int] = []   # start index in final canvas to place resized (if padding)
+    final_indices: list[slice] = []
+    cropped_dims = []  # keep track which dims were cropped (for filtering labels later)
+    for dim, (orig, new) in enumerate(zip(orig_sizes, new_sizes)):
+        if new >= orig:  # crop
+            max_start = new - orig
+            start = 0 if max_start == 0 else random.randint(0, max_start)
+            crop_starts.append(start)
+            pad_starts.append(0)
+            final_indices.append(slice(start, start + orig))
+            cropped_dims.append(dim)
+        else:  # pad
+            # choose random placement within original canvas
+            max_start = orig - new
+            start = 0 if max_start == 0 else random.randint(0, max_start)
+            crop_starts.append(0)
+            pad_starts.append(start)
+            final_indices.append(slice(0, new))
 
-        zmin = zoom_center_d - d // 2
-        ymin = zoom_center_h - h // 2
-        xmin = zoom_center_w - w // 2
-        zmax = zmin + d
-        ymax = ymin + h
-        xmax = xmin + w
+    # Apply cropping
+    image_cropped = image[:, final_indices[0], final_indices[1], final_indices[2]]
+    if masks is not None:
+        masks_cropped = masks[:, final_indices[0], final_indices[1], final_indices[2]]
+    else:
+        masks_cropped = None
 
-        image = image[:, zmin:zmax, ymin:ymax, xmin:xmax]
+    # If any padding needed (i.e., any new < orig), create canvas and place
+    if any(new < orig for orig, new in zip(orig_sizes, new_sizes)):
+        # prepare canvas
+        if out_zoom_padding == "random":
+            canvas = torch.rand(channels, d, h, w) * (torch.max(image_cropped) - torch.min(image_cropped)) + torch.min(image_cropped)
+        elif out_zoom_padding == "constant":
+            canvas = torch.zeros(channels, d, h, w) + torch.min(image_cropped)
+        else:
+            raise ValueError(f"Unknown out zoom padding mode {out_zoom_padding}")
+        z_start, y_start, x_start = pad_starts
+        z_slice = slice(z_start, z_start + image_cropped.shape[1])
+        y_slice = slice(y_start, y_start + image_cropped.shape[2])
+        x_slice = slice(x_start, x_start + image_cropped.shape[3])
+        canvas[:, z_slice, y_slice, x_slice] = image_cropped
+        image = canvas
+        if masks_cropped is not None:
+            mask_canvas = torch.zeros(masks_cropped.shape[0], d, h, w, dtype=masks_cropped.dtype, device=masks_cropped.device)
+            mask_canvas[:, z_slice, y_slice, x_slice] = masks_cropped
+            masks = mask_canvas
+        else:
+            masks = None
+    else:
+        # Only cropping, no padding
+        image = image_cropped
+        masks = masks_cropped
 
-        if masks is not None:
-            masks = masks[:, zmin:zmax, ymin:ymax, xmin:xmax]
+    # Adjust labels: subtract crop_starts for cropped dims, add pad_starts for padded dims
+    # crop_starts list contains either crop start (if cropped) else 0; pad_starts has placement start (0 if cropped)
+    # mapping dim indices: 0->z,1->h(y),2->w(x) ; label order x,y,z
+    # First subtract crop starts for each axis where cropping occurred
+    z_crop, y_crop, x_crop = crop_starts
+    z_pad, y_pad, x_pad = pad_starts
+    # subtract crop
+    augmented_labels[:, [3, 6]] -= z_crop  # z1,z2 at indices 3,6? actually order x1(1) y1(2) z1(3) x2(4) y2(5) z2(6)
+    augmented_labels[:, [2, 5]] -= y_crop
+    augmented_labels[:, [1, 4]] -= x_crop
+    # add padding offsets
+    augmented_labels[:, [3, 6]] += z_pad
+    augmented_labels[:, [2, 5]] += y_pad
+    augmented_labels[:, [1, 4]] += x_pad
 
-        # move labels to correspond to new center of zoom
-        augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] - xmin
-        augmented_labels[:, [2, 5]] = augmented_labels[:, [2, 5]] - ymin
-        augmented_labels[:, [3, 6]] = augmented_labels[:, [3, 6]] - zmin
-
-        # remove labels whose centers are 8 voxels outside of the new image region
+    # Filter labels whose centers fall far outside (only necessary for cropped dimensions)
+    if augmented_labels.shape[0]:
         label_center_x = (augmented_labels[:, 1] + augmented_labels[:, 4]) / 2
         label_center_y = (augmented_labels[:, 2] + augmented_labels[:, 5]) / 2
         label_center_z = (augmented_labels[:, 3] + augmented_labels[:, 6]) / 2
-
-        filter = ~(
-            (label_center_x < xmin - 8)
-            | (label_center_x > xmax + 8)
-            | (label_center_y < ymin - 8)
-            | (label_center_y > ymax + 8)
-            | (label_center_z < zmin - 8)
-            | (label_center_z > zmax + 8)
+        # base valid range
+        valid = (
+            (label_center_x >= -8) & (label_center_x <= w + 8) &
+            (label_center_y >= -8) & (label_center_y <= h + 8) &
+            (label_center_z >= -8) & (label_center_z <= d + 8)
         )
-        augmented_labels = augmented_labels[filter]
+        augmented_labels = augmented_labels[valid]
         if masks is not None:
-            masks = masks[filter]
+            masks = masks[valid]
 
-        # crop labels beyond bounds of new image
+        # Clamp to image bounds
         augmented_labels[:, 1].clamp_(0, w)  # x1
         augmented_labels[:, 2].clamp_(0, h)  # y1
         augmented_labels[:, 3].clamp_(0, d)  # z1
         augmented_labels[:, 4].clamp_(0, w)  # x2
         augmented_labels[:, 5].clamp_(0, h)  # y2
         augmented_labels[:, 6].clamp_(0, d)  # z2
-
-    else:
-        # new side lengths shorter than original side lengths
-        # pad to original image shape
-        zoom_center_d = random.randint(new_d // 2 + 1, d - new_d // 2 - 1)
-        zoom_center_h = random.randint(new_h // 2 + 1, h - new_h // 2 - 1)
-        zoom_center_w = random.randint(new_w // 2 + 1, w - new_w // 2 - 1)
-
-        xmin = zoom_center_w - new_w // 2
-        ymin = zoom_center_h - new_h // 2
-        zmin = zoom_center_d - new_d // 2
-
-        xmax = xmin + new_w
-        ymax = ymin + new_h
-        zmax = zmin + new_d
-
-        # create a new tensor
-        if out_zoom_padding == "random":
-            new_image = torch.rand(channels, d, h, w) * (
-                torch.max(image) - torch.min(image)
-            ) + torch.min(image)
-        elif out_zoom_padding == "constant":
-            new_image = torch.zeros(channels, d, h, w) + torch.min(image)
-        else:
-            msg = f"Unknown out zoom padding mode {out_zoom_padding}"
-            raise ValueError(msg)
-        new_image[:, zmin:zmax, ymin:ymax, xmin:xmax] = image
-        image = new_image
-        del new_image
-
-        if masks is not None:
-            mask_channels = masks.shape[0]
-            new_masks = torch.zeros(mask_channels, d, h, w, dtype=masks.dtype, device=masks.device)
-            new_masks[:, zmin:zmax, ymin:ymax, xmin:xmax] = masks
-            masks = new_masks
-
-        # move labels to correspond to new center of zoom
-        augmented_labels[:, [1, 4]] = augmented_labels[:, [1, 4]] + xmin
-        augmented_labels[:, [2, 5]] = augmented_labels[:, [2, 5]] + ymin
-        augmented_labels[:, [3, 6]] = augmented_labels[:, [3, 6]] + zmin
 
     return image, augmented_labels, masks
 
