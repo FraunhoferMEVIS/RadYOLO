@@ -603,3 +603,52 @@ def enlarge_bounding_boxes(
         masks = masks[filter]
 
     return image, labels, masks
+
+
+def random_channel_dropout(
+    image: torch.Tensor,
+    labels: torch.Tensor,
+    masks: torch.Tensor | None,
+    drop_probabilities: list[float] | tuple[float, ...],
+    fill_value: float | None = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Randomly drop (zero-out or constant-fill) at most one channel based on per-channel probabilities.
+
+    Args:
+        image: (C, D, H, W) tensor.
+        labels: (N, 7) unchanged.
+        masks: Optional (M, D, H, W) masks (unchanged).
+        drop_probabilities: per-channel independent probabilities. Only one channel can be dropped;
+            if multiple trigger, one is chosen proportionally to their probabilities.
+        p: Global probability to attempt a dropout event at all.
+        fill_value: Value to fill the dropped channel with. If None, use channel mean.
+
+    Returns:
+        (image, labels, masks) with possibly one channel dropped.
+    """
+    C = image.shape[0]
+    if len(drop_probabilities) != C:
+        raise ValueError(f"drop_probabilities length {len(drop_probabilities)} must match channel count {C}")
+
+    # Determine candidate channels
+    probs = torch.tensor(drop_probabilities, dtype=torch.float32)
+    # Sample Bernoulli for each channel
+    bern = torch.bernoulli(probs).bool()
+    if not bern.any():
+        return image, labels, masks
+    # If multiple, choose one weighted by their probabilities
+    candidate_indices = torch.nonzero(bern).flatten()
+    if candidate_indices.numel() > 1:
+        cand_probs = probs[candidate_indices]
+        cand_probs = cand_probs / cand_probs.sum()
+        chosen_idx = candidate_indices[torch.multinomial(cand_probs, 1)]
+    else:
+        chosen_idx = candidate_indices[0]
+
+    # Apply dropout: fill with value or channel mean
+    if fill_value is None:
+        replacement = image[chosen_idx].mean()
+    else:
+        replacement = torch.as_tensor(fill_value, dtype=image.dtype, device=image.device)
+    image[chosen_idx] = replacement
+    return image, labels, masks
