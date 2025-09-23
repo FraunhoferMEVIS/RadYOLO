@@ -439,7 +439,6 @@ def plot_images(
         bboxes: Bounding boxes for each detection. Shape: (num_detections, 4)
         confs: Confidence scores for each detection. Shape: (num_detections,).
         masks: Instance segmentation masks. Shape: (num_detections, height, width) or (1, height, width).
-        paths: List of file paths for each image in the batch.
         fname: Output filename for the plotted image grid.
         names: Dictionary mapping class indices to class names.
         on_plot: Optional callback function to be called after saving the plot.
