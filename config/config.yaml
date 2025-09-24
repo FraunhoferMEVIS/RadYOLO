@@ -53,21 +53,67 @@ class_separate_gain: 0.5 # (float) class loss gain for separate softmax classifi
 nbs: 64 # (int) nominal batch size
 
 # Optional Segmentation Head
-segmentation_output: True # (bool) add segmentation output to model
-prototype_masks: 8 # (int) number of prototype masks for segmentation output
+segmentation_output: True          # (bool) add segmentation output to model
+prototype_masks: 8                 # (int) number of prototype masks for segmentation output
 higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
 
 # Detection Head Options
 separate_objectness_head: True  # (bool) if True, add a separate objectness output and use CCE loss for class logits
 include_stride4_output: True
 
-# Data Augmentation
-max_zoom: 1.5
+# Zoom Augmentation
+max_zoom: 1.4
 min_zoom: 0.7
 out_zoom_padding: "constant"
 prob_zoom: 0.4
+zoom_uniform: false  # if false, enable anisotropic per-axis zoom factors
+
+# Cutout Augmentation
 prob_cutout: 0.2
 prob_mirroring: 0.5
 mirror_axes: ["x", "y", "z"]
+
+# Rotation augmentation
+prob_rotation: 0.2
+rotation_angle_x: [-15.0, 15.0]
+rotation_angle_y: [-15.0, 15.0]
+rotation_angle_z: [-15.0, 15.0]
+rotation_keep_box_volume: true
+
+# Channel dropout augmentation (drop at most one channel)
+channel_dropout_probabilities: [0.0,]  # e.g. [0.6,0.3,0.1] must match channel count
+channel_dropout_fill_value: 0.0        # ignored if channel_dropout_use_mean=true
+channel_dropout_use_mean: true         # if true, replace dropped channel with its mean
+
+# Cutout params (size_fraction, repeats)
+cutout_params:
+- [0.5, 1]
+- [0.25, 2]
+- [0.125, 4]
+
+# Intensity augmentation parameters
 do_batchgenerators_intensity_augmentation: True
 do_intensity_augmentations_per_channel: False
+intensity_noise_prob: 0.1
+intensity_noise_variance: [0.0, 1.0]
+intensity_blur_prob: 0.2
+intensity_blur_sigma: [0.5, 1.0]
+intensity_mult_brightness_prob: 0.15
+intensity_mult_brightness_range: [0.75, 1.25]
+intensity_add_brightness_prob: 0.15
+intensity_add_brightness_mu: 0.0
+intensity_add_brightness_sigma: 2.0
+intensity_contrast_prob: 0.15
+intensity_contrast_range: [0.75, 1.25]
+intensity_lowres_prob: 0.25
+intensity_lowres_scale: [0.5, 1.0]
+intensity_gamma_prob: 0.4
+intensity_gamma_range: [0.7, 1.5]
+intensity_gamma_p_invert: 0.25
+intensity_gamma_p_retain_stats: 1.0
+
+# GIN augmentation
+gin_layers: 4
+gin_channels: 2
+gin_prob_kernel_size_one: 0.8
+gin_prob: 0.2

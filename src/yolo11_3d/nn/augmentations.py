@@ -4,12 +4,14 @@ from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
 
 __author__ = "kgeissler"
 
-import random
 import math
+import numpy as np
+import random
 from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn.functional as F  # noqa: N812
+from torch import nn
 from batchgeneratorsv2.transforms.intensity.brightness import (
     MultiplicativeBrightnessTransform, BrightnessAdditiveTransform
 )
@@ -493,68 +495,108 @@ def random_mirroring(
 
 
 def batch_generators_intensity_augmentations(
-    image: torch.Tensor, do_intensity_augmentations_per_channel: bool
+    image: torch.Tensor,
+    do_intensity_augmentations_per_channel: bool = False,
+    noise_prob: float = 0.1,
+    noise_variance: tuple[float, float] = (0.0, 1.0),
+    blur_prob: float = 0.2,
+    blur_sigma: tuple[float, float] = (0.5, 1.0),
+    mult_brightness_prob: float = 0.15,
+    mult_brightness_range: tuple[float, float] = (0.75, 1.25),
+    add_brightness_prob: float = 0.15,
+    add_brightness_mu: float = 0.0,
+    add_brightness_sigma: float = 2.0,
+    contrast_prob: float = 0.15,
+    contrast_range: tuple[float, float] = (0.75, 1.25),
+    lowres_prob: float = 0.25,
+    lowres_scale: tuple[float, float] = (0.5, 1.0),
+    gamma_prob: float = 0.4,
+    gamma_range: tuple[float, float] = (0.7, 1.5),
+    gamma_p_invert: float = 0.25,
+    gamma_p_retain_stats: float = 1.0,
 ) -> torch.Tensor:
     synchronize_channels = not do_intensity_augmentations_per_channel
-    transforms: list[BasicTransform] = [
-        RandomTransform(
-            GaussianNoiseTransform(
-                noise_variance=(0, 1), synchronize_channels=synchronize_channels
-            ),
-            apply_probability=0.1,
-        ),
-        RandomTransform(
-            GaussianBlurTransform(
-                blur_sigma=(0.5, 1.0),
-                synchronize_channels=synchronize_channels,
-                p_per_channel=1,
-            ),
-            apply_probability=0.2,
-        ),
-        RandomTransform(
-            MultiplicativeBrightnessTransform(
-                multiplier_range=(0.75, 1.25), synchronize_channels=synchronize_channels
-            ),
-            apply_probability=0.15,
-        ),
-        RandomTransform(
-            BrightnessAdditiveTransform(
-                mu=0,
-                sigma=2,
-                per_channel=do_intensity_augmentations_per_channel,
-                p_per_channel=1
-            ),
-           apply_probability=0.15
-        ),
-        RandomTransform(
-            ContrastTransform(
-                contrast_range=(0.75, 1.25),
-                preserve_range=False,
-                synchronize_channels=synchronize_channels,
-            ),
-            apply_probability=0.15,
-        ),
-        RandomTransform(
-            SimulateLowResolutionTransform(
-                scale=(0.5, 1),
-                synchronize_channels=synchronize_channels,
-                synchronize_axes=False,
-                ignore_axes=tuple(),
-                p_per_channel=1,
-            ),
-            apply_probability=0.25,
-        ),
-        RandomTransform(
-            GammaTransform(
-                gamma=(0.7, 1.5),
-                p_invert_image=0.25,
-                synchronize_channels=synchronize_channels,
-                p_per_channel=1,
-                p_retain_stats=1,
-            ),
-            apply_probability=0.4,
-        ),
-    ]
+    transforms: list[BasicTransform] = []
+    if noise_prob > 0:
+        transforms.append(
+            RandomTransform(
+                GaussianNoiseTransform(
+                    noise_variance=noise_variance, synchronize_channels=synchronize_channels
+                ),
+                apply_probability=noise_prob,
+            )
+        )
+    if blur_prob > 0:
+        transforms.append(
+            RandomTransform(
+                GaussianBlurTransform(
+                    blur_sigma=blur_sigma,
+                    synchronize_channels=synchronize_channels,
+                    p_per_channel=1,
+                ),
+                apply_probability=blur_prob,
+            )
+        )
+    if mult_brightness_prob > 0:
+        transforms.append(
+            RandomTransform(
+                MultiplicativeBrightnessTransform(
+                    multiplier_range=mult_brightness_range, synchronize_channels=synchronize_channels
+                ),
+                apply_probability=mult_brightness_prob,
+            )
+        )
+    if add_brightness_prob > 0:
+        transforms.append(
+            RandomTransform(
+                BrightnessAdditiveTransform(
+                    mu=add_brightness_mu,
+                    sigma=add_brightness_sigma,
+                    per_channel=do_intensity_augmentations_per_channel,
+                    p_per_channel=1,
+                ),
+                apply_probability=add_brightness_prob,
+            )
+        )
+    if contrast_prob > 0:
+        transforms.append(
+            RandomTransform(
+                ContrastTransform(
+                    contrast_range=contrast_range,
+                    preserve_range=False,
+                    synchronize_channels=synchronize_channels,
+                ),
+                apply_probability=contrast_prob,
+            )
+        )
+    if lowres_prob > 0:
+        transforms.append(
+            RandomTransform(
+                SimulateLowResolutionTransform(
+                    scale=lowres_scale,
+                    synchronize_channels=synchronize_channels,
+                    synchronize_axes=False,
+                    ignore_axes=tuple(),
+                    p_per_channel=1,
+                ),
+                apply_probability=lowres_prob,
+            )
+        )
+    if gamma_prob > 0:
+        transforms.append(
+            RandomTransform(
+                GammaTransform(
+                    gamma=gamma_range,
+                    p_invert_image=gamma_p_invert,
+                    synchronize_channels=synchronize_channels,
+                    p_per_channel=1,
+                    p_retain_stats=gamma_p_retain_stats,
+                ),
+                apply_probability=gamma_prob,
+            )
+        )
+    if not transforms:
+        return image
     composed_transforms = ComposeTransforms(transforms)
     bg_result: dict[str, Any] = composed_transforms(image=image)
     augmented_image: torch.Tensor = bg_result["image"]
@@ -652,3 +694,89 @@ def random_channel_dropout(
         replacement = torch.as_tensor(fill_value, dtype=image.dtype, device=image.device)
     image[chosen_idx] = replacement
     return image, labels, masks
+
+
+class GINNet(nn.Module):
+    def __init__(
+        self,
+        hidden_layers: int,
+        hidden_channels: int,
+        p_kernel_size_1: float = 0.5,
+    ):
+        super(GINNet, self).__init__()
+
+        self._p_kernel_size_1 = p_kernel_size_1
+
+        self.layers_kernel_size_3 = nn.ModuleList()
+        self.layers_kernel_size_1 = nn.ModuleList()
+        self.layers_activation_functions = nn.ModuleList()
+
+        layer_dims = (
+            [1]
+            + [hidden_channels] * (hidden_layers - 1)
+            + [1]
+        )
+
+        for i in range(len(layer_dims) - 1):
+            self.layers_kernel_size_3.append(
+                nn.Conv3d(
+                    in_channels=layer_dims[i],
+                    out_channels=layer_dims[i + 1],
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
+            self.layers_kernel_size_1.append(
+                nn.Conv3d(
+                    in_channels=layer_dims[i],
+                    out_channels=layer_dims[i + 1],
+                    kernel_size=1,
+                    padding=0,
+                )
+            )
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers_kernel_size_3:
+            nn.init.kaiming_normal_(layer.weight)
+            nn.init.normal_(layer.bias)
+        for layer in self.layers_kernel_size_1:
+            nn.init.kaiming_normal_(layer.weight)
+            nn.init.normal_(layer.bias)
+
+        output = torch.zeros_like(input)
+        for channel in range(input.shape[0]):
+            input_i = x = input[channel].unsqueeze(0)
+            for i in range(len(self.layers_kernel_size_3)):
+                if random.random() <= self._p_kernel_size_1:
+                    x = self.layers_kernel_size_1[i](x)
+                else:
+                    x = self.layers_kernel_size_3[i](x)
+                x = F.leaky_relu(x)
+                
+            alpha = random.random()
+            output_i = alpha * input_i + (1 - alpha) * x
+            output_i = output_i * (torch.norm(input_i, p="fro") / torch.norm(output_i, p="fro"))
+            output[channel] = output_i.squeeze(0)
+
+        return output
+    
+def gin_augmentation(
+    image: torch.Tensor,
+    labels: torch.Tensor,
+    masks: torch.Tensor | None,
+    hidden_layers: int,
+    hidden_channels: int,
+    p_kernel_size_1: float = 0.5,
+    p: float = 0.2,
+) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
+    """
+    Applies GIN (Global Intensity Non-linear) augumentation to input image.
+    """
+    if random.random() >= p:
+        return image, labels, masks
+    
+    gin_model = GINNet(hidden_layers, hidden_channels, p_kernel_size_1)
+    with torch.no_grad():
+        augmented_image = gin_model.forward(image)
+
+    return augmented_image, labels, masks

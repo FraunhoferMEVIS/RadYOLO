@@ -631,18 +631,7 @@ class Trainer:
                 model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
             ),
             pad=0.0 if group == "train" else 0.5,
-            normalization=self.args.normalization,
-            load_masks=self.args.segmentation_output,
-            max_zoom=self.args.max_zoom,
-            min_zoom=self.args.min_zoom,
-            out_zoom_padding=self.args.out_zoom_padding,
-            prob_zoom=self.args.prob_zoom,
-            prob_cutout=self.args.prob_cutout,
-            cutout_params=self.args.cutout_params,
-            prob_mirroring=self.args.prob_mirroring,
-            mirror_axes=self.args.mirror_axes,
-            do_batchgenerators_intensity_augmentation=self.args.do_batchgenerators_intensity_augmentation,
-            do_intensity_augmentations_per_channel=self.args.do_intensity_augmentations_per_channel,
+            config=self.args
         )
 
     def save_model(

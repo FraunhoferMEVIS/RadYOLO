@@ -19,7 +19,11 @@ from yolo11_3d.nn.augmentations import (
     random_mirroring,
     random_zoom,
     tensor_cutout,
+    random_rotation,
+    random_channel_dropout,
+    gin_augmentation,
 )
+from yolo11_3d.nn.config import DefaultConfig
 from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 LOGGER = logging.getLogger(__name__)
@@ -76,7 +80,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] = {"type": "none"},
         load_masks: bool = True,
-        **hyp: Any,
+        config: DefaultConfig | None = None,
     ) -> None:
         super().__init__()
         self.src_path = src_path
@@ -89,7 +93,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         self.fold = fold
         self.group = group
         self.normalization = normalization
-        self.hyp = hyp
+        self.config = config
         self.load_masks = load_masks
         splits_file = os.path.join(src_path, "data_splits.json")
         with open(splits_file, "r") as file:
@@ -123,13 +127,27 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             image,
             labels,
             masks,
-            self.hyp["max_zoom"],
-            self.hyp["min_zoom"],
-            self.hyp["prob_zoom"],
-            self.hyp["out_zoom_padding"],
+            self.config.max_zoom,
+            self.config.min_zoom,
+            self.config.prob_zoom,
+            self.config.out_zoom_padding,
+            self.config.zoom_uniform,
         )
 
-        image, labels, masks = tensor_cutout(image, labels, masks, self.hyp["cutout_params"], self.hyp["prob_cutout"])
+        image, labels, masks = random_rotation(
+            image,
+            labels,
+            masks,
+            angle_ranges=(
+                self.config.rotation_angle_x,
+                self.config.rotation_angle_y,
+                self.config.rotation_angle_z,
+            ),
+            p=self.config.prob_rotation,
+            keep_box_volume=self.config.rotation_keep_box_volume,
+        )
+
+        image, labels, masks = tensor_cutout(image, labels, masks, self.config.cutout_params, self.config.prob_cutout)
         nl = len(labels)
         if nl:
             labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
@@ -140,13 +158,50 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             labels[:, 1:] = labels[:, 1:] / scale_tensor
 
         image, labels, masks = random_mirroring(
-            image, labels, masks, self.hyp["mirror_axes"], self.hyp["prob_mirroring"]
+            image, labels, masks, self.config.mirror_axes, self.config.prob_mirroring
         )
 
-        if self.hyp["do_batchgenerators_intensity_augmentation"]:
+
+        if self.config.do_batchgenerators_intensity_augmentation:
             image = batch_generators_intensity_augmentations(
-                image, self.hyp["do_intensity_augmentations_per_channel"]
+                image,
+                self.config.do_intensity_augmentations_per_channel,
+                noise_prob=self.config.intensity_noise_prob,
+                noise_variance=self.config.intensity_noise_variance,
+                blur_prob=self.config.intensity_blur_prob,
+                blur_sigma=self.config.intensity_blur_sigma,
+                mult_brightness_prob=self.config.intensity_mult_brightness_prob,
+                mult_brightness_range=self.config.intensity_mult_brightness_range,
+                add_brightness_prob=self.config.intensity_add_brightness_prob,
+                add_brightness_mu=self.config.intensity_add_brightness_mu,
+                add_brightness_sigma=self.config.intensity_add_brightness_sigma,
+                contrast_prob=self.config.intensity_contrast_prob,
+                contrast_range=self.config.intensity_contrast_range,
+                lowres_prob=self.config.intensity_lowres_prob,
+                lowres_scale=self.config.intensity_lowres_scale,
+                gamma_prob=self.config.intensity_gamma_prob,
+                gamma_range=self.config.intensity_gamma_range,
+                gamma_p_invert=self.config.intensity_gamma_p_invert,
+                gamma_p_retain_stats=self.config.intensity_gamma_p_retain_stats,
             )
+        
+        image, labels, masks = gin_augmentation(
+            image,
+            labels,
+            masks,
+            self.config.gin_layers,
+            self.config.gin_channels,
+            self.config.gin_prob_kernel_size_one,
+            self.config.gin_prob,
+        )
+
+        image, labels, masks = random_channel_dropout(
+            image,
+            labels,
+            masks,
+            drop_probabilities=self.config.channel_dropout_probabilities,
+            fill_value=None if self.config.channel_dropout_use_mean else self.config.channel_dropout_fill_value,
+        )
 
         sample["image"] = image
         sample["classes"] = labels[:, 0:1]

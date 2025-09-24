@@ -22,6 +22,7 @@ from yolo11_3d.nn.augmentations import (  # type: ignore  # noqa: E402
     tensor_cutout,
     random_rotation,
     random_channel_dropout,
+    gin_augmentation,
 )
 from yolo11_3d.ultralytics.utils.plotting import plot_images  # type: ignore  # noqa: E402
 
@@ -222,13 +223,23 @@ def build_grid_for_augmentation(
             )
         elif aug_name == "random_channel_dropout":
             # Example per-channel probabilities for 3 channels
-            drop_probs = [0.6, 0.3, 0.1]
+            drop_probs = [0.4, 0.3, 0.2]
             img_v, lab_v, mask_v = random_channel_dropout(
                 base_img.clone(),
                 base_labels_abs_xyzxyz.clone(),
                 base_masks.clone(),
                 drop_probabilities=drop_probs,
                 fill_value=0.0,
+            )
+        elif aug_name == "gin_augmentation":
+            img_v, lab_v, mask_v = gin_augmentation(
+                base_img.clone(),
+                base_labels_abs_xyzxyz.clone(),
+                base_masks.clone(),
+                hidden_layers=4,
+                hidden_channels=2,
+                p_kernel_size_1=0.5,
+                p=1.0
             )
         else:
             raise ValueError(f"Unknown augmentation name '{aug_name}'")
@@ -302,6 +313,7 @@ def main() -> None:
         "enlarge_bounding_boxes",
         "random_rotation",
         "random_channel_dropout",
+        "gin_augmentation",
     ]
 
     for aug in augmentations:

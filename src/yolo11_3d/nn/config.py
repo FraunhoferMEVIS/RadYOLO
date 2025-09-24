@@ -100,11 +100,13 @@ class DefaultConfig(BaseModel):
     separate_objectness_head: bool = False  # if True, add a separate objectness output and use CE for class logits
     include_stride4_output: bool = False  # add P2 detection head at stride 4
 
-    # Augmentation
+    # Zoom Augmentation
     max_zoom: float = Field(1.5, ge=0)
     min_zoom: float = Field(0.7, ge=0)
     out_zoom_padding: Literal["constant", "random"] = "constant"
     prob_zoom: float = Field(0.5, ge=0, le=1.0)
+    zoom_uniform: bool = False
+    # Cutout Augmentation
     prob_cutout: float = Field(0.5, ge=0, le=1.0)
     cutout_params: list[tuple[float, int]] = Field(
         default_factory=lambda: [
@@ -115,8 +117,41 @@ class DefaultConfig(BaseModel):
     )
     prob_mirroring: float = Field(0.5, ge=0, le=1.0)
     mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
+    # Rotation
+    prob_rotation: float = Field(0.0, ge=0, le=1.0)
+    rotation_angle_x: tuple[float, float] = (-20.0, 20.0)
+    rotation_angle_y: tuple[float, float] = (-20.0, 20.0)
+    rotation_angle_z: tuple[float, float] = (-20.0, 20.0)
+    rotation_keep_box_volume: bool = True
+    # Channel Dropout
+    channel_dropout_probabilities: tuple[float] = Field(default_factory=tuple)
+    channel_dropout_fill_value: float = 0.0
+    channel_dropout_use_mean: bool = False
+    # Intensity augmentation
     do_batchgenerators_intensity_augmentation: bool = True
     do_intensity_augmentations_per_channel: bool = False
+    intensity_noise_prob: float = 0.1
+    intensity_noise_variance: tuple[float, float] = (0.0, 1.0)
+    intensity_blur_prob: float = 0.2
+    intensity_blur_sigma: tuple[float, float] = (0.5, 1.0)
+    intensity_mult_brightness_prob: float = 0.15
+    intensity_mult_brightness_range: tuple[float, float] = (0.75, 1.25)
+    intensity_add_brightness_prob: float = 0.15
+    intensity_add_brightness_mu: float = 0.0
+    intensity_add_brightness_sigma: float = 2.0
+    intensity_contrast_prob: float = 0.15
+    intensity_contrast_range: tuple[float, float] = (0.75, 1.25)
+    intensity_lowres_prob: float = 0.25
+    intensity_lowres_scale: tuple[float, float] = (0.5, 1.0)
+    intensity_gamma_prob: float = 0.4
+    intensity_gamma_range: tuple[float, float] = (0.7, 1.5)
+    intensity_gamma_p_invert: float = 0.25
+    intensity_gamma_p_retain_stats: float = 1.0
+    # GIN augmentation
+    gin_layers: int = 4
+    gin_channels: int = 2
+    gin_prob_kernel_size_one: float = 0.8
+    gin_prob: float = 0.2
 
     save_dir: Path | None = None
 
