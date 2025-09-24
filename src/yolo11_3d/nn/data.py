@@ -5,7 +5,7 @@ import logging
 import os
 from collections.abc import Sized
 from pathlib import Path
-from typing import Any, Literal, TypedDict, cast, NotRequired
+from typing import Literal, TypedDict, cast, NotRequired
 
 import nibabel as nib
 import numpy as np
@@ -39,7 +39,7 @@ class Sample(TypedDict):
     )
     classes: torch.Tensor
     bboxes: torch.Tensor
-    masks: list[torch.Tensor | None]
+    masks: torch.Tensor | None
     case_name: str
 
 class Batch(TypedDict):
@@ -56,7 +56,7 @@ class Batch(TypedDict):
     cls: torch.Tensor
     bboxes: torch.Tensor
     batch_idx: torch.Tensor
-    masks: tuple[list[torch.Tensor | None]]
+    masks: tuple[torch.Tensor | None, ...]
     case_names: tuple[str]
 
 class NormalizationConfig(TypedDict):

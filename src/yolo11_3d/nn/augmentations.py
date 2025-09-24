@@ -457,7 +457,7 @@ def random_rotation(
 def random_mirroring(
     image: torch.Tensor,
     labels: torch.Tensor,
-    masks: list[torch.Tensor | None] | None,
+    masks: torch.Tensor | None,
     mirror_axes: list[str] = ["z", "y", "x"],
     p: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
@@ -465,7 +465,8 @@ def random_mirroring(
 
     Args:
         image (torch.Tensor): 3-D tensor to be augmented.
-        labels (np.ndarray): MedYOLO labels corresponding to image. class z1 x1 y1 z2 x2 y2
+        labels (np.ndarray): Labels corresponding to image. class x y z w h d
+        masks (torch.Tensor | None): masks corresponding to labels
         mirror_axes (List[str]): list of axes to be randomly mirrored
         p (float, optional): probability of performing mirroring augmentation.
 
