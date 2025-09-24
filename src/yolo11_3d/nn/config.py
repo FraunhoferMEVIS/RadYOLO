@@ -120,7 +120,7 @@ class DefaultConfig(BaseModel):
     rotation_angle_z: tuple[float, float] = (-20.0, 20.0)
     rotation_keep_box_volume: bool = True
     # Channel Dropout
-    channel_dropout_probabilities: tuple[float] = Field(default_factory=tuple)
+    channel_dropout_probabilities: tuple[float, ...] = Field(default_factory=tuple)
     channel_dropout_fill_value: float = 0.0
     channel_dropout_use_mean: bool = False
     # Intensity augmentation

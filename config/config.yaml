@@ -70,8 +70,7 @@ out_zoom_padding: "constant"
 prob_zoom: 0.4
 zoom_uniform: false  # if false, enable anisotropic per-axis zoom factors
 
-# Cutout Augmentation
-prob_cutout: 0.2
+# Mirroring Augmentation
 prob_mirroring: 0.5
 mirror_axes: ["x", "y", "z"]
 
@@ -87,8 +86,9 @@ channel_dropout_probabilities: [0.0,]  # e.g. [0.6,0.3,0.1] must match channel c
 channel_dropout_fill_value: 0.0        # ignored if channel_dropout_use_mean=true
 channel_dropout_use_mean: true         # if true, replace dropped channel with its mean
 
-# Cutout params (size_fraction, repeats)
-cutout_params:
+# Cutout Augmentation
+prob_cutout: 0.2
+cutout_params:   # Cutout params (size_fraction, repeats)
 - [0.5, 1]
 - [0.25, 2]
 - [0.125, 4]
