@@ -33,7 +33,6 @@ class DefaultConfig(BaseModel):
     model_scale: Literal["n", "s", "m", "l", "x"]
 
     # Train settings
-    model: FilePath | NewPath  # path to model file
     data: DirectoryPath  # path to data folder containing dataset.yaml
     fold: int
     epochs: int = 100  # number of epochs to train for

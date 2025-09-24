@@ -79,7 +79,6 @@ class Trainer:
         if self.device.type in {"cpu", "mps"}:
             self.args.workers = 0
 
-        self.model_path = self.args.model.with_suffix(".pt")
         self.model: torch.nn.Module | None = None
         self.data = self.get_dataset_config(self.args.data)
 
@@ -106,7 +105,6 @@ class Trainer:
         file_handler.addFilter(YoloFilter())
         logging.root.addHandler(file_handler)
 
-        self.plot_idx = [0, 1, 2]
         # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
         self.ewa_mAP1095 = None
         self.ewa_alpha = 0.6
@@ -128,7 +126,6 @@ class Trainer:
                 LOGGER.info(message)
                 resume = True
                 self.args = ckpt_args
-                self.args.model = self.args.resume = self.last_model_path
 
             except Exception as e:
                 msg = "Resume checkpoint not found, please pass a valid checkpoint to resume from."
@@ -145,10 +142,10 @@ class Trainer:
         if isinstance(self.model, HardcodedModel):
             return None, self.model
 
-        checkpoint_path = self.model_path
+        checkpoint_path = self.last_model_path
         weights_ema = None
         checkpoint: ModelCheckpoint | None = None
-        if checkpoint_path.suffix == ".pt" and checkpoint_path.exists():
+        if self.resume and checkpoint_path.suffix == ".pt" and checkpoint_path.exists():
             checkpoint = model_checkpoint_from_torch(checkpoint_path)
             self.args = self.args.model_copy(update=checkpoint["train_args"].model_dump())
             weights_ema = checkpoint["ema"].to(self.device).float()
@@ -754,7 +751,7 @@ class Trainer:
         assert start_epoch > 0
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",
-            self.args.model,
+            self.last_model_path,
             start_epoch + 1,
             self.epochs,
         )
