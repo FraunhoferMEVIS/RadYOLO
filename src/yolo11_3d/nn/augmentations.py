@@ -755,7 +755,7 @@ class GINNet(nn.Module):
                 
             alpha = random.random()
             output_i = alpha * input_i + (1 - alpha) * x
-            output_i = output_i * (torch.norm(input_i, p="fro") / torch.norm(output_i, p="fro"))
+            output_i = output_i * (torch.norm(input_i, p="fro") / (torch.norm(output_i, p="fro") + 1e-6))
             output[channel] = output_i.squeeze(0)
 
         return output
