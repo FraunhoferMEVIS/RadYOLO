@@ -1,5 +1,0 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
-
-# Parameters
-nc: 1 # number of input channels for model
-scale: s # model scale, allowed values: (n, s, m, l, x)

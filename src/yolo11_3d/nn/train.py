@@ -27,7 +27,6 @@ from .config import (
     DefaultConfig,
     ModelCheckpoint,
     get_cfg,
-    get_model_cfg,
     model_checkpoint_from_torch,
 )
 from .data import NIfTIDatasetWithMasks
@@ -53,7 +52,6 @@ class YoloFilter(logging.Filter):
 class Trainer:
     def __init__(self, cfg: str | Path) -> None:
         self.args = get_cfg(cfg, {})
-        self.model_config = get_model_cfg(self.args.model)
         run_dir = Path() / (self.args.project or "runs")
         if not run_dir.is_dir():
             msg = f"{run_dir} does not exist or is not a directory!"
@@ -211,8 +209,8 @@ class Trainer:
     ]:
         ckpt, model = self.setup_model(
             self.data.nc,
-            input_channels=self.model_config.nc,
-            scale=self.model_config.scale,
+            input_channels=self.args.input_channels,
+            scale=self.args.model_scale,
             device=device,
         )
         model = model.to(device)

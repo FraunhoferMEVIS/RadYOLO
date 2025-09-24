@@ -1,4 +1,6 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Model Parameters
+input_channels: 1 # number of input channels for model
+model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Train settings -------------------------------------------------------------------------------------------------------
 model: "config/yolo11_3d.yaml" # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml

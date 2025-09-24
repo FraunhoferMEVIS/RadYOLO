@@ -26,15 +26,11 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 DimList = Annotated[list[int], annotated_types.Len(min_length=2, max_length=3)]
-
-
-class ModelConfig(BaseModel):
-    nc: int
-    scale: Literal["n", "s", "m", "l", "x"]
-
+    
 
 class DefaultConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
+    input_channels: int
+    model_scale: Literal["n", "s", "m", "l", "x"]
 
     # Train settings
     model: FilePath | NewPath  # path to model file
@@ -267,8 +263,3 @@ def get_dataset_cfg(config_path: str | Path) -> DatasetConfig:
         yaml_config = yaml.safe_load(f)
     return DatasetConfig.model_validate(yaml_config)
 
-
-def get_model_cfg(config_path: str | Path) -> ModelConfig:
-    with Path(config_path).open() as f:
-        yaml_config = yaml.safe_load(f)
-    return ModelConfig.model_validate(yaml_config)
