@@ -81,6 +81,7 @@ class DefaultConfig(BaseModel):
     warmup_epochs: float = 3.0  # warmup epochs (fractions ok)
     warmup_momentum: float = 0.8  # warmup initial momentum
     warmup_bias_lr: float = 0.1  # warmup initial bias lr
+    objectness_loss: Literal["bce", "focal"] = "bce" # loss function for objectness loss
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain

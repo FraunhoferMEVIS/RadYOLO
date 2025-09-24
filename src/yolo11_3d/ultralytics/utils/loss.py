@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, Literal
 import logging
 
 import torch
@@ -24,6 +24,27 @@ if TYPE_CHECKING:
     from yolo11_3d.nn.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
+
+
+class QualityFocalLoss(nn.Module):
+    """
+    Implements the Quality Focal Loss (https://arxiv.org/pdf/2006.04388) for addressing class imbalance
+    by down-weighting easy examples and focusing on hard negatives during training.
+
+    Attributes:
+        gamma (float): The focusing parameter that controls how much the loss focuses on hard-to-classify examples.
+    """
+
+    def __init__(self, gamma: float = 2.0):
+        super().__init__()
+        self.gamma = gamma
+
+    def forward(self, pred_logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        loss = F.binary_cross_entropy_with_logits(pred_logits, target, reduction="none")
+        pred_prob = pred_logits.sigmoid()
+        modulating_factor = torch.abs(pred_prob - target) ** self.gamma
+        loss *= modulating_factor
+        return loss.sum()
 
 class DFLoss(nn.Module):
     """Criterion class for computing DFL losses during training."""
@@ -115,10 +136,11 @@ class v8DetectionLoss:  # noqa: N801
         tal_fallback: bool = True,
         enable_mask_loss: bool = False,
         separate_objectness_head: bool = False,
+        objectness_loss: Literal["focal", "bce"] = "bce"
     ) -> None:  # model must be de-paralleled
         """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
         m = detect_layer
-        self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        self.objectness_loss = nn.BCEWithLogitsLoss(reduction="sum") if objectness_loss == "bce" else QualityFocalLoss()
         self.ce = nn.CrossEntropyLoss(reduction="none")
         self.box_gain = box
         self.classification_gain = cls
@@ -269,10 +291,10 @@ class v8DetectionLoss:  # noqa: N801
             ce_loss = (ce_loss * fg_mask).sum() / denom
             loss[4] = ce_loss
             # BCE-with-logits on objectness score
-            loss[1] = self.bce(pred_objectness_logit, target_objectness_scores).sum() / target_objectness_scores_sum
+            loss[1] = self.objectness_loss(pred_objectness_logit, target_objectness_scores) / target_objectness_scores_sum
         else:
             # BCE-with-logits on multi-label scores as in YOLO
-            loss[1] = self.bce(pred_class_logits, target_scores.to(dtype)).sum() / target_scores_sum
+            loss[1] = self.objectness_loss(pred_class_logits, target_scores.to(dtype)) / target_scores_sum
 
         # Bbox loss
         if fg_mask.sum():

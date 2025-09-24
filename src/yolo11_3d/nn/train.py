@@ -168,6 +168,7 @@ class Trainer:
             higher_resolution_prototypes=self.args.higher_resolution_prototypes,
             separate_objectness_head=self.args.separate_objectness_head,
             include_stride4_output=self.args.include_stride4_output,
+            objectness_loss=self.args.objectness_loss,
         )
         if weights_ema:
             model.load(weights_ema)

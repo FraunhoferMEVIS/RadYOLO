@@ -41,6 +41,7 @@ class HardcodedModel(nn.Module):
         higher_resolution_prototypes: bool = True,
         separate_objectness_head: bool = False,
         include_stride4_output: bool = False,
+        objectness_loss: Literal["bce", "focal"] = "bce",
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -260,7 +261,8 @@ class HardcodedModel(nn.Module):
 
         self.criterion = v8DetectionLoss(
             self, box, cls, dfl, mask_gain, class_separate_gain, self.l23, device, tal_beta=1.0, tal_fallback=True,
-            enable_mask_loss=enable_output_masks, separate_objectness_head=self.separate_objectness_head
+            enable_mask_loss=enable_output_masks, separate_objectness_head=self.separate_objectness_head,
+            objectness_loss=objectness_loss
         )
 
     @overload
