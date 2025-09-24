@@ -72,8 +72,6 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         src_path: Path,
         imgsz: tuple[int, int, int],
         augment: bool = False,
-        batch_size: int = 16,
-        stride: int = 32,
         min_stride: int = 8,
         pad: float = 0.5,
         fold: int = 0,
@@ -86,8 +84,6 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         self.src_path = src_path
         self.imgsz = imgsz
         self.augment = augment
-        self.batch_size = batch_size
-        self.stride = stride
         self.min_stride = min_stride
         self.pad = pad
         self.fold = fold

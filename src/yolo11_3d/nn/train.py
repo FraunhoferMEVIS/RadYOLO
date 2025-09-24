@@ -74,7 +74,6 @@ class Trainer:
 
         init_seeds(self.args.seed, deterministic=self.args.deterministic)
 
-        self.batch_size = self.args.batch
         self.epochs = self.args.epochs or 100
         if self.device.type in {"cpu", "mps"}:
             self.args.workers = 0
@@ -181,20 +180,11 @@ class Trainer:
 
     def _setup_train(
         self,
-        device: torch.device,
-        args: DefaultConfig,
-        batch_size: int,
-        start_epoch: int = 0,
     ) -> tuple[
         HardcodedModel,
-        bool,
         torch.GradScaler,
-        DefaultConfig,
-        int,
-        int,
         torch.utils.data.DataLoader,
         Validator | None,
-        dict[str, int],
         ModelEMA,
         int,
         torch.optim.Optimizer,
@@ -209,9 +199,9 @@ class Trainer:
             self.data.nc,
             input_channels=self.args.input_channels,
             scale=self.args.model_scale,
-            device=device,
+            device=self.device,
         )
-        model = model.to(device)
+        model = model.to(self.device)
 
         # Freeze layers
         freeze_layer_names = [".dfl"]
@@ -224,49 +214,34 @@ class Trainer:
                 layer.requires_grad = True
 
         # Check AMP
-        amp = args.amp
-        scaler = torch.GradScaler("cuda", enabled=amp)
-
-        # Check imgsz
-        grid_size = max(
-            int(
-                model.stride.max()
-                if hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
-                else 32
-            ),
-            32,
-        )
-        stride = grid_size
+        scaler = torch.GradScaler("cuda", enabled=self.args.amp)
 
         # Dataloaders
         train_loader = self.get_dataloader(
-            self.args.data, model, batch_size=batch_size, rank=-1, fold=args.fold, mode="train", device=device
+            self.args.data, model, fold=self.args.fold, mode="train"
         )
         if self.args.val:
             val_loader = self.get_dataloader(
-                self.args.data, model, batch_size=batch_size * 2, rank=-1, fold=args.fold, mode="val", device=device
+                self.args.data, model, fold=self.args.fold, mode="val"
             )
             validator = self.get_validator(
                 val_loader,
                 self.save_dir,
                 self.data.names,
             )
-            metric_keys = validator.metrics.keys + self.label_loss_items(prefix="val")
-            metrics: dict[str, int] = dict(zip(metric_keys, [0] * len(metric_keys), strict=True))
         else:
             val_loader = None
             validator = None
-            metrics = {}
         ema = ModelEMA(model)
 
         # Optimizer
-        accumulate = max(round(args.nbs / batch_size), 1)
-        weight_decay = args.weight_decay * batch_size * accumulate / args.nbs
+        accumulate = max(round(self.args.nbs / self.args.batch_size), 1)
+        weight_decay = self.args.weight_decay * self.args.batch_size * accumulate / self.args.nbs
         optimizer = self.build_optimizer(
             model=model,
-            name=args.optimizer,
-            lr=args.lr0,
-            momentum=args.momentum,
+            name=self.args.optimizer,
+            lr=self.args.lr0,
+            momentum=self.args.momentum,
             decay=weight_decay,
         )
 
@@ -277,14 +252,9 @@ class Trainer:
         scheduler.last_epoch = start_epoch - 1
         return (
             model,
-            amp,
             scaler,
-            args,
-            stride,
-            batch_size,
             train_loader,
             validator,
-            metrics,
             ema,
             accumulate,
             optimizer,
@@ -299,14 +269,9 @@ class Trainer:
     def train(self) -> None:
         (
             model,
-            amp,
             scaler,
-            args,
-            stride,
-            batch_size,
             train_loader,
             validator,
-            metrics,
             ema,
             accumulate,
             optimizer,
@@ -316,16 +281,9 @@ class Trainer:
             stopper,
             best_fitness,
             start_epoch,
-        ) = self._setup_train(
-            device=self.device,
-            args=self.args,
-            batch_size=self.batch_size,
-        )
+        ) = self._setup_train()
 
         self._train_loop(
-            epochs=self.epochs,
-            batch_size=self.batch_size,
-            args=self.args,
             model=model,
             train_loader=train_loader,
             validator=validator,
@@ -333,7 +291,6 @@ class Trainer:
             scheduler=scheduler,
             scaler=scaler,
             lf=lf,
-            amp_device_type=self.device.type,
             ema=ema,
             accumulate=accumulate,
             stopper=stopper,
@@ -344,9 +301,6 @@ class Trainer:
 
     def _train_loop(
         self,
-        epochs: int,
-        batch_size: int,
-        args: DefaultConfig,
         model: HardcodedModel,
         train_loader: torch.utils.data.DataLoader,
         validator: Validator | None,
@@ -354,7 +308,6 @@ class Trainer:
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         scaler: torch.amp.grad_scaler.GradScaler,
         lf: Callable[[int], float],
-        amp_device_type: str,
         ema: ModelEMA,
         accumulate: int,
         stopper: EarlyStopping,
@@ -362,6 +315,7 @@ class Trainer:
         best_fitness: float | None,
         start_epoch: int,
     ) -> None:
+        args = self.args
         num_batches = len(train_loader)
         num_warmup_iterations = (
             max(round(args.warmup_epochs * num_batches), 100) if args.warmup_epochs > 0 else -1
@@ -402,7 +356,7 @@ class Trainer:
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [1, args.nbs / batch_size],
+                                    [1, args.nbs / self.args.batch_size],
                                 ).round()
                             ),
                         )
@@ -423,7 +377,7 @@ class Trainer:
                                 )
 
                     # Forward
-                    with torch.autocast(amp_device_type):
+                    with torch.autocast(self.device.type):
                         batch["img"] = batch["img"].to(self.device, non_blocking=True)
                         if self.args.segmentation_output:
                             batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
@@ -457,10 +411,9 @@ class Trainer:
                     pbar.set_description(
                         ("%11s" * 2 + "%11.4g" * (1 + loss_length))
                         % (
-                            f"{self.epoch + 1}/{epochs}",
+                            f"{self.epoch + 1}/{self.epochs}",
                             f"{self._get_memory():.3g}G",
                             *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
-                            # batch["cls"].shape[0],  # batch size
                             batch["img"].shape[-1],  # imgsz
                         )
                     )
@@ -480,13 +433,13 @@ class Trainer:
                 )
                 LOGGER.warning(
                     "%15s%11s" + "%11.4g" * (loss_length + 1),
-                    f"{self.epoch + 1}/{epochs}",
+                    f"{self.epoch + 1}/{self.epochs}",
                     f"{self._get_memory():.3g}G",
                     *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
                     loss,
                 )
 
-            final_epoch = self.epoch + 1 >= epochs
+            final_epoch = self.epoch + 1 >= self.epochs
             ema.update_attr(
                 model,
                 include=["yaml", "nc", "args", "names", "stride", "class_weights", "num_classes"],
@@ -497,8 +450,7 @@ class Trainer:
                     validator=validator,
                     ema=ema,
                     best_fitness=best_fitness,
-                    loss=loss,
-                    amp=amp_device_type != "cpu",
+                    amp=self.device.type != "cpu",
                 )
                 self.save_metrics(
                     metrics={
@@ -590,45 +542,31 @@ class Trainer:
         self,
         dataset_path: Path,
         model: torch.nn.Module,
-        batch_size: int = 16,
-        rank: int = 0,
         fold: int = 0,
         mode: Literal["train", "val"] = "train",
-        device: torch.device | str = "cpu",
     ) -> DataLoader:
         assert mode in {"train", "val"}
-        dataset = self.build_dataset(
-            img_path=dataset_path, fold=fold, group=mode, model=model, batch=batch_size
-        )
-        shuffle = mode == "train"
-        workers = self.args.workers if mode == "train" else self.args.workers * 2
-        return build_dataloader(dataset, batch_size, workers, shuffle, device)
-
-    def build_dataset(
-        self,
-        img_path: Path | list[Path],
-        batch: int,
-        group: Literal["train", "val"] = "train",
-        fold: int = 0,
-        model: torch.nn.Module | None = None,
-    ) -> NIfTIDatasetWithMasks:
-        grid_size = max(
-            int(model.stride.max() if model and isinstance(model.stride, torch.Tensor) else 0), 32
-        )
-        return NIfTIDatasetWithMasks(
-            src_path=img_path,
+        dataset = NIfTIDatasetWithMasks(
+            src_path=dataset_path,
             fold=fold,
-            group=group,
+            group=mode,
             imgsz=tuple(self.args.imgsz),
-            augment=self.args.augment and group == "train",
-            batch_size=batch,
-            stride=grid_size,
+            augment=self.args.augment and mode == "train",
             min_stride=int(
                 model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
             ),
-            pad=0.0 if group == "train" else 0.5,
+            pad=0.0 if mode == "train" else 0.5,
             config=self.args
         )
+        shuffle = mode == "train"
+        data_loader = build_dataloader(
+            dataset, 
+            self.args.batch_size, 
+            self.args.workers, 
+            shuffle, 
+            self.device
+        )
+        return data_loader
 
     def save_model(
         self,
@@ -683,7 +621,6 @@ class Trainer:
         validator: Validator,
         ema: ModelEMA,
         best_fitness: float | None,
-        loss: torch.Tensor,
         amp: bool,
     ) -> tuple[dict[str, float], float, float]:
         metrics = validator(self, ema=ema, amp=amp)

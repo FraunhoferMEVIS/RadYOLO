@@ -186,9 +186,6 @@ def validate(model_path: Path, dataset_folder: Path, fold: int, group: str) -> i
             group=group,
             imgsz=tuple(train_args.imgsz),
             augment=False,
-            stride=int(model.stride.max().item())
-            if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
-            else 32,
             min_stride=int(model.stride.min().item())
             if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
             else 8,
