@@ -345,7 +345,6 @@ def random_rotation(
 
     masks_rot: torch.Tensor | None
     if masks is not None:
-        mC = masks.shape[0]
         masks_rot = F.grid_sample(
             masks.unsqueeze(0).float(),
             grid,
