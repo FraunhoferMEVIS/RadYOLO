@@ -14,7 +14,7 @@ from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from yolo11_3d.config.config import DatasetConfig, model_checkpoint_from_torch
 from yolo11_3d.data.data import NIfTIDatasetWithMasks
-from yolo11_3d.nn.onnx_export import export_model
+from yolo11_3d.export.onnx_export import export_model
 from yolo11_3d.nn.train import Trainer
 from yolo11_3d.nn.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, select_device
