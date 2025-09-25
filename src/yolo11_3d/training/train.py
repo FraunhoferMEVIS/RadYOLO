@@ -312,10 +312,9 @@ class Trainer:
         best_fitness: float | None,
         start_epoch: int,
     ) -> None:
-        config = self.config
         num_batches = len(train_loader)
         num_warmup_iterations = (
-            max(round(config.warmup_epochs * num_batches), 100) if config.warmup_epochs > 0 else -1
+            max(round(self.config.warmup_epochs * num_batches), 100) if self.config.warmup_epochs > 0 else -1
         )
         train_time_start = time.time()
         self.epoch = start_epoch
@@ -353,7 +352,7 @@ class Trainer:
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [1, config.nbs / self.config.batch_size],
+                                    [1, self.config.nbs / self.config.batch_size],
                                 ).round()
                             ),
                         )
@@ -362,7 +361,7 @@ class Trainer:
                                 num_iterations,
                                 warmup_iteration_range,
                                 [
-                                    config.warmup_bias_lr if j == 0 else 0.0,
+                                    self.config.warmup_bias_lr if j == 0 else 0.0,
                                     x["initial_lr"] * lf(self.epoch),
                                 ],
                             )
@@ -370,7 +369,7 @@ class Trainer:
                                 x["momentum"] = np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [config.warmup_momentum, config.momentum],
+                                    [self.config.warmup_momentum, self.config.momentum],
                                 )
 
                     # Forward
@@ -458,19 +457,19 @@ class Trainer:
 
             stop |= stopper(self.epoch + 1, fitness) or final_epoch
 
-            if config.save or final_epoch:
+            if self.config.save or final_epoch:
                 self.save_model(
                     epoch=self.epoch,
                     best_fitness=best_fitness or 0.0,
                     ema=ema,
                     optimizer=optimizer,
                     scaler=scaler,
-                    train_config=config,
+                    train_config=self.config,
                     metrics=metrics,
                     fitness=fitness,
                 )
 
-            if config.plots:
+            if self.config.plots:
                 plot_results(self.csv_path)
 
             self._clear_memory()
