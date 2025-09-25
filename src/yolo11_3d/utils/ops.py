@@ -71,26 +71,6 @@ def scale_boxes(
     return clip_boxes(boxes, img0_shape)
 
 
-
-def nms_(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
-    order = torch.argsort(-scores)
-    indices = torch.arange(boxes.shape[0])
-    keep = torch.ones_like(indices, dtype=torch.bool)
-
-    for i in indices:
-        if keep[i]:
-            box = boxes[order[i]]
-            iou = bbox_iou(
-                box.unsqueeze(0),
-                (boxes[order[i] + 1 :]) * keep[i + 1 :].unsqueeze(-1),
-                xyzwhd=False,
-            )
-            overlapped = torch.nonzero(iou > iou_threshold)
-            keep[overlapped + i + 1] = 0
-
-    return order[keep]
-
-
 def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
     order = torch.argsort(-scores)
     keep = []

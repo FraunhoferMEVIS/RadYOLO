@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+import seaborn
 import torch
 
 if TYPE_CHECKING:
@@ -262,7 +263,6 @@ class ConfusionMatrix:
             save_dir (str): Directory where the plot will be saved.
             names (tuple): Names of classes, used as labels on the plot.
         """
-        import seaborn  # scope for faster 'import ultralytics'
 
         array = self.matrix_ / (
             (self.matrix_.sum(0).reshape(1, -1) + 1e-9) if normalize else 1

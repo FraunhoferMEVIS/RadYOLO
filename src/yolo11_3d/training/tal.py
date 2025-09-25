@@ -603,22 +603,22 @@ def make_anchors(
 
 
 def dist2bbox(
-    distance: torch.Tensor, anchor_points: torch.Tensor, xywh: bool = True, dim: int = -1
+    distance: torch.Tensor, anchor_points: torch.Tensor, xyzwhd: bool = True, dim: int = -1
 ) -> torch.Tensor:
-    """Transform distance(ltrb) to box(xywh or xyxy)."""
+    """Transform distance(ltrb) to box(xyzwhd or xyzxyz)."""
     lt, rb = distance.chunk(2, dim)
-    x1y1 = anchor_points - lt
-    x2y2 = anchor_points + rb
-    if xywh:
-        c_xy = (x1y1 + x2y2) / 2
-        wh = x2y2 - x1y1
-        return torch.cat((c_xy, wh), dim)  # xywh bbox
-    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+    x1y1z1 = anchor_points - lt
+    x2y2z2 = anchor_points + rb
+    if xyzwhd:
+        c_xyz = (x1y1z1 + x2y2z2) / 2
+        whd = x2y2z2 - x1y1z1
+        return torch.cat((c_xyz, whd), dim)  # xyzwhd bbox
+    return torch.cat((x1y1z1, x2y2z2), dim)  # xyzxyz bbox
 
 
 def bbox2dist(anchor_points: torch.Tensor, bbox: torch.Tensor, reg_max: float) -> torch.Tensor:
-    """Transform bbox(xyxy) to dist(ltrb)."""
-    x1y1, x2y2 = bbox.chunk(2, -1)
-    return torch.cat((anchor_points - x1y1, x2y2 - anchor_points), -1).clamp_(
+    """Transform bbox(xyzxyz) to dist(ltrb)."""
+    x1y1z1, x2y2z2 = bbox.chunk(2, -1)
+    return torch.cat((anchor_points - x1y1z1, x2y2z2 - anchor_points), -1).clamp_(
         0, reg_max - 0.01
     )  # dist (lt, rb)

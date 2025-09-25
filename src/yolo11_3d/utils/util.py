@@ -45,39 +45,6 @@ def intersect_dicts(
     }
 
 
-def initialize_weights(model: nn.Module) -> None:
-    for m in model.modules():
-        if isinstance(m, nn.Conv2d):
-            pass
-        elif isinstance(m, nn.BatchNorm2d):
-            m.eps = 1e-3
-            m.momentum = 0.03
-        elif isinstance(m, nn.Hardswish | nn.LeakyReLU | nn.ReLU | nn.ReLU6 | nn.SiLU):
-            m.inplace = True
-
-
-def scale_img(
-    img: torch.Tensor, ratio: float = 1.0, same_shape: bool = False, gs=32
-) -> torch.Tensor:
-    if ratio == 1.0:
-        return img
-
-    h, w = img.shape[2:]
-    s = (int(h * ratio), int(w * ratio))
-    img = F.interpolate(img, size=s, mode="bilinear", align_corners=False)
-    if not same_shape:
-        h, w = (math.ceil(x * ratio / gs) * gs for x in (h, w))
-    return F.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)
-
-
-def model_to_dict(model: nn.Module) -> dict:
-    return {
-        "type": type(model).__name__,
-        "parameters": {name: param.shape for name, param in model.named_parameters()},
-        "children": [model_to_dict(child) for child in model.children()],
-    }
-
-
 def select_device(
     device: str | torch.device = "", _: int = 0, newline: bool = False, verbose: bool = True
 ) -> torch.device:

@@ -197,7 +197,7 @@ class v8DetectionLoss:  # noqa: N801
             pred_dist = (
                 pred_dist.view(b, a, 6, c // 6).softmax(3).matmul(self.proj.type(pred_dist.dtype))
             )
-        return dist2bbox(pred_dist, anchor_points, xywh=False)
+        return dist2bbox(pred_dist, anchor_points, xyzwhd=False)
 
     def __call__(
         self,

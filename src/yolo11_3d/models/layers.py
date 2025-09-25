@@ -556,7 +556,7 @@ class Detect(nn.Module):
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
     ) -> torch.Tensor:
-        return dist2bbox(bboxes, anchors, xywh=xywh, dim=1)
+        return dist2bbox(bboxes, anchors, xyzwhd=xywh, dim=1)
 
 
 class PrototypeMasks(nn.Module):
