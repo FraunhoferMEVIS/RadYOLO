@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from ..config.config import DatasetConfig, DefaultConfig
     from ..data.data import Batch
     from ..models.model import HardcodedModel
-    from .train import Trainer
+    from ..training.train import Trainer
     from .util import ModelEMA
     from torch.utils.data import DataLoader
 

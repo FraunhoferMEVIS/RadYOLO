@@ -31,14 +31,14 @@ from ..config.config import (
 )
 from ..data.data import NIfTIDatasetWithMasks
 from ..models.model import HardcodedModel
-from .validate import Validator
+from ..nn.validate import Validator
 
-from .util import ModelEMA, init_seeds, select_device
+from ..nn.util import ModelEMA, init_seeds, select_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .validate import Validator
+    from ..nn.validate import Validator
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)

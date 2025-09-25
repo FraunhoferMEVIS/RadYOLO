@@ -11,7 +11,7 @@ from torch.nn import functional as F
 
 from yolo11_3d.ultralytics.utils.metrics import bbox_iou
 from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
-from yolo11_3d.ultralytics.utils.tal import (
+from yolo11_3d.training.tal import (
     TaskAlignedAssigner,
     bbox2dist,
     dist2bbox,
