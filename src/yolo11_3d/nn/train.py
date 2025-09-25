@@ -556,7 +556,8 @@ class Trainer:
                 model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
             ),
             pad=0.0 if mode == "train" else 0.5,
-            config=self.args
+            normalization=self.args.normalization,
+            config=self.args,
         )
         shuffle = mode == "train"
         data_loader = build_dataloader(
@@ -564,7 +565,7 @@ class Trainer:
             self.args.batch_size, 
             self.args.workers, 
             shuffle, 
-            self.device
+            self.device,
         )
         return data_loader
 
