@@ -17,14 +17,14 @@ from yolo11_3d.ultralytics.utils.metrics import (
     DetMetrics,
     box_iou,
 )
-from yolo11_3d.ultralytics.utils.plotting import output_to_target, plot_images
+from yolo11_3d.validation.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
     from ..config.config import DatasetConfig, DefaultConfig
     from ..data.data import Batch
     from ..models.model import HardcodedModel
     from ..training.train import Trainer
-    from .util import ModelEMA
+    from ..nn.util import ModelEMA
     from torch.utils.data import DataLoader
 
 LOGGER = logging.getLogger(__name__)

@@ -19,7 +19,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.data.data import build_dataloader
-from yolo11_3d.ultralytics.utils.plotting import plot_results
+from yolo11_3d.validation.plotting import plot_results
 from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
 from ..config.config import (
@@ -31,14 +31,14 @@ from ..config.config import (
 )
 from ..data.data import NIfTIDatasetWithMasks
 from ..models.model import HardcodedModel
-from ..nn.validate import Validator
+from ..validation.validate import Validator
 
 from ..nn.util import ModelEMA, init_seeds, select_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..nn.validate import Validator
+    from ..validation.validate import Validator
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)

@@ -16,10 +16,10 @@ from yolo11_3d.config.config import DatasetConfig, model_checkpoint_from_torch
 from yolo11_3d.data.data import NIfTIDatasetWithMasks
 from yolo11_3d.export.onnx_export import export_model
 from yolo11_3d.training.train import Trainer
-from yolo11_3d.nn.validate import Validator
+from yolo11_3d.validation.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, select_device
 from yolo11_3d.data.data import build_dataloader
-from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
+from yolo11_3d.validation.plotting import plot_results as plot_results_
 from yolo11_3d.data.data_splits import k_fold_data_splits
 from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from yolo11_3d.data.convert_to_nndetection import convert_dataset_to_nndetection

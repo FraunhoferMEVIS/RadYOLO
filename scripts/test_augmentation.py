@@ -24,7 +24,7 @@ from yolo11_3d.data.augmentations import (  # type: ignore  # noqa: E402
     random_channel_dropout,
     gin_augmentation,
 )
-from yolo11_3d.ultralytics.utils.plotting import plot_images  # type: ignore  # noqa: E402
+from yolo11_3d.validation.plotting import plot_images  # type: ignore  # noqa: E402
 
 
 def seed_everything(seed: int = 0) -> None:
