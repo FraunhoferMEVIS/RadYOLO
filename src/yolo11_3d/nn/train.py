@@ -22,7 +22,7 @@ from yolo11_3d.data.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results
 from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
-from .config import (
+from ..config.config import (
     DatasetConfig,
     DefaultConfig,
     ModelCheckpoint,

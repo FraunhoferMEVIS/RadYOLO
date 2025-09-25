@@ -23,7 +23,7 @@ from yolo11_3d.data.augmentations import (
     random_channel_dropout,
     gin_augmentation,
 )
-from yolo11_3d.nn.config import DefaultConfig
+from yolo11_3d.config.config import DefaultConfig
 from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 LOGGER = logging.getLogger(__name__)

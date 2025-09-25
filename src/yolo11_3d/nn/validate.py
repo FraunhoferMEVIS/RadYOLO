@@ -20,7 +20,7 @@ from yolo11_3d.ultralytics.utils.metrics import (
 from yolo11_3d.ultralytics.utils.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
-    from .config import DatasetConfig, DefaultConfig
+    from ..config.config import DatasetConfig, DefaultConfig
     from ..data.data import Batch
     from ..models.model import HardcodedModel
     from .train import Trainer
