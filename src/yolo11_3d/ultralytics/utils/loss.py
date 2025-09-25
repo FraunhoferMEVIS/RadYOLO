@@ -20,8 +20,8 @@ from yolo11_3d.ultralytics.utils.tal import (
 
 if TYPE_CHECKING:
     from yolo11_3d.data.data import Batch
-    from yolo11_3d.nn.layers import Detect
-    from yolo11_3d.nn.model import HardcodedModel
+    from yolo11_3d.models.layers import Detect
+    from yolo11_3d.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
 

@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-from yolo11_3d.nn.augmentations import (
+from yolo11_3d.data.augmentations import (
     batch_generators_intensity_augmentations,
     enlarge_bounding_boxes,
     random_mirroring,

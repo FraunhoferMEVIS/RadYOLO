@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal, overload
 import torch
 from torch import nn
 
-from yolo11_3d.nn.layers import (
+from yolo11_3d.models.layers import (
     C2PSA,
     SPPF,
     C3k2,

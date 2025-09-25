@@ -2,8 +2,8 @@ import torch
 from copy import deepcopy
 from pathlib import Path
 
-from yolo11_3d.nn.model import HardcodedModel
-from yolo11_3d.nn.layers import (
+from yolo11_3d.models.model import HardcodedModel
+from yolo11_3d.models.layers import (
     C2f,
     Detect
 )

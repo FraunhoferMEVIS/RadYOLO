@@ -30,7 +30,7 @@ from .config import (
     model_checkpoint_from_torch,
 )
 from ..data.data import NIfTIDatasetWithMasks
-from .model import HardcodedModel
+from ..models.model import HardcodedModel
 from .validate import Validator
 
 from .util import ModelEMA, init_seeds, select_device

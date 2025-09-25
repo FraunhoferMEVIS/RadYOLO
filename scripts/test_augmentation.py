@@ -14,7 +14,7 @@ SRC_PATH = REPO_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from yolo11_3d.nn.augmentations import (  # type: ignore  # noqa: E402
+from yolo11_3d.data.augmentations import (  # type: ignore  # noqa: E402
     batch_generators_intensity_augmentations,
     enlarge_bounding_boxes,
     random_mirroring,
