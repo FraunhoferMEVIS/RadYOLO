@@ -1,4 +1,4 @@
-# yolo11-3d
+# YOLO11-3D
 
 YOLOv11 from ultralytics modified to work with 3D images.
 
@@ -14,27 +14,27 @@ This project uses `uv` for package managing and provides a `pyproject.toml`. It 
 
 After installation this project provides a cli `yolo11-3d` with built-in help.
 
-Available commands are:
-- train
-- validate
-- onnx-export
-- plot-results
-- analyze-dataset
-- create-data-splits
-- convert-to-nndetection
+Available commands are `train`, `test`, `plot-results`, `analyze-dataset`, `create-data-splits`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
-### Convert YOLO11_3D dataset to nnDetection
+### Train
 
-You can convert a dataset in this repo's format into nnDetection's Task structure:
+To train a model, call
 
 ```
-pwsh
-uv run -m yolo11_3d convert-to-nndetection <path-to-yolo11_3d-dataset> --out-root <det_data_root> --task-id 100 --task-name MyDataset --fold 0
+uv run -m yolo11_3d train <path_to_config_yaml>
 ```
 
-This creates `<det_data_root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, `labelsTr` and optional `imagesTs`, `labelsTs`, plus a `dataset.yaml`.
+where `<path_to_config_yaml>` points to the path of a configuration file for the desired training.
+
+### Test
+
+The `test` command can be used to run a trained on the `test` split of the data (and also the `train` and `val` splits):
+
+```
+uv run -m yolo11_3d test <path_to_model_checkpoint> <path_to_dataset_folder>
+```
 
 ## Dataset Format
 
@@ -74,6 +74,42 @@ an example could look like
 
 The masks folder is optional. If it exists the masks should have one channel per object containing a binary mask for each object. The channel index needs to match the index of the object in the labels .txt file. There can also be missing mask files. In these cases the segmentation loss for the respective case is just ignored.
 
+In the dataset folder you need a dataset.yaml file, which states the label names and looks like this:
+```
+names:
+  0: spleen
+  1: right_kidney
+  2: left_kidney
+  3: gall_bladder
+```
+
+### Analyze dataset
+
+To automatically analyze the dataset to get statistics about the image sizes, intensities and labels, you can call the command:
+
+```
+uv run -m yolo11_3d analyze-dataset <path_to_dataset_folder>
+```
+
+### Create data splits
+
+To automtically create a data split file, you can call:
+
+```
+uv run -m yolo11_3d create-data-splits <path_to_dataset_folder>
+```
+
+By default it splits the data using a 5-fold cross validation scheme, where each group uses three of the folds as `train` set, one as `val` set and one as `test` set. The `val` set is used to compute the validation metrics during training and select the best model, while the `test` set is left out of the training to serve as independent test data in the end.
+
+### Convert YOLO11_3D dataset to nnDetection
+
+You can convert a dataset in this repo's format into nnDetection's Task structure:
+
+```pwsh
+uv run -m yolo11_3d convert-to-nndetection <path-to-yolo11_3d-dataset> --out-root <det_data_root> --task-id 100 --task-name MyDataset --fold 0
+```
+
+This creates `<det_data_root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, `labelsTr` and optional `imagesTs`, `labelsTs`, plus a `dataset.yaml`.
 
 ## Docker Image
 

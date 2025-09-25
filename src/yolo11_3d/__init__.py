@@ -124,7 +124,7 @@ def train(config: Path) -> int:
         return 0
 
 
-@main.command("validate")
+@main.command("test")
 @click.argument(
     "model_path",
     type=click.Path(
@@ -150,8 +150,8 @@ def train(config: Path) -> int:
 )
 @click.option("--fold", default=0, help="Fold from dataset splits file to use.")
 @click.option("--group", default="test", help="Group from datas splits to use. Can be train, val or test.")
-def validate(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
-    """Validate a yolo11-3d model.
+def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
+    """Test a yolo11-3d model.
 
     MODEL: specifies the path to a model checkpoint.
     dataset_folder: specifies the path to a dataset folder.
