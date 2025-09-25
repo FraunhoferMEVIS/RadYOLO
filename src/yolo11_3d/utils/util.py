@@ -156,8 +156,8 @@ class ModelEMA:
                 if v.dtype.is_floating_point:  # true for FP16 and FP32
                     v *= d
                     v += (1 - d) * msd[k].detach()
-                    # assert v.dtype == msd[k].dtype == torch.float32, f'{k}: EMA {v.dtype},  model {msd[k].dtype}'
 
+    # TODO: Check if this can be removed
     def update_attr(
         self,
         model: nn.Module,

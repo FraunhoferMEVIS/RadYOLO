@@ -167,8 +167,8 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
 
         checkpoint = model_checkpoint_from_torch(model_path)
         model = checkpoint["ema"]
-        train_args = checkpoint["train_args"]
-        device = select_device(train_args.device)
+        train_config = checkpoint["train_config"]
+        device = select_device(train_config.device)
         model.device = device
         model.to(device)
         ema = ModelEMA(model)
@@ -177,13 +177,13 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             src_path=dataset_folder,
             fold=fold,
             group=group,
-            imgsz=tuple(train_args.imgsz),
+            imgsz=tuple(train_config.imgsz),
             augment=False,
             min_stride=int(model.stride.min().item())
             if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
             else 8,
-            normalization=train_args.normalization,
-            load_masks = train_args.segmentation_output,
+            normalization=train_config.normalization,
+            load_masks = train_config.segmentation_output,
         )
 
         dataloader = build_dataloader(
@@ -197,7 +197,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
         validator = Validator(
             dataloader=dataloader,
             save_dir=model_path.parents[1] / "validation" / group,
-            args=train_args,
+            config=train_config,
             names=dataset_config.names,
             save_predictions=True,
         )
@@ -235,9 +235,9 @@ def onnx_export(model_path: Path) -> int:
         checkpoint = model_checkpoint_from_torch(model_path)
 
         model = checkpoint["ema"]
-        train_args = checkpoint["train_args"]
+        train_config = checkpoint["train_config"]
         input_channels = getattr(model, "input_channels", 3)
-        input_shape = (input_channels, *train_args.imgsz)
+        input_shape = (input_channels, *train_config.imgsz)
 
         export_model(model, input_shape, model_path, copy=False)
     except Exception as e:

@@ -48,35 +48,35 @@ class YoloFilter(logging.Filter):
 
 class Trainer:
     def __init__(self, cfg: str | Path) -> None:
-        self.args = get_cfg(cfg, {})
-        run_dir = Path() / (self.args.project or "runs")
+        self.config = get_cfg(cfg, {})
+        run_dir = Path() / (self.config.project or "runs")
         if not run_dir.is_dir():
             msg = f"{run_dir} does not exist or is not a directory!"
             raise RuntimeError(msg)
         
-        self.save_dir = run_dir / (str(self.args.name) or time_now.strftime("%Y_%m_%d-%H_%M_%S"))
+        self.save_dir = run_dir / (str(self.config.name) or time_now.strftime("%Y_%m_%d-%H_%M_%S"))
         self.wdir = self.save_dir / "weights"
-        self.save_dir.mkdir(exist_ok=self.args.exist_ok)
-        self.wdir.mkdir(exist_ok=self.args.exist_ok)
+        self.save_dir.mkdir(exist_ok=self.config.exist_ok)
+        self.wdir.mkdir(exist_ok=self.config.exist_ok)
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
-        self.save_period = self.args.save_period
+        self.save_period = self.config.save_period
         self.csv_path = self.save_dir / "results.csv"
 
         self.check_resume()
 
-        self.device = select_device(self.args.device)
-        if self.args.use_cudnn_benchmark:
+        self.device = select_device(self.config.device)
+        if self.config.use_cudnn_benchmark:
             torch.backends.cudnn.benchmark = True
 
-        init_seeds(self.args.seed, deterministic=self.args.deterministic)
+        init_seeds(self.config.seed, deterministic=self.config.deterministic)
 
-        self.epochs = self.args.epochs or 100
+        self.epochs = self.config.epochs or 100
         if self.device.type in {"cpu", "mps"}:
-            self.args.workers = 0
+            self.config.workers = 0
 
         self.model: torch.nn.Module | None = None
-        self.data = self.get_dataset_config(self.args.data)
+        self.data = self.get_dataset_config(self.config.data)
 
         self.lf: Callable[[int], float] | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
@@ -106,22 +106,22 @@ class Trainer:
         self.ewa_alpha = 0.6
 
     def check_resume(self) -> None:
-        resume = self.args.resume
+        resume = self.config.resume
         if resume:
             try:
                 if not self.last_model_path.exists():
                     self.resume = False
                     return
 
-                ckpt_args = model_checkpoint_from_torch(self.last_model_path)["train_args"]
-                if not Path(ckpt_args.data).exists():
-                    ckpt_args.data = self.args.data
+                checkpoint_config = model_checkpoint_from_torch(self.last_model_path)["train_config"]
+                if not Path(checkpoint_config.data).exists():
+                    checkpoint_config.data = self.config.data
 
                 message = f"Resuming from model checkpoint {self.last_model_path}..."
                 print(message)
                 LOGGER.info(message)
                 resume = True
-                self.args = ckpt_args
+                self.config = checkpoint_config
 
             except Exception as e:
                 msg = "Resume checkpoint not found, please pass a valid checkpoint to resume from."
@@ -143,25 +143,25 @@ class Trainer:
         checkpoint: ModelCheckpoint | None = None
         if self.resume and checkpoint_path.suffix == ".pt" and checkpoint_path.exists():
             checkpoint = model_checkpoint_from_torch(checkpoint_path)
-            self.args = self.args.model_copy(update=checkpoint["train_args"].model_dump())
+            self.config = self.config.model_copy(update=checkpoint["train_config"].model_dump())
             weights_ema = checkpoint["ema"].to(self.device).float()
 
         model = HardcodedModel(
             input_channels=input_channels,
             num_classes=num_classes,
             scale=scale,
-            box=self.args.box,
-            cls=self.args.cls,
-            dfl=self.args.dfl,
-            mask_gain=self.args.mask_gain,
-            class_separate_gain=self.args.class_separate_gain,
+            box=self.config.box,
+            cls=self.config.cls,
+            dfl=self.config.dfl,
+            mask_gain=self.config.mask_gain,
+            class_separate_gain=self.config.class_separate_gain,
             device=device,
-            enable_output_masks=self.args.segmentation_output,
-            num_prototype_masks=self.args.prototype_masks,
-            higher_resolution_prototypes=self.args.higher_resolution_prototypes,
-            separate_objectness_head=self.args.separate_objectness_head,
-            include_stride4_output=self.args.include_stride4_output,
-            objectness_loss=self.args.objectness_loss,
+            enable_output_masks=self.config.segmentation_output,
+            num_prototype_masks=self.config.prototype_masks,
+            higher_resolution_prototypes=self.config.higher_resolution_prototypes,
+            separate_objectness_head=self.config.separate_objectness_head,
+            include_stride4_output=self.config.include_stride4_output,
+            objectness_loss=self.config.objectness_loss,
         )
         if weights_ema:
             model.load(weights_ema)
@@ -171,7 +171,7 @@ class Trainer:
         self, optimizer: torch.optim.Optimizer
     ) -> tuple[torch.optim.lr_scheduler.LRScheduler, Callable[[int], float]]:
         def lf(x: int) -> float:
-            return max(1 - x / self.epochs, 0) * (1.0 - self.args.lrf) + self.args.lrf
+            return max(1 - x / self.epochs, 0) * (1.0 - self.config.lrf) + self.config.lrf
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lf)
         return scheduler, lf
 
@@ -194,8 +194,8 @@ class Trainer:
     ]:
         ckpt, model = self.setup_model(
             self.data.nc,
-            input_channels=self.args.input_channels,
-            scale=self.args.model_scale,
+            input_channels=self.config.input_channels,
+            scale=self.config.model_scale,
             device=self.device,
         )
         model = model.to(self.device)
@@ -211,15 +211,15 @@ class Trainer:
                 layer.requires_grad = True
 
         # Check AMP
-        scaler = torch.GradScaler("cuda", enabled=self.args.amp)
+        scaler = torch.GradScaler("cuda", enabled=self.config.amp)
 
         # Dataloaders
         train_loader = self.get_dataloader(
-            self.args.data, model, fold=self.args.fold, mode="train"
+            self.config.data, model, fold=self.config.fold, mode="train"
         )
-        if self.args.val:
+        if self.config.val:
             val_loader = self.get_dataloader(
-                self.args.data, model, fold=self.args.fold, mode="val"
+                self.config.data, model, fold=self.config.fold, mode="val"
             )
             validator = self.get_validator(
                 val_loader,
@@ -232,19 +232,19 @@ class Trainer:
         ema = ModelEMA(model)
 
         # Optimizer
-        accumulate = max(round(self.args.nbs / self.args.batch_size), 1)
-        weight_decay = self.args.weight_decay * self.args.batch_size * accumulate / self.args.nbs
+        accumulate = max(round(self.config.nbs / self.config.batch_size), 1)
+        weight_decay = self.config.weight_decay * self.config.batch_size * accumulate / self.config.nbs
         optimizer = self.build_optimizer(
             model=model,
-            name=self.args.optimizer,
-            lr=self.args.lr0,
-            momentum=self.args.momentum,
+            name=self.config.optimizer,
+            lr=self.config.lr0,
+            momentum=self.config.momentum,
             decay=weight_decay,
         )
 
         # Scheduler
         scheduler, lf = self._setup_scheduler(optimizer)
-        stopper, stop = EarlyStopping(patience=self.args.patience), False
+        stopper, stop = EarlyStopping(patience=self.config.patience), False
         best_fitness, start_epoch = self.resume_training(ckpt, optimizer, scaler, ema)
         scheduler.last_epoch = start_epoch - 1
         return (
@@ -312,10 +312,10 @@ class Trainer:
         best_fitness: float | None,
         start_epoch: int,
     ) -> None:
-        args = self.args
+        config = self.config
         num_batches = len(train_loader)
         num_warmup_iterations = (
-            max(round(args.warmup_epochs * num_batches), 100) if args.warmup_epochs > 0 else -1
+            max(round(config.warmup_epochs * num_batches), 100) if config.warmup_epochs > 0 else -1
         )
         train_time_start = time.time()
         self.epoch = start_epoch
@@ -353,7 +353,7 @@ class Trainer:
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [1, args.nbs / self.args.batch_size],
+                                    [1, config.nbs / self.config.batch_size],
                                 ).round()
                             ),
                         )
@@ -362,7 +362,7 @@ class Trainer:
                                 num_iterations,
                                 warmup_iteration_range,
                                 [
-                                    args.warmup_bias_lr if j == 0 else 0.0,
+                                    config.warmup_bias_lr if j == 0 else 0.0,
                                     x["initial_lr"] * lf(self.epoch),
                                 ],
                             )
@@ -370,13 +370,13 @@ class Trainer:
                                 x["momentum"] = np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [args.warmup_momentum, args.momentum],
+                                    [config.warmup_momentum, config.momentum],
                                 )
 
                     # Forward
                     with torch.autocast(self.device.type):
                         batch["img"] = batch["img"].to(self.device, non_blocking=True)
-                        if self.args.segmentation_output:
+                        if self.config.segmentation_output:
                             batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
                                                    for masks in batch["masks"])
                         
@@ -437,12 +437,13 @@ class Trainer:
                 )
 
             final_epoch = self.epoch + 1 >= self.epochs
+            # TODO: Check if this can be removed
             ema.update_attr(
                 model,
                 include=["yaml", "nc", "args", "names", "stride", "class_weights", "num_classes"],
             )
 
-            if validator is not None and (self.args.val or final_epoch or stop):
+            if validator is not None and (self.config.val or final_epoch or stop):
                 metrics, fitness, best_fitness = self.validate(
                     validator=validator,
                     ema=ema,
@@ -462,19 +463,19 @@ class Trainer:
 
             stop |= stopper(self.epoch + 1, fitness) or final_epoch
 
-            if args.save or final_epoch:
+            if config.save or final_epoch:
                 self.save_model(
                     epoch=self.epoch,
                     best_fitness=best_fitness or 0.0,
                     ema=ema,
                     optimizer=optimizer,
                     scaler=scaler,
-                    train_args=args,
+                    train_config=config,
                     metrics=metrics,
                     fitness=fitness,
                 )
 
-            if args.plots:
+            if config.plots:
                 plot_results(self.csv_path)
 
             self._clear_memory()
@@ -547,20 +548,20 @@ class Trainer:
             src_path=dataset_path,
             fold=fold,
             group=mode,
-            imgsz=tuple(self.args.imgsz),
-            augment=self.args.augment and mode == "train",
+            imgsz=tuple(self.config.imgsz),
+            augment=self.config.augment and mode == "train",
             min_stride=int(
                 model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
             ),
             pad=0.0 if mode == "train" else 0.5,
-            normalization=self.args.normalization,
-            config=self.args,
+            normalization=self.config.normalization,
+            config=self.config,
         )
         shuffle = mode == "train"
         data_loader = build_dataloader(
             dataset, 
-            self.args.batch_size, 
-            self.args.workers, 
+            self.config.batch_size, 
+            self.config.workers, 
             shuffle, 
             self.device,
         )
@@ -573,7 +574,7 @@ class Trainer:
         ema: ModelEMA,
         optimizer: torch.optim.Optimizer,
         scaler: torch.GradScaler,
-        train_args: DefaultConfig,
+        train_config: DefaultConfig,
         metrics: dict[str, float],
         fitness: float,
     ):
@@ -586,7 +587,7 @@ class Trainer:
             updates=ema.updates,
             optimizer=optimizer.state_dict(),
             scaler=scaler.state_dict(),
-            train_args=train_args,
+            train_config=train_config,
             train_metrics={**metrics, "metrics/mAP-ewa(B)": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0},
             train_results={},
             date=datetime.datetime.now(tz=datetime.UTC),
@@ -610,7 +611,7 @@ class Trainer:
         return Validator(
             test_loader,
             save_dir=save_dir,
-            args=self.args,
+            config=self.config,
             names=names,
         )
 

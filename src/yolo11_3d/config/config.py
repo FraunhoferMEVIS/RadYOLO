@@ -216,7 +216,7 @@ class ModelCheckpoint(TypedDict):
     updates: int
     optimizer: dict | None
     scaler: dict | None
-    train_args: DefaultConfig
+    train_config: DefaultConfig
     train_metrics: dict
     train_results: dict
     date: datetime.datetime
@@ -234,7 +234,7 @@ def model_checkpoint_from_torch(checkpoint: Path) -> ModelCheckpoint:
         updates=ckpt["updates"],
         optimizer=ckpt["optimizer"],
         scaler=ckpt["scaler"],
-        train_args=DefaultConfig.model_validate(ckpt["train_args"]),
+        train_config=DefaultConfig.model_validate(ckpt["train_config"]),
         train_metrics=ckpt["train_metrics"],
         train_results=ckpt["train_results"],
         date=ckpt["date"],

@@ -36,11 +36,11 @@ class Validator():
         self,
         dataloader: DataLoader,
         save_dir: Path,
-        args: DefaultConfig,
+        config: DefaultConfig,
         names: dict[int, str],
         save_predictions: bool = False
     ) -> None:
-        self.args = args
+        self.config = config
         self.dataloader = dataloader
         self.data: DatasetConfig | None = None
         self.device: torch.device | None = None
@@ -56,9 +56,9 @@ class Validator():
             "target_img": [],
         }
         self.nc: int = len(self.names)
-        if self.args.conf is None:
-            self.args.conf = 0.001
-        self.confusion_matrix: ConfusionMatrix = ConfusionMatrix(self.nc, self.args.conf)
+        if self.config.conf is None:
+            self.config.conf = 0.001
+        self.confusion_matrix: ConfusionMatrix = ConfusionMatrix(self.nc, self.config.conf)
         self.predictions_for_saving: dict[str, list[dict[str, Any]]] = {}
         self.save_predictions = save_predictions
 
@@ -70,7 +70,7 @@ class Validator():
         self.metrics = DetMetrics(
             save_dir=self.save_dir,
             names=self.names,
-            plot=self.args.plots,
+            plot=self.config.plots,
         )
         self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
         self.niou = self.iouv.numel()
@@ -116,12 +116,12 @@ class Validator():
             preds = self.postprocess(pred_class_box, pred_mask_coeff)
 
             self.update_metrics(preds, batch, pred_prototype_masks)
-            if self.args.plots and batch_i < 3:
+            if self.config.plots and batch_i < 3:
                 self.plot_val_samples(batch, batch_i)
                 self.plot_predictions(batch, preds, batch_i)
 
         stats = self.get_stats()
-        self.finalize_metrics()
+        self.metrics.confusion_matrix = self.confusion_matrix
         self.print_results()
         if self.training:
             model.float()
@@ -137,14 +137,14 @@ class Validator():
             with self.save_dir.joinpath("predictions.json").open("w") as f:
                 LOGGER.info("Saving %s...", f.name)
                 json.dump(self.predictions_for_saving, f, indent=4)  # flatten and save
-        if self.args.plots or self.save_predictions:
+        if self.config.plots or self.save_predictions:
             LOGGER.info("Results saved to %s", self.save_dir)
         return stats
 
     def init_metrics(self) -> None:
         """Initialize evaluation metrics for YOLO."""
         self.metrics.names = self.names
-        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.args.conf)
+        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.config.conf)
         self.seen = 0
         self.predictions_for_saving = {}
         self.stats = {"tp": [], "fp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
@@ -166,7 +166,6 @@ class Validator():
     def preprocess(self, batch: Batch) -> Batch:
         """Preprocesses batch of images for YOLO validation."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
-        #batch["img"] = batch["img"].half() if self.args.half else batch["img"].float()
         batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
                                for masks in batch["masks"])
 
@@ -208,12 +207,12 @@ class Validator():
 
         return ops.non_max_suppression(
             prediction,
-            self.args.conf,
-            self.args.iou,
+            self.config.conf,
+            self.config.iou,
             labels=self.lb,
             multi_label=True,
-            agnostic=self.args.agnostic_nms,
-            max_det=self.args.max_det,
+            agnostic=self.config.agnostic_nms,
+            max_det=self.config.max_det,
             nc=self.nc,
         )
 
@@ -270,7 +269,7 @@ class Validator():
                 if num_labels:
                     for k in self.stats:
                         self.stats[k].append(stat[k])
-                    if self.args.plots:
+                    if self.config.plots:
                         self.confusion_matrix.process_batch(
                             detections=None, gt_bboxes=bboxes, gt_cls=classes
                         )
@@ -296,7 +295,7 @@ class Validator():
                         prototype_masks[sample_index],
                         gt_masks_si if gt_masks_si is not None else [],
                     )
-            if self.args.plots:
+            if self.config.plots:
                 self.confusion_matrix.process_batch(predn, bboxes, classes)
             for k in self.stats:
                 self.stats[k].append(stat[k])
@@ -489,11 +488,6 @@ class Validator():
         # Add Dice metric
         dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
         return {**self.metrics.results_dict, "metrics/dice(M)": dice_avg}
-
-    def finalize_metrics(self, *args, **kwargs) -> None:
-        """Set final values for metrics speed and confusion matrix."""
-        # self.metrics.speed = self.speed
-        self.metrics.confusion_matrix = self.confusion_matrix
     
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
@@ -506,7 +500,7 @@ class Validator():
             )
 
         # Print results per class
-        if self.args.verbose and not self.training and self.nc > 1 and len(self.stats):
+        if self.config.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
                 LOGGER.warning(
                     pf,
@@ -516,7 +510,7 @@ class Validator():
                     *self.metrics.class_result(i),
                 )
 
-        if self.args.plots:
+        if self.config.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(
                     save_dir=self.save_dir,
@@ -549,13 +543,13 @@ class Validator():
     def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
         plot_images(
             project_nifti_images(batch["img"], -3),
-            *output_to_target(preds, max_det=self.args.max_det, axis=2),
+            *output_to_target(preds, max_det=self.config.max_det, axis=2),
             fname=str(self.save_dir / f"val_batch{ni}_xy_pred.jpg"),
             names=self.names,
         )
         plot_images(
             project_nifti_images(batch["img"], -2),
-            *output_to_target(preds, max_det=self.args.max_det, axis=1),
+            *output_to_target(preds, max_det=self.config.max_det, axis=1),
             fname=str(self.save_dir / f"val_batch{ni}_xz_pred.jpg"),
             names=self.names,
         )
