@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 
-from .metrics import bbox_iou
+from ..validation.metrics import bbox_iou
 
 LOGGER = logging.getLogger(__name__)
 

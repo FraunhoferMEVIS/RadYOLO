@@ -7,7 +7,7 @@ import logging
 import torch
 from torch import nn
 
-from yolo11_3d.ultralytics.utils.metrics import bbox_iou
+from yolo11_3d.validation.metrics import bbox_iou
 
 LOGGER = logging.getLogger(__name__)
 

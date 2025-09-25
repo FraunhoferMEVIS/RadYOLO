@@ -9,8 +9,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from yolo11_3d.ultralytics.utils.metrics import bbox_iou
-from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
+from yolo11_3d.validation.metrics import bbox_iou
+from yolo11_3d.utils.ops import xyzwhd2xyzxyz
 from yolo11_3d.training.tal import (
     TaskAlignedAssigner,
     bbox2dist,

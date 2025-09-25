@@ -20,7 +20,7 @@ from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.data.data import build_dataloader
 from yolo11_3d.validation.plotting import plot_results
-from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
+from yolo11_3d.utils.torch_utils import EarlyStopping
 
 from ..config.config import (
     DatasetConfig,
@@ -33,7 +33,7 @@ from ..data.data import NIfTIDatasetWithMasks
 from ..models.model import HardcodedModel
 from ..validation.validate import Validator
 
-from ..nn.util import ModelEMA, init_seeds, select_device
+from ..utils.util import ModelEMA, init_seeds, select_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -16,7 +16,7 @@ from yolo11_3d.models.layers import (
     PrototypeMasksHighResolution,
     PrototypeMasksHighResolutionOneSkip,
 )
-from yolo11_3d.nn.util import intersect_dicts, make_divisible
+from yolo11_3d.utils.util import intersect_dicts, make_divisible
 from yolo11_3d.training.loss import v8DetectionLoss
 
 if TYPE_CHECKING:

@@ -15,7 +15,7 @@ import numpy.typing as npt
 import torch
 from PIL import Image, ImageDraw, ImageFont
 
-from ..ultralytics.utils import ops
+from ..utils import ops
 
 if TYPE_CHECKING:
     from collections.abc import Callable

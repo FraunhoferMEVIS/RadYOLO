@@ -11,8 +11,8 @@ import torch
 import torch.nn.functional as F
 from tqdm_loggable.auto import tqdm
 
-from yolo11_3d.ultralytics.utils import ops
-from yolo11_3d.ultralytics.utils.metrics import (
+from yolo11_3d.utils import ops
+from yolo11_3d.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
     box_iou,
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ..data.data import Batch
     from ..models.model import HardcodedModel
     from ..training.train import Trainer
-    from ..nn.util import ModelEMA
+    from ..utils.util import ModelEMA
     from torch.utils.data import DataLoader
 
 LOGGER = logging.getLogger(__name__)

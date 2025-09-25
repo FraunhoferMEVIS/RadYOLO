@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz
+from yolo11_3d.utils.ops import xyzwhd2xyzxyz
 
 __author__ = "kgeissler"
 

@@ -24,7 +24,7 @@ from yolo11_3d.data.augmentations import (
     gin_augmentation,
 )
 from yolo11_3d.config.config import DefaultConfig
-from yolo11_3d.ultralytics.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
+from yolo11_3d.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 LOGGER = logging.getLogger(__name__)
 
