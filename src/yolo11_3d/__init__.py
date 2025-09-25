@@ -13,16 +13,16 @@ import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from yolo11_3d.nn.config import DatasetConfig, model_checkpoint_from_torch
-from yolo11_3d.nn.data import NIfTIDatasetWithMasks
+from yolo11_3d.data.data import NIfTIDatasetWithMasks
 from yolo11_3d.nn.onnx_export import export_model
 from yolo11_3d.nn.train import Trainer
 from yolo11_3d.nn.validate import Validator
 from yolo11_3d.nn.util import ModelEMA, select_device
-from yolo11_3d.nn.data import build_dataloader
+from yolo11_3d.data.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results as plot_results_
-from yolo11_3d.data_splits import k_fold_data_splits
-from yolo11_3d.analyze_dataset import analyze_dataset as analyze_dataset_fn
-from yolo11_3d.convert_to_nndetection import convert_dataset_to_nndetection
+from yolo11_3d.data.data_splits import k_fold_data_splits
+from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
+from yolo11_3d.data.convert_to_nndetection import convert_dataset_to_nndetection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +40,6 @@ def main(verbose: bool, debug: bool) -> None:
     level = logging.DEBUG if debug else logging.INFO if verbose else logging.WARNING
 
     simple_formatter = logging.Formatter(
-        # fmt="%(asctime)s %(levelname)-9s %(name)-30s: %(message)s",
         fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(message)s",
         datefmt="[%H:%M:%S%z]",
         defaults={"spacer": " " * 11},
@@ -58,10 +57,6 @@ def main(verbose: bool, debug: bool) -> None:
     LOGGER.addHandler(err_handler)
 
     LOGGER.setLevel(logging.DEBUG)
-    # logging.basicConfig(
-    #     level=level,
-    #     # handlers=[out_handler, err_handler],
-    # )
 
     tqdm_logging.set_level(logging.INFO)
     tqdm_logging.set_log_rate(datetime.timedelta(minutes=1))
@@ -69,10 +64,8 @@ def main(verbose: bool, debug: bool) -> None:
     tqdm_handler = logging.StreamHandler(sys.stdout)
     tqdm_handler.setFormatter(
         logging.Formatter(
-            # fmt="%(asctime)s %(levelname)-9s %(spacer)s%(message)s",
             fmt="%(asctime)s %(levelname)-9s %(message)s",
             datefmt="[%H:%M:%S%z]",
-            # defaults={"spacer": " " * (30 - 11)},
         )
     )
     tqdm_logger.addHandler(tqdm_handler)

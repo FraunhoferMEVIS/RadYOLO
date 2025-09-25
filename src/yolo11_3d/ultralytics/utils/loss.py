@@ -19,7 +19,7 @@ from yolo11_3d.ultralytics.utils.tal import (
 )
 
 if TYPE_CHECKING:
-    from yolo11_3d.nn.data import Batch
+    from yolo11_3d.data.data import Batch
     from yolo11_3d.nn.layers import Detect
     from yolo11_3d.nn.model import HardcodedModel
 

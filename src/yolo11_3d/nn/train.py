@@ -18,7 +18,7 @@ import yaml
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
-from yolo11_3d.nn.data import build_dataloader
+from yolo11_3d.data.data import build_dataloader
 from yolo11_3d.ultralytics.utils.plotting import plot_results
 from yolo11_3d.ultralytics.utils.torch_utils import EarlyStopping
 
@@ -29,7 +29,7 @@ from .config import (
     get_cfg,
     model_checkpoint_from_torch,
 )
-from .data import NIfTIDatasetWithMasks
+from ..data.data import NIfTIDatasetWithMasks
 from .model import HardcodedModel
 from .validate import Validator
 
