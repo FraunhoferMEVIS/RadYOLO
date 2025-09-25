@@ -7,6 +7,7 @@ name = "yolo11-3d"
 version = "0.1.0.dev20250725"
 authors = [
   { name = "Laurens Müller-Groh", email = "laurens.mueller-groh@mevis.fraunhofer.de" },
+  { name = "Kai Geissler", email = "kai.geissler@mevis.fraunhofer.de" },
 ]
 description = "Add your description here"
 readme = "README.md"
