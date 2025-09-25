@@ -11,11 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict
 from pydantic import (
     BaseModel,
-    ConfigDict,
     DirectoryPath,
     Field,
     FilePath,
-    NewPath,
     NonNegativeInt,
     model_validator,
 )

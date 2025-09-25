@@ -3,8 +3,6 @@ from __future__ import annotations
 import random
 from pathlib import Path
 import sys
-import os
-from typing import Callable
 
 import torch
 

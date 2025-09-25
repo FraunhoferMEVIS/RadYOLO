@@ -20,11 +20,11 @@ from yolo11_3d.validation.metrics import (
 from yolo11_3d.validation.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
-    from ..config.config import DatasetConfig, DefaultConfig
-    from ..data.data import Batch
-    from ..models.model import HardcodedModel
-    from ..training.train import Trainer
-    from ..utils.util import ModelEMA
+    from yolo11_3d.config.config import DatasetConfig, DefaultConfig
+    from yolo11_3d.data.data import Batch
+    from yolo11_3d.models.model import HardcodedModel
+    from yolo11_3d.training.train import Trainer
+    from yolo11_3d.utils.util import ModelEMA
     from torch.utils.data import DataLoader
 
 LOGGER = logging.getLogger(__name__)

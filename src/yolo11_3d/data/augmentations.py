@@ -5,7 +5,6 @@ from yolo11_3d.utils.ops import xyzwhd2xyzxyz
 __author__ = "kgeissler"
 
 import math
-import numpy as np
 import random
 from typing import TYPE_CHECKING, Any
 
