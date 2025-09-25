@@ -157,24 +157,4 @@ class ModelEMA:
                     v *= d
                     v += (1 - d) * msd[k].detach()
 
-    # TODO: Check if this can be removed
-    def update_attr(
-        self,
-        model: nn.Module,
-        include: Collection[str] = (),
-        exclude: Collection[str] = ("process_group", "reducer"),
-    ) -> None:
-        """Updates attributes and saves stripped model with optimizer removed."""
-        if self.enabled:
-            copy_attr(self.ema, model, include, exclude)
-
-
-def copy_attr(
-    a: object, b: object, include: Collection[str] = (), exclude: Collection[str] = ()
-) -> None:
-    """Copies attributes from object 'b' to object 'a', with options to include/exclude certain attributes."""
-    for k, v in b.__dict__.items():
-        if (len(include) and k not in include) or k.startswith("_") or k in exclude:
-            continue
-        setattr(a, k, v)
 

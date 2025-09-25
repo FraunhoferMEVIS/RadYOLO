@@ -437,11 +437,6 @@ class Trainer:
                 )
 
             final_epoch = self.epoch + 1 >= self.epochs
-            # TODO: Check if this can be removed
-            ema.update_attr(
-                model,
-                include=["yaml", "nc", "args", "names", "stride", "class_weights", "num_classes"],
-            )
 
             if validator is not None and (self.config.val or final_epoch or stop):
                 metrics, fitness, best_fitness = self.validate(
