@@ -11,19 +11,12 @@ from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 import tqdm_loggable
 import tqdm_loggable.utils
 import yaml
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
-from yolo11_3d.data.data import build_dataloader, NIfTIDatasetWithMasks
-from yolo11_3d.models.model import HardcodedModel
-from yolo11_3d.validation.plotting import plot_results
-from yolo11_3d.validation.validate import Validator
-from yolo11_3d.utils.torch_utils import EarlyStopping
-from yolo11_3d.utils.util import ModelEMA, init_seeds, select_device
 from yolo11_3d.config.config import (
     DatasetConfig,
     DefaultConfig,
@@ -31,11 +24,18 @@ from yolo11_3d.config.config import (
     get_cfg,
     model_checkpoint_from_torch,
 )
+from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
+from yolo11_3d.models.model import HardcodedModel
+from yolo11_3d.utils.torch_utils import EarlyStopping
+from yolo11_3d.utils.util import ModelEMA, init_seeds, select_device
+from yolo11_3d.validation.plotting import plot_results
+from yolo11_3d.validation.validate import Validator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from yolo11_3d.validation.validate import Validator
+    from torch.utils.data import DataLoader
+
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)
@@ -53,8 +53,8 @@ class Trainer:
         if not run_dir.is_dir():
             msg = f"{run_dir} does not exist or is not a directory!"
             raise RuntimeError(msg)
-        
-        self.save_dir = run_dir / (str(self.config.name) or time_now.strftime("%Y_%m_%d-%H_%M_%S"))
+
+        self.save_dir = run_dir / str(self.config.name)
         self.wdir = self.save_dir / "weights"
         self.save_dir.mkdir(exist_ok=self.config.exist_ok)
         self.wdir.mkdir(exist_ok=self.config.exist_ok)
@@ -94,7 +94,10 @@ class Trainer:
         )
         file_handler.setFormatter(
             logging.Formatter(
-                fmt="%(asctime)s %(levelname)- 9s %(module)30.30s:%(funcName)-14.14s:%(lineno)- 4d: %(message)s",
+                fmt=(
+                    "%(asctime)s %(levelname)- 9s %(module)30.30s:"
+                    "%(funcName)-14.14s:%(lineno)- 4d: %(message)s"
+                ),
                 datefmt="[%H:%M:%S%z]",
             )
         )
@@ -113,13 +116,12 @@ class Trainer:
                     self.resume = False
                     return
 
-                checkpoint_config = model_checkpoint_from_torch(self.last_model_path)["train_config"]
+                checkpoint_config = model_checkpoint_from_torch(self.last_model_path)[
+                    "train_config"
+                ]
                 if not Path(checkpoint_config.data).exists():
                     checkpoint_config.data = self.config.data
 
-                message = f"Resuming from model checkpoint {self.last_model_path}..."
-                print(message)
-                LOGGER.info(message)
                 resume = True
                 self.config = checkpoint_config
 
@@ -172,6 +174,7 @@ class Trainer:
     ) -> tuple[torch.optim.lr_scheduler.LRScheduler, Callable[[int], float]]:
         def lf(x: int) -> float:
             return max(1 - x / self.epochs, 0) * (1.0 - self.config.lrf) + self.config.lrf
+
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lf)
         return scheduler, lf
 
@@ -233,7 +236,9 @@ class Trainer:
 
         # Optimizer
         accumulate = max(round(self.config.nbs / self.config.batch_size), 1)
-        weight_decay = self.config.weight_decay * self.config.batch_size * accumulate / self.config.nbs
+        weight_decay = (
+            self.config.weight_decay * self.config.batch_size * accumulate / self.config.nbs
+        )
         optimizer = self.build_optimizer(
             model=model,
             name=self.config.optimizer,
@@ -314,7 +319,9 @@ class Trainer:
     ) -> None:
         num_batches = len(train_loader)
         num_warmup_iterations = (
-            max(round(self.config.warmup_epochs * num_batches), 100) if self.config.warmup_epochs > 0 else -1
+            max(round(self.config.warmup_epochs * num_batches), 100)
+            if self.config.warmup_epochs > 0
+            else -1
         )
         train_time_start = time.time()
         self.epoch = start_epoch
@@ -376,9 +383,13 @@ class Trainer:
                     with torch.autocast(self.device.type):
                         batch["img"] = batch["img"].to(self.device, non_blocking=True)
                         if self.config.segmentation_output:
-                            batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
-                                                   for masks in batch["masks"])
-                        
+                            batch["masks"] = tuple(
+                                masks.to(self.device, non_blocking=True)
+                                if masks is not None
+                                else None
+                                for masks in batch["masks"]
+                            )
+
                         loss, self.loss_items = cast(
                             "tuple[torch.Tensor, torch.Tensor]", model(batch)
                         )
@@ -405,30 +416,30 @@ class Trainer:
                     # Log
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
                     pbar.set_description(
-                        ("%11s" * 2 + "%11.4g" * (1 + loss_length))
+                        ("%11s" * 2 + "%11.4g" * (loss_length))
                         % (
                             f"{self.epoch + 1}/{self.epochs}",
                             f"{self._get_memory():.3g}G",
                             *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
-                            batch["img"].shape[-1],  # imgsz
                         )
                     )
 
             scheduler.step()
 
             if loss is None:
-                raise RuntimeError
+                message = "Detected None loss"
+                raise RuntimeError(message)
 
             if tloss is not None:
                 LOGGER.warning(
-                    "%15s" * 1 + "%11s" * (2 + len(self.loss_names)),
+                    "%15s" * 1 + "%11s" * (2 + len(self.loss_names)),  # noqa: G003
                     "Completed Epoch",
                     "GPU_mem",
                     *self.loss_names,
                     "Loss",
                 )
                 LOGGER.warning(
-                    "%15s%11s" + "%11.4g" * (loss_length + 1),
+                    "%15s%11s" + "%11.4g" * (loss_length + 1),  # noqa: G003
                     f"{self.epoch + 1}/{self.epochs}",
                     f"{self._get_memory():.3g}G",
                     *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
@@ -523,12 +534,11 @@ class Trainer:
     def get_dataset_config(
         dataset_folder: Path,
     ) -> DatasetConfig:
-        """Reduction of get_dataset(), check_det_dataset(), check_file() and validation included in Pydantic model."""
+        """Reduction of get_dataset(), check_file() and validation included in Pydantic model."""
         dataset_config_path = dataset_folder / "dataset.yaml"
         with Path(dataset_config_path).open() as f:
             yaml_config = yaml.safe_load(f)
-        dataset_config = DatasetConfig.model_validate(yaml_config)
-        return dataset_config
+        return DatasetConfig.model_validate(yaml_config)
 
     def get_dataloader(
         self,
@@ -537,7 +547,9 @@ class Trainer:
         fold: int = 0,
         mode: Literal["train", "val"] = "train",
     ) -> DataLoader:
-        assert mode in {"train", "val"}
+        if mode not in {"train", "val"}:
+            message = f"get_dataloader() only supports modes train and val, but got {mode}"
+            raise ValueError(message)
         dataset = NIfTIDatasetWithMasks(
             src_path=dataset_path,
             fold=fold,
@@ -552,14 +564,13 @@ class Trainer:
             config=self.config,
         )
         shuffle = mode == "train"
-        data_loader = build_dataloader(
-            dataset, 
-            self.config.batch_size, 
-            self.config.workers, 
-            shuffle, 
+        return build_dataloader(
+            dataset,
+            self.config.batch_size,
+            self.config.workers,
+            shuffle,
             self.device,
         )
-        return data_loader
 
     def save_model(
         self,
@@ -571,7 +582,7 @@ class Trainer:
         train_config: DefaultConfig,
         metrics: dict[str, float],
         fitness: float,
-    ):
+    ) -> None:
         buffer = io.BytesIO()
         checkpoint = ModelCheckpoint(
             epoch=epoch,
@@ -582,7 +593,12 @@ class Trainer:
             optimizer=optimizer.state_dict(),
             scaler=scaler.state_dict(),
             train_config=train_config,
-            train_metrics={**metrics, "metrics/mAP-ewa(B)": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0},
+            train_metrics={
+                **metrics,
+                "metrics/mAP-ewa(B)": float(self.ewa_mAP1095)
+                if self.ewa_mAP1095 is not None
+                else 0.0,
+            },
             train_results={},
             date=datetime.datetime.now(tz=datetime.UTC),
         )
@@ -617,20 +633,16 @@ class Trainer:
         amp: bool,
     ) -> tuple[dict[str, float], float, float]:
         metrics = validator(self, ema=ema, amp=amp)
-        # Update stateful EWA using per-epoch mAP 0.1–0.95
         map_val = metrics.get("metrics/mAP10-95(B)")
         if map_val is not None:
             if self.ewa_mAP1095 is None:
                 self.ewa_mAP1095 = float(map_val)
             else:
-                self.ewa_mAP1095 = self.ewa_alpha * float(self.ewa_mAP1095) + (1.0 - self.ewa_alpha) * float(map_val)
+                self.ewa_mAP1095 = self.ewa_alpha * float(self.ewa_mAP1095) + (
+                    1.0 - self.ewa_alpha
+                ) * float(map_val)
             metrics["metrics/mAP-ewa(B)"] = float(self.ewa_mAP1095)
-        # Use EWA as new fitness metric if available, otherwise fall back to original
-        fitness: float = (
-            float(self.ewa_mAP1095)
-            if self.ewa_mAP1095 is not None
-            else 0.0
-        )
+        fitness = float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0
         if not best_fitness or best_fitness < fitness:
             best_fitness = fitness
         return metrics, fitness, best_fitness
@@ -671,14 +683,9 @@ class Trainer:
         if ckpt["ema"] is not None:
             ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
             ema.updates = ckpt["updates"]
-        # Restore stateful EWA metric if present in saved train_metrics
-        try:
-            ewa_saved = ckpt.get("train_metrics", {}).get("metrics/mAP-ewa(B)")
-            if isinstance(ewa_saved, (int, float)):
-                self.ewa_mAP1095 = float(ewa_saved)
-        except Exception:
-            pass
-        assert start_epoch > 0
+
+        self.ewa_mAP1095 = ckpt.get("train_metrics", {}).get("metrics/mAP-ewa(B)")
+
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",
             self.last_model_path,
