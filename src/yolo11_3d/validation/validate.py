@@ -117,6 +117,9 @@ class Validator():
 
             self.update_metrics(preds, batch, pred_prototype_masks)
             if self.config.plots and batch_i < 3:
+                val_sample_folder = self.save_dir / "validation_samples"
+                if not val_sample_folder.exists():
+                    val_sample_folder.mkdir()
                 self.plot_val_samples(batch, batch_i)
                 self.plot_predictions(batch, preds, batch_i)
 
@@ -528,7 +531,7 @@ class Validator():
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
             batch["bboxes"][:, [0, 1, 3, 4]],
-            fname=str(self.save_dir / f"val_batch{ni}_xy_labels.jpg"),
+            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xy_labels.jpg"),
             names=self.names,
         )
         plot_images(
@@ -536,21 +539,22 @@ class Validator():
             batch["batch_idx"],
             batch["cls"].squeeze(-1),
             batch["bboxes"][:, [0, 2, 3, 5]],
-            fname=str(self.save_dir / f"val_batch{ni}_xz_labels.jpg"),
+            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xz_labels.jpg"),
             names=self.names,
         )
 
     def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
+        """Plot predictions samples."""
         plot_images(
             project_nifti_images(batch["img"], -3),
             *output_to_target(preds, max_det=self.config.max_det, axis=2),
-            fname=str(self.save_dir / f"val_batch{ni}_xy_pred.jpg"),
+            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xy_pred.jpg"),
             names=self.names,
         )
         plot_images(
             project_nifti_images(batch["img"], -2),
             *output_to_target(preds, max_det=self.config.max_det, axis=1),
-            fname=str(self.save_dir / f"val_batch{ni}_xz_pred.jpg"),
+            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xz_pred.jpg"),
             names=self.names,
         )
 
