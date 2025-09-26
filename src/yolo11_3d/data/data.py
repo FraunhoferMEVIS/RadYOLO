@@ -394,5 +394,5 @@ def build_dataloader(
         num_workers=number_workers,
         pin_memory=(device.type if isinstance(device, torch.device) else device) != "cpu",
         collate_fn=getattr(dataset, "collate_fn", None),
-        persistent_workers=True
+        persistent_workers=number_workers > 0,
     )

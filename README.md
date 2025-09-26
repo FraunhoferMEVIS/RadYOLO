@@ -123,8 +123,23 @@ docker build -t yolo11-3d:latest .
 
 The source code can be found in `src/`
 
-The `yolo11-3d`-package is split up into two subpackage trees.
+### Tests
 
-The `ultralytics` subpackage contains code copied from the ultralytics repository. To account for 3D data part of the code was slightly modified. Therefore all code in this package is subject to their respective license.
+End-to-end CLI tests live in `tests/` and create a tiny synthetic dataset (two 16×16×16 volumes) to exercise all commands quickly on CPU. Install dev dependencies and run:
 
-The `nn` subpackage contains code which was heavily modified or developed from scratch and is therefore not considered to be subject to the ultralytics license.
+```bash
+cd ./tests
+uv run pytest
+```
+
+Or with plain pip:
+```bash
+pip install -e .[dev]
+cd ./tests
+pytest
+```
+
+Optional coverage:
+```bash
+pytest --cov=yolo11_3d --cov-report=term-missing
+```
