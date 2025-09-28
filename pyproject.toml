@@ -79,6 +79,7 @@ ignore = [
   "D10",    # document later, or so they said...
   # "TRY",
   "COM812", # we use the magic trailing comma
+  "S101",   # Allow asserts
   "S311",   # we have no requirements for cryptographically secure randomness
 ]
 
