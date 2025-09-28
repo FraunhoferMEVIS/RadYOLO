@@ -409,3 +409,80 @@ def convert_to_nndetection(dataset_path: Path, out_root: Path, task_id: int, tas
         return 1
     else:
         return 0
+
+
+@main.command("predict")
+@click.argument(
+    "model_path",
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.argument(
+    "input_dir",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.argument(
+    "output_dir",
+    type=click.Path(
+        file_okay=False,
+        dir_okay=True,
+        writable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--conf",
+    default=0.1,
+    type=float,
+    help="Confidence threshold (overrides training config).",
+)
+@click.option(
+    "--iou",
+    default=0.2,
+    type=float,
+    help="IoU threshold for NMS (overrides training config).",
+)
+@click.option(
+    "--device",
+    default="0",
+    type=str,
+    help="Device for inference (e.g. cpu, 0). Overrides training config device.",
+)
+def predict(
+    model_path: Path,
+    input_dir: Path,
+    output_dir: Path,
+    conf: float | None,
+    iou: float | None,
+    device: str | None,
+) -> int:
+    """Run inference on .nii.gz images in INPUT_DIR and write JSON (and masks) to OUTPUT_DIR."""
+    try:
+        from yolo11_3d.inference.predict import PredictionConfig, run_prediction
+        return run_prediction(
+            PredictionConfig(
+                model_path=model_path,
+                input_dir=input_dir,
+                output_dir=output_dir,
+                conf=conf,
+                iou=iou,
+                device=device,
+            )
+        )
+    except Exception as e:  # pragma: no cover
+        LOGGER.exception("Prediction failed", exc_info=e)
+        return 1
