@@ -5,26 +5,28 @@ import logging
 import os
 from collections.abc import Sized
 from pathlib import Path
-from typing import Literal, TypedDict, cast, NotRequired
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 
 import nibabel as nib
 import numpy as np
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F  # noqa: N812
+from torch.utils.data import DataLoader, Dataset
 
 from yolo11_3d.data.augmentations import (
     batch_generators_intensity_augmentations,
     enlarge_bounding_boxes,
+    gin_augmentation,
+    random_channel_dropout,
     random_mirroring,
+    random_rotation,
     random_zoom,
     tensor_cutout,
-    random_rotation,
-    random_channel_dropout,
-    gin_augmentation,
 )
-from yolo11_3d.config.config import DefaultConfig
 from yolo11_3d.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
+
+if TYPE_CHECKING:
+    from yolo11_3d.config.config import DefaultConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,23 +35,18 @@ class Sample(TypedDict):
     image: torch.Tensor
     shape: tuple[int, int, int]
     original_shape: tuple[int, int, int]
-    ratio_pad: (
-        tuple[tuple[float, float, float], tuple[int, int, int]]
-        | None
-    )
+    ratio_pad: tuple[tuple[float, float, float], tuple[int, int, int]] | None
     classes: torch.Tensor
     bboxes: torch.Tensor
     masks: torch.Tensor | None
     case_name: str
 
+
 class Batch(TypedDict):
     img: torch.Tensor
     ori_shape: tuple[tuple[int, int, int], ...]
     ratio_pad: tuple[
-        tuple[
-            tuple[float, float, float], tuple[int, int, int]
-        ]
-        | None,
+        tuple[tuple[float, float, float], tuple[int, int, int]] | None,
         ...,
     ]
     shape: tuple[tuple[int, int, int], ...]
@@ -59,12 +56,14 @@ class Batch(TypedDict):
     masks: tuple[torch.Tensor | None, ...]
     case_names: tuple[str]
 
+
 class NormalizationConfig(TypedDict):
     type: Literal["none", "zscore", "ct", "255_to_01"]
     mean: NotRequired[float]
     std: NotRequired[float]
     clip_min: NotRequired[float]
     clip_max: NotRequired[float]
+
 
 class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
     def __init__(
@@ -91,11 +90,12 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         self.normalization = normalization
         self.config = config
         self.load_masks = load_masks
-        splits_file = os.path.join(src_path, "data_splits.json")
-        with open(splits_file, "r") as file:
+        splits_file = Path(src_path) / "data_splits.json"
+        with splits_file.open("r") as file:
             splits = json.load(file)
         if fold >= len(splits):
-            raise Exception(f"There are only {len(splits)} folds defined, but fold index {fold} was selected.")
+            msg = f"There are only {len(splits)} folds defined, but fold index {fold} was selected."
+            raise Exception(msg)
         self.cases: list[str] = splits[fold][group]
 
     def __len__(self) -> int:
@@ -143,20 +143,23 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             keep_box_volume=self.config.rotation_keep_box_volume,
         )
 
-        image, labels, masks = tensor_cutout(image, labels, masks, self.config.cutout_params, self.config.prob_cutout)
+        image, labels, masks = tensor_cutout(
+            image, labels, masks, self.config.cutout_params, self.config.prob_cutout
+        )
         nl = len(labels)
         if nl:
             labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
 
-        image, labels, masks = enlarge_bounding_boxes(image, labels, masks, self.imgsz, self.min_stride)
-        
+        image, labels, masks = enlarge_bounding_boxes(
+            image, labels, masks, self.imgsz, self.min_stride
+        )
+
         if nl:
             labels[:, 1:] = labels[:, 1:] / scale_tensor
 
         image, labels, masks = random_mirroring(
             image, labels, masks, self.config.mirror_axes, self.config.prob_mirroring
         )
-
 
         if self.config.do_batchgenerators_intensity_augmentation:
             image = batch_generators_intensity_augmentations(
@@ -180,7 +183,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                 gamma_p_invert=self.config.intensity_gamma_p_invert,
                 gamma_p_retain_stats=self.config.intensity_gamma_p_retain_stats,
             )
-        
+
         image, labels, masks = gin_augmentation(
             image,
             labels,
@@ -196,7 +199,9 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             labels,
             masks,
             drop_probabilities=self.config.channel_dropout_probabilities,
-            fill_value=None if self.config.channel_dropout_use_mean else self.config.channel_dropout_fill_value,
+            fill_value=None
+            if self.config.channel_dropout_use_mean
+            else self.config.channel_dropout_fill_value,
         )
 
         sample["image"] = image
@@ -231,16 +236,16 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         )
 
     def load_image(self, case_name: str) -> torch.Tensor:
-        image_path = os.path.join(self.src_path, "images", f"{case_name}.nii.gz")
-        if not os.path.exists(image_path):
-            raise IOError(f"Image path does not exists: {image_path}. Is your dataset format correct?")
+        image_path = Path(self.src_path) / "images" / f"{case_name}.nii.gz"
+        if not image_path.exists():
+            msg = f"Image path does not exists: {image_path}. Is your dataset format correct?"
+            raise OSError(msg)
         nifti_image = nib.loadsave.load(image_path)
         if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
             raise TypeError
         image = np.asanyarray(nifti_image.dataobj, dtype=np.float32)
         image_tensor = torch.from_numpy(image)
-        image_tensor = image_tensor.permute(*reversed(range(image_tensor.ndim)))
-        return image_tensor
+        return image_tensor.permute(*reversed(range(image_tensor.ndim)))
 
     def resample_and_normalize(
         self, image: torch.Tensor
@@ -270,13 +275,13 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         eps = 1e-6
         if isinstance(normalization_cfg, list):
             if len(normalization_cfg) != C:
-                raise ValueError(
-                    f"Normalization config length ({len(normalization_cfg)}) does not match number of channels ({C})."
-                )
+                msg = f"Normalization config length ({len(normalization_cfg)}) does not match number of channels ({C})."
+                raise ValueError(msg)
             for c in range(C):
                 entry = normalization_cfg[c]
                 if not isinstance(entry, dict) or "type" not in entry:
-                    raise ValueError("Invalid normalization entry; expected dict with 'type'")
+                    msg = "Invalid normalization entry; expected dict with 'type'"
+                    raise ValueError(msg)
 
                 normalization_scheme = str(entry.get("type", "none"))
 
@@ -299,7 +304,8 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                     x = x.clamp(clip_min, clip_max)
                     image[c] = (x - mean) / std
                 else:
-                    raise NotImplementedError(f"Unknown normalization scheme '{normalization_scheme}' for channel {c}")
+                    msg = f"Unknown normalization scheme '{normalization_scheme}' for channel {c}"
+                    raise NotImplementedError(msg)
         elif isinstance(normalization_cfg, dict):
             normalization_scheme = normalization_cfg["type"]
             if normalization_scheme == "none":
@@ -319,28 +325,33 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                 image = image.clamp(clip_min, clip_max)
                 image = (image - mean) / std
             else:
-                raise NotImplementedError(f"Unknown normalization scheme '{normalization_cfg}'")
+                msg = f"Unknown normalization scheme '{normalization_cfg}'"
+                raise NotImplementedError(msg)
         else:
-            raise ValueError(f"Invalid normalization config; expected string or dict but got {normalization_cfg}")
+            msg = f"Invalid normalization config; expected string or dict but got {normalization_cfg}"
+            raise TypeError(msg)
 
         return image
-    
-    def load_labels_and_masks(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None]]:
-        label_path = os.path.join(self.src_path, "labels", f"{case_name}.txt")
-        with open(label_path, "r") as file:
+
+    def load_labels_and_masks(
+        self, case_name: str
+    ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None]]:
+        label_path = Path(self.src_path) / "labels" / f"{case_name}.txt"
+        with label_path.open("r") as file:
             lines = file.read().strip().splitlines()
         if lines:
             string_labels = [line.split() for line in lines if len(line)]
             if any(len(label) not in (0, 7) for label in string_labels):
-                raise Exception(f"Labels in wrong fomat in file {label_path}")
+                msg = f"Labels in wrong fomat in file {label_path}"
+                raise Exception(msg)
             labels = np.array(string_labels, dtype=np.float32)
         else:
             labels = np.zeros((0, 7))
         classes = torch.from_numpy(labels[:, 0:1])
         bboxes = torch.from_numpy(labels[:, 1:])
 
-        mask_path = os.path.join(self.src_path, "masks", f"{case_name}.nii.gz")
-        if self.load_masks and os.path.exists(mask_path):
+        mask_path = Path(self.src_path) / "masks" / f"{case_name}.nii.gz"
+        if self.load_masks and mask_path.exists():
             nifti_image = nib.loadsave.load(mask_path)
             if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
                 raise TypeError
@@ -369,7 +380,10 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                 "cls": torch.cat([sample["classes"] for sample in batch], 0),
                 "bboxes": torch.cat([sample["bboxes"] for sample in batch], 0),
                 "batch_idx": torch.cat(
-                    [torch.full(sample["classes"].size()[:1], idx) for idx, sample in enumerate(batch)],
+                    [
+                        torch.full(sample["classes"].size()[:1], idx)
+                        for idx, sample in enumerate(batch)
+                    ],
                     0,
                 ),
                 "masks": tuple(sample["masks"] for sample in batch),
