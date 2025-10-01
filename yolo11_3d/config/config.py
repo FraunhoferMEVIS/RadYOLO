@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import annotated_types
 import logging
 import pathlib
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, Self, TypedDict
+
 import torch
 import yaml
-
-from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict
 from pydantic import (
     BaseModel,
     DirectoryPath,
@@ -23,8 +22,28 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DimList = Annotated[list[int], annotated_types.Len(min_length=2, max_length=3)]
-    
+
+def _validate_normalization_entry(entry: dict) -> dict:
+    allowed = {"none", "zscore", "255_to_01", "ct"}
+    if not isinstance(entry, dict):
+        msg = "Invalid normalization entry; must be dict with a 'type' field"
+        raise TypeError(msg)
+    if "type" not in entry:
+        msg = "Each normalization entry must have a 'type' field"
+        raise ValueError(msg)
+    if entry["type"] not in allowed:
+        msg = f"Unsupported normalization type '{entry['type']}'. Allowed: {sorted(allowed)}"
+        raise ValueError(msg)
+    if entry["type"] == "ct" and not (
+        "mean" in entry and "std" in entry and "clip_min" in entry and "clip_max" in entry
+    ):
+        msg = (
+            f"ct normalization needs to define type, mean, std, clip_min "
+            f"and clip_max, but only has keys {entry.keys()}"
+        )
+        raise ValueError(msg)
+    return entry
+
 
 class DefaultConfig(BaseModel):
     input_channels: int
@@ -32,18 +51,21 @@ class DefaultConfig(BaseModel):
 
     # Train settings
     data: DirectoryPath  # path to data folder containing dataset.yaml
-    fold: int
-    epochs: int = 100  # number of epochs to train for
+    fold: int  # fold from data_splits.json to use
+    epochs: int = 1000  # number of epochs to train for
     patience: int = (
         100  # epochs to wait for no observable improvement for early stopping of training
     )
     batch_size: int = 2  # number of images per batch
-    imgsz: DimList  # input images size as int for train and val modes, or list[h,w] for predict and export modes
-    normalization: dict | list[dict] = {"type": "none"}  # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
+    imgsz: list[int, int, int]  # input images size as (depth, height, width)
+    # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
+    # applied globally or a list of such dicts for each channel. For ct you have to define
+    # mean, std, clip_min and clip_max in the dict.
+    normalization: dict | list[dict] = {"type": "none"}
     save: bool = True  # save train checkpoints
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     device: str = ""  # device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
-    workers: int = 8  # number of worker threads for data loading (per RANK if DDP)
+    workers: int = 6  # number of worker threads for data loading (per RANK if DDP)
     project: str = ""  # project name
     name: int | str  # experiment name, results saved to 'project/name' directory
     exist_ok: bool = False  # whether to overwrite existing experiment
@@ -55,11 +77,13 @@ class DefaultConfig(BaseModel):
     deterministic: bool = True  # whether to enable deterministic mode
     resume: bool | FilePath = False  # resume training from last checkpoint
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
-    use_cudnn_benchmark: bool = True # Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
+    # Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and
+    # chooses the best one
+    use_cudnn_benchmark: bool = True
 
     # Val/Test Settings
     val: bool = True  # validate/test during training
-    conf: float | None =  0.001 # object confidence threshold for detection during validation
+    conf: float | None = 0.001  # object confidence threshold for detection during validation
     iou: float = 0.2  # intersection over union (IoU) threshold for NMS
     max_det: int = 300  # maximum number of detections per image
     half: bool = False  # use half precision (FP16)
@@ -78,20 +102,22 @@ class DefaultConfig(BaseModel):
     warmup_epochs: float = 3.0  # warmup epochs (fractions ok)
     warmup_momentum: float = 0.8  # warmup initial momentum
     warmup_bias_lr: float = 0.1  # warmup initial bias lr
-    objectness_loss: Literal["bce", "focal"] = "bce" # loss function for objectness loss
+    objectness_loss: Literal["bce", "focal"] = "bce"  # loss function for objectness loss
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain
     mask_gain: float = 1.0  # mask loss gain
-    class_separate_gain: float = 0.5 # class loss gain for separate softmax classification loss
+    class_separate_gain: float = 0.5  # class loss gain for separate softmax classification loss
     nbs: int = 64  # nominal batch size
 
     # Optional Segmentation Head
-    segmentation_output: bool = True # add segmentation output to model
-    prototype_masks: int = 8 # number of prototype masks for segmentation output
-    higher_resolution_prototypes: bool = True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
+    segmentation_output: bool = True  # add segmentation output to model
+    prototype_masks: int = 8  # number of prototype masks for segmentation output
+    # use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
+    higher_resolution_prototypes: bool = True
     # Detection head options
-    separate_objectness_head: bool = False  # if True, add a separate objectness output and use CE for class logits
+    # add separate objectness output, use cross entropy loss for softmax class probabilities
+    separate_objectness_head: bool = False
     include_stride4_output: bool = False  # add P2 detection head at stride 4
 
     # Zoom Augmentation
@@ -152,28 +178,17 @@ class DefaultConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_normalization(self) -> Self:
         normalization = self.normalization
-        allowed = {"none", "zscore", "255_to_01", "ct"}
-        
-        def _validate_entry(entry: Any) -> dict:
-            if not isinstance(entry, dict):
-                raise ValueError("Invalid normalization; must be a dict with a 'type' field or list of such dicts")
-            if "type" not in entry:
-                raise ValueError("Each normalization entry must have a 'type' field")
-            if entry["type"] not in allowed:
-                raise ValueError(f"Unsupported normalization type '{entry["type"]}'. Allowed: {sorted(allowed)}")
-            if entry["type"] == "ct" and not ("mean" in entry.keys() and "std" in entry.keys() and "clip_min" in entry.keys() and "clip_max" in entry.keys()):
-                    raise ValueError(f"ct normalization needs to define type, mean, std, clip_min and clip_max, but only has keys {entry.keys()}")
-            return entry
-        
         if isinstance(normalization, list):
             if not normalization:
-                raise ValueError("normalization list must not be empty")
+                msg = "normalization list must not be empty"
+                raise ValueError(msg)
             for entry in normalization:
-                _validate_entry(entry) 
+                _validate_normalization_entry(entry)
         elif isinstance(normalization, dict):
-            _validate_entry(normalization)
+            _validate_normalization_entry(normalization)
         else:
-            raise ValueError("normalization must be a dict or a list of dicts")
+            msg = "normalization must be a dict or a list of dicts"
+            raise TypeError(msg)
         return self
 
 
@@ -192,8 +207,9 @@ class DatasetConfig(BaseModel):
                     return self
 
                 msg = (
-                    f"{self.nc}-class dataset requires class indices 0-{self.nc - 1}, but you have invalid class indices "
-                    f"{min(self.names.keys())}-{max(self.names.keys())} defined in your dataset YAML."
+                    f"{self.nc}-class dataset requires class indices 0-{self.nc - 1}, but there are"
+                    f" invalid class indices {min(self.names.keys())}-{max(self.names.keys())} "
+                    "defined in dataset.yaml"
                 )
                 raise KeyError(msg)
 
@@ -260,4 +276,3 @@ def get_dataset_cfg(config_path: str | Path) -> DatasetConfig:
     with Path(config_path).open() as f:
         yaml_config = yaml.safe_load(f)
     return DatasetConfig.model_validate(yaml_config)
-
