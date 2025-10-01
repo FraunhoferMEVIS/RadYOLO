@@ -120,6 +120,7 @@ def random_zoom(
     min_zoom: float = 0.7,
     p: float = 0.5,
     out_zoom_padding: str = "random",
+    padding_fill_value: float = 0,
     uniform_zoom: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Randomly zooms in or out of a random part of the input image.
@@ -132,6 +133,7 @@ def random_zoom(
         min_zoom (float, optional): minimum edge length multiplier. Defaults to 0.7.
         p (float, optional): probability of zooming the input. Defaults to 0.5.
         out_zoom_padding (str): Padding strategy when zooming out ("random" or "constant").
+        padding_fill_value (float): Fill value to use for constant padding.
         uniform_zoom (bool): If True (default) a single zoom factor is sampled and applied to all
             spatial dimensions. If False, an independent zoom factor is sampled for each spatial
             dimension (depth, height, width) uniformly from [min_zoom, max_zoom].
@@ -214,7 +216,7 @@ def random_zoom(
                 torch.max(image_cropped) - torch.min(image_cropped)
             ) + torch.min(image_cropped)
         elif out_zoom_padding == "constant":
-            canvas = torch.zeros(channels, d, h, w) + torch.min(image_cropped)
+            canvas = torch.zeros(channels, d, h, w) + padding_fill_value
         else:
             msg = f"Unknown out zoom padding mode {out_zoom_padding}"
             raise ValueError(msg)
@@ -300,6 +302,7 @@ def random_rotation(
     p: float = 0.5,
     mode: str = "bilinear",
     keep_box_volume: bool = True,
+    fill_value: float = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Randomly rotate the 3D volume about its center with independent angles per axis.
 
@@ -311,6 +314,7 @@ def random_rotation(
         p: Probability of applying the rotation.
         mode: Interpolation mode for image ("bilinear" or "nearest"). Masks always rotated with nearest.
         keep_box_volume (bool): Reduce box size after rotation to preserve box volume
+        fill_value (float): Fill value for padded area.
 
     Returns:
         Rotated (image, labels, masks).
@@ -367,6 +371,8 @@ def random_rotation(
     affine[0, :, :3] = R_inv
     grid = F.affine_grid(affine, size=(1, C, D, H, W), align_corners=True)
     # grid coords order is (x,y,z); our rotation matrix acts about center (0,0,0) in normalized space already
+    # padding only possible with constant 0, so subtract fill value before rotation and add after
+    image = image - fill_value
     image_rot = F.grid_sample(
         image.unsqueeze(0),
         grid,
@@ -374,6 +380,7 @@ def random_rotation(
         padding_mode="zeros",
         align_corners=True,
     ).squeeze(0)
+    image_rot = image + fill_value
 
     masks_rot: torch.Tensor | None
     if masks is not None:

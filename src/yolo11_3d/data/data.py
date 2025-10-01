@@ -119,6 +119,8 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
 
         labels = torch.cat((classes, bboxes), dim=1)
 
+        fill_value = torch.min(image)
+
         image, labels, masks = random_zoom(
             image,
             labels,
@@ -127,6 +129,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             self.config.min_zoom,
             self.config.prob_zoom,
             self.config.out_zoom_padding,
+            fill_value,
             self.config.zoom_uniform,
         )
 
@@ -141,6 +144,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             ),
             p=self.config.prob_rotation,
             keep_box_volume=self.config.rotation_keep_box_volume,
+            fill_value=fill_value,
         )
 
         image, labels, masks = tensor_cutout(
