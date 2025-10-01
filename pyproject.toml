@@ -74,6 +74,7 @@ ignore = [
   "FBT001", # we like to use booleans as function parameters
   "FBT002", # ^^^
   "FBT003", # ^^^
+  "G004",   # Allow f-strings in logging messages
   "TD003",  # we do not work with issues
   "D10",    # document later, or so they said...
   # "TRY",
