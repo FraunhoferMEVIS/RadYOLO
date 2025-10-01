@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import numpy.typing as npt
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 from tqdm_loggable.auto import tqdm
 
 from yolo11_3d.utils import ops
@@ -20,25 +19,28 @@ from yolo11_3d.validation.metrics import (
 from yolo11_3d.validation.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from torch.utils.data import DataLoader
+
     from yolo11_3d.config.config import DatasetConfig, DefaultConfig
     from yolo11_3d.data.data import Batch
     from yolo11_3d.models.model import HardcodedModel
     from yolo11_3d.training.train import Trainer
     from yolo11_3d.utils.util import ModelEMA
-    from torch.utils.data import DataLoader
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 
 
-class Validator():
+class Validator:
     def __init__(
         self,
         dataloader: DataLoader,
         save_dir: Path,
         config: DefaultConfig,
         names: dict[int, str],
-        save_predictions: bool = False
+        save_predictions: bool = False,
     ) -> None:
         self.config = config
         self.dataloader = dataloader
@@ -78,10 +80,8 @@ class Validator():
         self.dice_sum = 0.0
         self.dice_count = 0
 
-    def __call__(
-        self, trainer: Trainer | None, ema: ModelEMA
-    ) -> dict[str, float]:
-        """Executes validation process, running inference on dataloader and computing performance metrics."""
+    def __call__(self, trainer: Trainer | None, ema: ModelEMA) -> dict[str, float]:
+        """Execute validation process, run inference on dataloader and compute metrics."""
         model = cast("HardcodedModel", ema.ema)
         self.training = trainer is not None
         if self.training and trainer is not None:
@@ -128,7 +128,9 @@ class Validator():
             model.float()
             results = {
                 **stats,
-                **trainer.label_loss_items(validation_loss.cpu() / len(self.dataloader), prefix="val"),
+                **trainer.label_loss_items(
+                    validation_loss.cpu() / len(self.dataloader), prefix="val"
+                ),
             }
             return {
                 k: round(float(v), 5) for k, v in results.items()
@@ -148,7 +150,14 @@ class Validator():
         self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.config.conf)
         self.seen = 0
         self.predictions_for_saving = {}
-        self.stats = {"tp": [], "fp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+        self.stats = {
+            "tp": [],
+            "fp": [],
+            "conf": [],
+            "pred_cls": [],
+            "target_cls": [],
+            "target_img": [],
+        }
         self.dice_sum = 0.0
         self.dice_count = 0
 
@@ -167,21 +176,18 @@ class Validator():
     def preprocess(self, batch: Batch) -> Batch:
         """Preprocesses batch of images for YOLO validation."""
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
-        batch["masks"] = tuple(masks.to(self.device, non_blocking=True) if masks is not None else None
-                               for masks in batch["masks"])
+        batch["masks"] = tuple(
+            masks.to(self.device, non_blocking=True) if masks is not None else None
+            for masks in batch["masks"]
+        )
 
         for k in ["batch_idx", "cls", "bboxes"]:
             batch[k] = batch[k].to(self.device)
 
         return batch
 
-    def postprocess(
-        self,
-        prediction,
-        mask_coefficients
-    ) -> list[torch.Tensor]:
-        """Apply Non-maximum suppression to prediction outputs, concatenating mask coefficients if present."""
-
+    def postprocess(self, prediction, mask_coefficients) -> list[torch.Tensor]:
+        """Apply Non-maximum suppression to prediction outputs and handle mask coefficients."""
         # Unpack detection outputs (inference_out, loss_out)
         if isinstance(prediction, (list, tuple)):
             prediction = prediction[0]
@@ -201,8 +207,14 @@ class Validator():
 
         # Attach mask coefficients to predictions if available
         if isinstance(mask_coefficients, torch.Tensor):
-            if prediction.shape[0] != mask_coefficients.shape[0] or prediction.shape[-1] != mask_coefficients.shape[-1]:
-                LOGGER.warning("Mask coefficients shape mismatch with predictions; ignoring mask coefficients for NMS.")
+            if (
+                prediction.shape[0] != mask_coefficients.shape[0]
+                or prediction.shape[-1] != mask_coefficients.shape[-1]
+            ):
+                LOGGER.warning(
+                    f"Mask coefficients shape {prediction.shape} mismatch with predictions"
+                    f" shape {mask_coefficients.shape}. Ignoring mask coefficients for NMS."
+                )
             else:
                 prediction = torch.cat((prediction, mask_coefficients), dim=1)
 
@@ -314,12 +326,8 @@ class Validator():
             box_i = [round(coordinate, 2) for coordinate in box_i]
             confidence_i = round(prediction_i[6].item(), 6)
             class_i = int(prediction_i[7].item())
-            #mask_coefficients = prediction_i[8:]
-            prediction_list.append({
-                "box": box_i,
-                "confidence": confidence_i,
-                "class": class_i
-            })
+            # mask_coefficients = prediction_i[8:]
+            prediction_list.append({"box": box_i, "confidence": confidence_i, "class": class_i})
         return prediction_list
 
     def _process_batch(
@@ -328,10 +336,10 @@ class Validator():
         """Return correct prediction matrix.
 
         Args:
-            detections (torch.Tensor): Tensor of shape (N, 6) representing detections where each detection is
-                (x1, y1, x2, y2, conf, class).
-            gt_bboxes (torch.Tensor): Tensor of shape (M, 4) representing ground-truth bounding box coordinates. Each
-                bounding box is of the format: (x1, y1, x2, y2).
+            detections (torch.Tensor): Tensor of shape (N, 8) representing detections
+            where each detection is (x1, y1, z1, x2, y2, z2, conf, class).
+            gt_bboxes (torch.Tensor): Tensor of shape (M, 6) representing ground-truth bounding box
+            coordinates. Each bounding box is of the format: (x1, y1, z1, x2, y2, z2).
             gt_cls (torch.Tensor): Tensor of shape (M,) representing target class indices.
 
         Returns:
@@ -339,8 +347,9 @@ class Validator():
             (torch.Tensor): False positive prediction matrix of shape (N, 18) for 18 IoU levels.
 
         Note:
-            The function does not return any value directly usable for metrics calculation. Instead, it provides an
-            intermediate representation used for evaluating predictions against ground truth.
+            The function does not return any value directly usable for metrics calculation. Instead,
+            it provides an intermediate representation used for evaluating predictions against
+            ground truth.
         """
         iou = box_iou(gt_bboxes, detections[:, :6])
         true_positives, false_positives = self.match_predictions(detections[:, 7], gt_cls, iou)
@@ -382,7 +391,7 @@ class Validator():
         gt_bboxes: torch.Tensor,
         gt_cls: torch.Tensor,
         prototypes: torch.Tensor,
-        gt_masks_list: list[torch.Tensor | None]
+        gt_masks_list: list[torch.Tensor | None],
     ) -> None:
         """Compute and accumulate Dice for matched instances in a single image."""
         # Require mask coefficients appended after class column
@@ -404,10 +413,14 @@ class Validator():
             if gt_mask is None:
                 continue
             gt_mask_downsampled = F.interpolate(
-                gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype), proto_dhw, mode="nearest-exact"
+                gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype),
+                proto_dhw,
+                mode="nearest-exact",
             )[0, 0]
             # Reconstruct predicted mask logits from coefficients and prototypes
-            coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(device=prototypes.device, dtype=prototypes.dtype)
+            coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(
+                device=prototypes.device, dtype=prototypes.dtype
+            )
             # prototypes shape: (n_proto, H, W, D) -> logits (H, W, D), match training loss
             pred_logits = torch.einsum("n,nhwd->hwd", coeff, prototypes)
             pred_prob = pred_logits.sigmoid()
@@ -431,7 +444,8 @@ class Validator():
         Args:
             pred_classes (torch.Tensor): Predicted class indices of shape(P,).
             true_classes (torch.Tensor): Target class indices of shape(T,).
-            iou (torch.Tensor): An PxT tensor containing the pairwise IoU values for predictions and ground of truth
+            iou (torch.Tensor): An PxT tensor containing the pairwise IoU values for prediction and
+                ground truth bounding boxes
 
         Returns:
             (torch.Tensor): True positive tensor of shape(P, 18) for 18 IoU thresholds.
@@ -439,32 +453,60 @@ class Validator():
         """
         # shape(P, 18), P: predictions, 18: IoU thresholds
         true_positives_np = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
-        true_positives_missing_np = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(bool)
+        true_positives_missing_np = np.zeros((pred_classes.shape[0], self.iouv.shape[0])).astype(
+            bool
+        )
         # shape(T, P) T: true class, P: predicted
         correct_class = true_classes[:, None] == pred_classes
-        missing_class = torch.logical_and(true_classes[:, None] != pred_classes, true_classes[:, None] == -1) # calculate false positives for class -1 (missing class label)
+        missing_class = torch.logical_and(
+            true_classes[:, None] != pred_classes, true_classes[:, None] == -1
+        )  # calculate false positives for class -1 (missing class label)
         iou_tp = iou * correct_class  # shape(T, P) zero out the wrong classes
         iou_missing_class = iou * missing_class  # shape(T, P) zero out the non-missing classes
-        iou_tp_np = iou_tp.cpu().numpy() # shape(T, P)
-        iou_missing_np = iou_missing_class.cpu().numpy() # shape(T, P)
+        iou_tp_np = iou_tp.cpu().numpy()  # shape(T, P)
+        iou_missing_np = iou_missing_class.cpu().numpy()  # shape(T, P)
         for i, iou_threshold in enumerate(self.iouv.cpu().tolist()):
-            matches_tp = np.nonzero(iou_tp_np >= iou_threshold)  # IoU >= threshold and classes match
-            matches_missing = np.nonzero(iou_missing_np >= iou_threshold)  # IoU >= threshold, classes do not match and true class -1
-            matches_tp = np.array(matches_tp).T # shape(N, 2) N: number of true positive matches
-            matches_missing = np.array(matches_missing).T # shape(M, 2) M: number of missing class matches
+            matches_tp = np.nonzero(
+                iou_tp_np >= iou_threshold
+            )  # IoU >= threshold and classes match
+            matches_missing = np.nonzero(
+                iou_missing_np >= iou_threshold
+            )  # IoU >= threshold, classes do not match and true class -1
+            matches_tp = np.array(matches_tp).T  # shape(N, 2) N: number of true positive matches
+            matches_missing = np.array(
+                matches_missing
+            ).T  # shape(M, 2) M: number of missing class matches
             if matches_tp.shape[0] > 0:
-                sorted_matches_tp = matches_tp[iou_tp_np[matches_tp[:, 0], matches_tp[:, 1]].argsort()[::-1]] # sort matches by IoU
-                unique_matches_tp = sorted_matches_tp[np.unique(sorted_matches_tp[:, 1], return_index=True)[1]] # select unique match with highest IoU for each true class
-                unique_matches_tp = unique_matches_tp[np.unique(unique_matches_tp[:, 0], return_index=True)[1]] # select unique match with highest IoU for each predicted class
+                sorted_matches_tp = matches_tp[
+                    iou_tp_np[matches_tp[:, 0], matches_tp[:, 1]].argsort()[::-1]
+                ]  # sort matches by IoU
+                unique_matches_tp = sorted_matches_tp[
+                    np.unique(sorted_matches_tp[:, 1], return_index=True)[1]
+                ]  # select unique match with highest IoU for each true class
+                unique_matches_tp = unique_matches_tp[
+                    np.unique(unique_matches_tp[:, 0], return_index=True)[1]
+                ]  # select unique match with highest IoU for each predicted class
                 true_positives_np[unique_matches_tp[:, 1].astype(int), i] = True
             if matches_missing.shape[0] > 0:
-                sorted_matches_missing = matches_missing[iou_missing_np[matches_missing[:, 0], matches_missing[:, 1]].argsort()[::-1]] # sort matches by IoU
-                unique_matches_missing = sorted_matches_missing[np.unique(sorted_matches_missing[:, 1], return_index=True)[1]] # select unique match with highest IoU for each true class
-                unique_matches_missing = unique_matches_missing[np.unique(unique_matches_missing[:, 0], return_index=True)[1]] # select unique match with highest IoU for each predicted class
+                sorted_matches_missing = matches_missing[
+                    iou_missing_np[matches_missing[:, 0], matches_missing[:, 1]].argsort()[::-1]
+                ]  # sort matches by IoU
+                unique_matches_missing = sorted_matches_missing[
+                    np.unique(sorted_matches_missing[:, 1], return_index=True)[1]
+                ]  # select unique match with highest IoU for each true class
+                unique_matches_missing = unique_matches_missing[
+                    np.unique(unique_matches_missing[:, 0], return_index=True)[1]
+                ]  # select unique match with highest IoU for each predicted class
                 true_positives_missing_np[unique_matches_missing[:, 1].astype(int), i] = True
-        true_positives = torch.tensor(true_positives_np, dtype=torch.bool, device=pred_classes.device)
-        true_positives_missing = torch.tensor(true_positives_missing_np, dtype=torch.bool, device=pred_classes.device)
-        false_positives = torch.logical_and(torch.logical_not(true_positives), torch.logical_not(true_positives_missing))
+        true_positives = torch.tensor(
+            true_positives_np, dtype=torch.bool, device=pred_classes.device
+        )
+        true_positives_missing = torch.tensor(
+            true_positives_missing_np, dtype=torch.bool, device=pred_classes.device
+        )
+        false_positives = torch.logical_and(
+            torch.logical_not(true_positives), torch.logical_not(true_positives_missing)
+        )
         return true_positives, false_positives
 
     def get_stats(self) -> dict[str, float]:
@@ -489,7 +531,7 @@ class Validator():
         # Add Dice metric
         dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
         return {**self.metrics.results_dict, "metrics/dice(M)": dice_avg}
-    
+
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
         LOGGER.warning(self.get_desc())
@@ -562,7 +604,7 @@ def project_nifti_images(
 ) -> torch.Tensor:
     if image.shape[1] > 1:
         time_diff_img = (image[:, [1]] - image[:, [0]]).amax(dim)
-    else: 
+    else:
         time_diff_img = image.amax(dim)
     percentiles = (
         time_diff_img.reshape((time_diff_img.shape[0], -1))

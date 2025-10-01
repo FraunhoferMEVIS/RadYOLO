@@ -13,16 +13,16 @@ import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from yolo11_3d.config.config import DatasetConfig, model_checkpoint_from_torch
-from yolo11_3d.data.data import NIfTIDatasetWithMasks
-from yolo11_3d.export.onnx_export import export_model
-from yolo11_3d.training.train import Trainer
-from yolo11_3d.validation.validate import Validator
-from yolo11_3d.utils.util import ModelEMA, select_device
-from yolo11_3d.data.data import build_dataloader
-from yolo11_3d.validation.plotting import plot_results as plot_results_
-from yolo11_3d.data.data_splits import k_fold_data_splits
 from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from yolo11_3d.data.convert_to_nndetection import convert_dataset_to_nndetection
+from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
+from yolo11_3d.data.data_splits import k_fold_data_splits
+from yolo11_3d.export.onnx_export import export_model
+from yolo11_3d.inference.predict import PredictionConfig, run_prediction
+from yolo11_3d.training.train import Trainer
+from yolo11_3d.utils.util import ModelEMA, select_device
+from yolo11_3d.validation.plotting import plot_results as plot_results_
+from yolo11_3d.validation.validate import Validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -142,7 +142,9 @@ def train(config: Path) -> int:
     metavar="DATASET_CONFIG",
 )
 @click.option("--fold", default=0, help="Fold from dataset splits file to use.")
-@click.option("--group", default="test", help="Group from datas splits to use. Can be train, val or test.")
+@click.option(
+    "--group", default="test", help="Group from datas splits to use. Can be train, val or test."
+)
 def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
     """Test a yolo11-3d model.
 
@@ -183,7 +185,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
             else 8,
             normalization=train_config.normalization,
-            load_masks = train_config.segmentation_output,
+            load_masks=train_config.segmentation_output,
         )
 
         dataloader = build_dataloader(
@@ -231,7 +233,7 @@ def onnx_export(model_path: Path) -> int:
     It exports the containing model to ONNX next to it.
     """
     try:
-        print(f"Exporting model {model_path} to onnx...")
+        LOGGER.info(f"Exporting model {model_path} to onnx...")
         checkpoint = model_checkpoint_from_torch(model_path)
 
         model = checkpoint["ema"]
@@ -262,7 +264,7 @@ def onnx_export(model_path: Path) -> int:
 def plot_results(result_path: Path) -> int:
     """Plot data from a results.csv path produced during training.
 
-    This command is intended for the use-case of plotting intermediate results of a running training.
+    This command is intended for the plotting intermediate results of a running training.
     """
     try:
         plot_results_(result_path)
@@ -285,7 +287,9 @@ def plot_results(result_path: Path) -> int:
         path_type=Path,
     ),
 )
-@click.option("--seed", default=42, show_default=True, help="RNG seed for shuffling before splitting.")
+@click.option(
+    "--seed", default=42, show_default=True, help="RNG seed for shuffling before splitting."
+)
 @click.option("--k", default=5, show_default=True, help="Number of folds to generate. Must be >=3.")
 @click.option(
     "--group-by-prefix/--no-group-by-prefix",
@@ -299,7 +303,9 @@ def plot_results(result_path: Path) -> int:
     show_default=True,
     help="Separator used to extract the prefix (text before first occurrence).",
 )
-def create_data_splits(dataset_path: Path, seed: int, k: int, group_by_prefix: bool, prefix_sep: str) -> int:
+def create_data_splits(
+    dataset_path: Path, seed: int, k: int, group_by_prefix: bool, prefix_sep: str
+) -> int:
     """Create k-fold data splits from DATASET_PATH/images and write data_splits.json."""
     try:
         out_path = k_fold_data_splits(
@@ -329,7 +335,12 @@ def create_data_splits(dataset_path: Path, seed: int, k: int, group_by_prefix: b
         path_type=Path,
     ),
 )
-@click.option("--workers", default=0, show_default=True, help="Number of parallel workers to use (0 = CPU count).")
+@click.option(
+    "--workers",
+    default=0,
+    show_default=True,
+    help="Number of parallel workers to use (0 = CPU count).",
+)
 def analyze_dataset(dataset_path: Path, workers: int) -> int:
     """Analyze a dataset folder and write dataset_fingerprint.json with summary statistics.
 
@@ -364,9 +375,15 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     show_default=True,
     help="Root folder containing TaskXXX_* folders (det_data).",
 )
-@click.option("--task-id", type=int, default=100, show_default=True, help="Task number (>=100 recommended).")
-@click.option("--task-name", type=str, default=None, help="Task name (defaults to dataset folder name).")
-@click.option("--fold", type=int, default=0, show_default=True, help="Fold index from data_splits.json.")
+@click.option(
+    "--task-id", type=int, default=100, show_default=True, help="Task number (>=100 recommended)."
+)
+@click.option(
+    "--task-name", type=str, default=None, help="Task name (defaults to dataset folder name)."
+)
+@click.option(
+    "--fold", type=int, default=0, show_default=True, help="Fold index from data_splits.json."
+)
 @click.option(
     "--include-val-in-train/--no-include-val-in-train",
     default=True,
@@ -387,7 +404,16 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     show_default=True,
     help="Number of parallel processes (0 = use CPU count).",
 )
-def convert_to_nndetection(dataset_path: Path, out_root: Path, task_id: int, task_name: str | None, fold: int, include_val_in_train: bool, modality: str, workers: int) -> int:
+def convert_to_nndetection(
+    dataset_path: Path,
+    out_root: Path,
+    task_id: int,
+    task_name: str | None,
+    fold: int,
+    include_val_in_train: bool,
+    modality: str,
+    workers: int,
+) -> int:
     """Convert a YOLO11_3D dataset to nnDetection Task folder structure.
 
     DATASET_PATH must contain images/ (.nii.gz), labels/ (.txt) and optional masks/ (.nii.gz).
@@ -472,7 +498,6 @@ def predict(
 ) -> int:
     """Run inference on .nii.gz images in INPUT_DIR and write JSON (and masks) to OUTPUT_DIR."""
     try:
-        from yolo11_3d.inference.predict import PredictionConfig, run_prediction
         return run_prediction(
             PredictionConfig(
                 model_path=model_path,
