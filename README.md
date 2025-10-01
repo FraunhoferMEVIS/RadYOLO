@@ -14,7 +14,7 @@ This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-
 
 After installation this project provides a cli `yolo11-3d` with built-in help.
 
-Available commands are `train`, `test`, `plot-results`, `analyze-dataset`, `create-data-splits`, `onnx-export` and `convert-to-nndetection`.
+Available commands are `train`, `test`, `predict`, `analyze-dataset`, `create-data-splits`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
