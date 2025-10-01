@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from yolo11_3d.utils.ops import xyzwhd2xyzxyz
-
-__author__ = "kgeissler"
-
 import math
 import random
 from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn.functional as F  # noqa: N812
-from torch import nn
 from batchgeneratorsv2.transforms.intensity.brightness import (
-    MultiplicativeBrightnessTransform, BrightnessAdditiveTransform
+    BrightnessAdditiveTransform,
+    MultiplicativeBrightnessTransform,
 )
 from batchgeneratorsv2.transforms.intensity.contrast import ContrastTransform
 from batchgeneratorsv2.transforms.intensity.gamma import GammaTransform
@@ -21,6 +17,9 @@ from batchgeneratorsv2.transforms.noise.gaussian_blur import GaussianBlurTransfo
 from batchgeneratorsv2.transforms.spatial.low_resolution import SimulateLowResolutionTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.random import RandomTransform
+from torch import nn
+
+from yolo11_3d.utils.ops import xyzwhd2xyzxyz
 
 if TYPE_CHECKING:
     from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
@@ -64,10 +63,12 @@ def tensor_cutout(
 
     Args:
         im (torch.Tensor): 3-D tensor to be augmented.
-        labels (np.array): Med YOLO labels corresponding to im. class z1 x1 y1 z2 x2 y2
-        cutout_params (list[tuple[float, int]]): a list of ordered pairs that set sizes and numbers of cutout boxes.
-                                           the maximum extent of the boxes is set by the first element of the ordered pair
-                                           the number of boxes with that maximum extent is set by the second element of the ordered pair
+        labels (torch.Tensor): labels corresponding to image. class x1 y1 z1 y2 y2 z2
+        masks (torch.Tensor | None): corresponding masks
+        cutout_params (list[tuple[float, int]]): a list of ordered pairs that set sizes and numbers
+            of cutout boxes. The maximum extent of the boxes is set by the first element of the
+            ordered pair. The number of boxes with that maximum extent is set by the second element
+            of the ordered pair
         p (float, optional): probability of performing cutout augmentation. Defaults to 0.5.
 
     Returns:
@@ -110,6 +111,7 @@ def tensor_cutout(
 
     return im, labels, masks
 
+
 def random_zoom(
     image: torch.Tensor,
     labels: torch.Tensor,
@@ -124,7 +126,8 @@ def random_zoom(
 
     Args:
         image (torch.Tensor): 3-D tensor to be augmented.
-        labels (List[float]): MedYOLO labels corresponding to image. class z1 x1 y1 z2 x2 y2
+        labels (torch.Tensor): Llbels corresponding to image. class x1 y1 z1 x2 y2 z2
+        masks (torach.Tensor | None): corresponding masks
         max_zoom (float, optional): maximum edge length multiplier. Defaults to 1.5.
         min_zoom (float, optional): minimum edge length multiplier. Defaults to 0.7.
         p (float, optional): probability of zooming the input. Defaults to 0.5.
@@ -142,12 +145,10 @@ def random_zoom(
 
     augmented_labels = labels.clone()
 
-    # retrieve original image shape (this is resized to imgsz_z x imgsz_y x imgsz_x by this point in the dataloader)
+    # get original image shape (resized to imgsz_z x imgsz_y x imgsz_x by this point in dataloader)
     channels, d, h, w = image.shape
     if uniform_zoom:
-        zoom_factors = (
-            random.uniform(min_zoom, max_zoom),
-        ) * 3  # (d, h, w) identical factors
+        zoom_factors = (random.uniform(min_zoom, max_zoom),) * 3  # (d, h, w) identical factors
     else:
         zoom_factors = (
             random.uniform(min_zoom, max_zoom),  # depth
@@ -179,7 +180,7 @@ def random_zoom(
     new_sizes = (new_d, new_h, new_w)
     # For each dimension build slicing / padding indices
     crop_starts: list[int] = []  # start index in resized image to take (if cropping)
-    pad_starts: list[int] = []   # start index in final canvas to place resized (if padding)
+    pad_starts: list[int] = []  # start index in final canvas to place resized (if padding)
     final_indices: list[slice] = []
     cropped_dims = []  # keep track which dims were cropped (for filtering labels later)
     for dim, (orig, new) in enumerate(zip(orig_sizes, new_sizes)):
@@ -209,11 +210,14 @@ def random_zoom(
     if any(new < orig for orig, new in zip(orig_sizes, new_sizes)):
         # prepare canvas
         if out_zoom_padding == "random":
-            canvas = torch.rand(channels, d, h, w) * (torch.max(image_cropped) - torch.min(image_cropped)) + torch.min(image_cropped)
+            canvas = torch.rand(channels, d, h, w) * (
+                torch.max(image_cropped) - torch.min(image_cropped)
+            ) + torch.min(image_cropped)
         elif out_zoom_padding == "constant":
             canvas = torch.zeros(channels, d, h, w) + torch.min(image_cropped)
         else:
-            raise ValueError(f"Unknown out zoom padding mode {out_zoom_padding}")
+            msg = f"Unknown out zoom padding mode {out_zoom_padding}"
+            raise ValueError(msg)
         z_start, y_start, x_start = pad_starts
         z_slice = slice(z_start, z_start + image_cropped.shape[1])
         y_slice = slice(y_start, y_start + image_cropped.shape[2])
@@ -221,7 +225,14 @@ def random_zoom(
         canvas[:, z_slice, y_slice, x_slice] = image_cropped
         image = canvas
         if masks_cropped is not None:
-            mask_canvas = torch.zeros(masks_cropped.shape[0], d, h, w, dtype=masks_cropped.dtype, device=masks_cropped.device)
+            mask_canvas = torch.zeros(
+                masks_cropped.shape[0],
+                d,
+                h,
+                w,
+                dtype=masks_cropped.dtype,
+                device=masks_cropped.device,
+            )
             mask_canvas[:, z_slice, y_slice, x_slice] = masks_cropped
             masks = mask_canvas
         else:
@@ -238,7 +249,9 @@ def random_zoom(
     z_crop, y_crop, x_crop = crop_starts
     z_pad, y_pad, x_pad = pad_starts
     # subtract crop
-    augmented_labels[:, [3, 6]] -= z_crop  # z1,z2 at indices 3,6? actually order x1(1) y1(2) z1(3) x2(4) y2(5) z2(6)
+    augmented_labels[:, [3, 6]] -= (
+        z_crop  # z1,z2 at indices 3,6? actually order x1(1) y1(2) z1(3) x2(4) y2(5) z2(6)
+    )
     augmented_labels[:, [2, 5]] -= y_crop
     augmented_labels[:, [1, 4]] -= x_crop
     # add padding offsets
@@ -253,9 +266,12 @@ def random_zoom(
         label_center_z = (augmented_labels[:, 3] + augmented_labels[:, 6]) / 2
         # base valid range
         valid = (
-            (label_center_x >= -8) & (label_center_x <= w + 8) &
-            (label_center_y >= -8) & (label_center_y <= h + 8) &
-            (label_center_z >= -8) & (label_center_z <= d + 8)
+            (label_center_x >= -8)
+            & (label_center_x <= w + 8)
+            & (label_center_y >= -8)
+            & (label_center_y <= h + 8)
+            & (label_center_z >= -8)
+            & (label_center_z <= d + 8)
         )
         augmented_labels = augmented_labels[valid]
         if masks is not None:
@@ -276,7 +292,11 @@ def random_rotation(
     image: torch.Tensor,
     labels: torch.Tensor,
     masks: torch.Tensor | None,
-    angle_ranges: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = ((-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0)),
+    angle_ranges: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = (
+        (-20.0, 20.0),
+        (-20.0, 20.0),
+        (-20.0, 20.0),
+    ),
     p: float = 0.5,
     mode: str = "bilinear",
     keep_box_volume: bool = True,
@@ -290,6 +310,7 @@ def random_rotation(
         angle_ranges: ((min_x,max_x),(min_y,max_y),(min_z,max_z)) in degrees for rotations about x,y,z axes.
         p: Probability of applying the rotation.
         mode: Interpolation mode for image ("bilinear" or "nearest"). Masks always rotated with nearest.
+        keep_box_volume (bool): Reduce box size after rotation to preserve box volume
 
     Returns:
         Rotated (image, labels, masks).
@@ -309,21 +330,33 @@ def random_rotation(
     cx, cy, cz = (W - 1) / 2.0, (H - 1) / 2.0, (D - 1) / 2.0
 
     # Rotation matrices (x,y,z axes) operating on [x,y,z]
-    Rx = torch.tensor([
-        [1, 0, 0],
-        [0, math.cos(ax), -math.sin(ax)],
-        [0, math.sin(ax), math.cos(ax)],
-    ], device=device, dtype=dtype)
-    Ry = torch.tensor([
-        [math.cos(ay), 0, math.sin(ay)],
-        [0, 1, 0],
-        [-math.sin(ay), 0, math.cos(ay)],
-    ], device=device, dtype=dtype)
-    Rz = torch.tensor([
-        [math.cos(az), -math.sin(az), 0],
-        [math.sin(az), math.cos(az), 0],
-        [0, 0, 1],
-    ], device=device, dtype=dtype)
+    Rx = torch.tensor(
+        [
+            [1, 0, 0],
+            [0, math.cos(ax), -math.sin(ax)],
+            [0, math.sin(ax), math.cos(ax)],
+        ],
+        device=device,
+        dtype=dtype,
+    )
+    Ry = torch.tensor(
+        [
+            [math.cos(ay), 0, math.sin(ay)],
+            [0, 1, 0],
+            [-math.sin(ay), 0, math.cos(ay)],
+        ],
+        device=device,
+        dtype=dtype,
+    )
+    Rz = torch.tensor(
+        [
+            [math.cos(az), -math.sin(az), 0],
+            [math.sin(az), math.cos(az), 0],
+            [0, 0, 1],
+        ],
+        device=device,
+        dtype=dtype,
+    )
     R = Rz @ Ry @ Rx  # combined forward rotation
 
     # For grid_sample we need inverse transform (maps output -> input)
@@ -377,10 +410,10 @@ def random_rotation(
     # Widths
     w = (x2 - x1).unsqueeze(1)
     h = (y2 - y1).unsqueeze(1)
-    d_ = (z2 - z1).unsqueeze(1)
+    d = (z2 - z1).unsqueeze(1)
     # Build corner coords (N,8,3) in (x,y,z)
     base = torch.stack([x1, y1, z1], 1).unsqueeze(1)  # (N,1,3)
-    extents = torch.stack([w, h, d_], 2)  # (N,1,3)
+    extents = torch.stack([w, h, d], 2)  # (N,1,3)
     corners = base + corner_bits.unsqueeze(0) * extents  # broadcast
 
     # Center, rotate, uncenter
@@ -411,8 +444,16 @@ def random_rotation(
 
     if keep_box_volume and rotated_labels.shape[0]:
         # Original volumes
-        orig_vol = (labels[:, 4] - labels[:, 1]) * (labels[:, 5] - labels[:, 2]) * (labels[:, 6] - labels[:, 3])
-        new_vol = (rotated_labels[:, 4] - rotated_labels[:, 1]) * (rotated_labels[:, 5] - rotated_labels[:, 2]) * (rotated_labels[:, 6] - rotated_labels[:, 3])
+        orig_vol = (
+            (labels[:, 4] - labels[:, 1])
+            * (labels[:, 5] - labels[:, 2])
+            * (labels[:, 6] - labels[:, 3])
+        )
+        new_vol = (
+            (rotated_labels[:, 4] - rotated_labels[:, 1])
+            * (rotated_labels[:, 5] - rotated_labels[:, 2])
+            * (rotated_labels[:, 6] - rotated_labels[:, 3])
+        )
         eps = 1e-6
         scale = ((orig_vol + eps) / (new_vol + eps)).clamp(min=0) ** (1.0 / 3.0)  # (N,)
         # centers and half-sizes
@@ -445,7 +486,11 @@ def random_rotation(
         rotated_labels[:, 6] = nz2
 
     # Remove degenerate boxes
-    keep = (rotated_labels[:, 4] - rotated_labels[:, 1] > 1) & (rotated_labels[:, 5] - rotated_labels[:, 2] > 1) & (rotated_labels[:, 6] - rotated_labels[:, 3] > 1)
+    keep = (
+        (rotated_labels[:, 4] - rotated_labels[:, 1] > 1)
+        & (rotated_labels[:, 5] - rotated_labels[:, 2] > 1)
+        & (rotated_labels[:, 6] - rotated_labels[:, 3] > 1)
+    )
     rotated_labels = rotated_labels[keep]
     if masks_rot is not None:
         masks_rot = masks_rot[keep] if keep.numel() == masks_rot.shape[0] else masks_rot
@@ -457,7 +502,7 @@ def random_mirroring(
     image: torch.Tensor,
     labels: torch.Tensor,
     masks: torch.Tensor | None,
-    mirror_axes: list[str] = ["z", "y", "x"],
+    mirror_axes: tuple[str] = ("z", "y", "x"),
     p: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Applies image mirroring augmentation.
@@ -540,7 +585,8 @@ def batch_generators_intensity_augmentations(
         transforms.append(
             RandomTransform(
                 MultiplicativeBrightnessTransform(
-                    multiplier_range=mult_brightness_range, synchronize_channels=synchronize_channels
+                    multiplier_range=mult_brightness_range,
+                    synchronize_channels=synchronize_channels,
                 ),
                 apply_probability=mult_brightness_prob,
             )
@@ -575,7 +621,7 @@ def batch_generators_intensity_augmentations(
                     scale=lowres_scale,
                     synchronize_channels=synchronize_channels,
                     synchronize_axes=False,
-                    ignore_axes=tuple(),
+                    ignore_axes=(),
                     p_per_channel=1,
                 ),
                 apply_probability=lowres_prob,
@@ -601,10 +647,11 @@ def batch_generators_intensity_augmentations(
     augmented_image: torch.Tensor = bg_result["image"]
     return augmented_image
 
+
 def enlarge_bounding_boxes(
     image: torch.Tensor,
     labels: torch.Tensor,
-    masks: list[torch.Tensor | None] | None,
+    masks: torch.Tensor | None,
     imgsz: tuple[int, int, int],
     stride: int,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
@@ -613,6 +660,7 @@ def enlarge_bounding_boxes(
     Args:
         image (torch.Tensor): 3-D tensor to be augmented.
         labels (torch.Tensor): bounding boxes. class x y z w h d
+        masks (torch.Tensor | None): corresponding masks
         imgsz (tuple[int, int, int]): target image size.
         stride (int): stride size.
 
@@ -631,7 +679,7 @@ def enlarge_bounding_boxes(
     # for that we convert the xyzwhd bounding boxes to xyzxyz using the function xyzwhd2xyzxyz
     # and then check if the coordinates are within the image size
     bboxes = xyzwhd2xyzxyz(labels[:, 1:7])
-    filter = (
+    box_filter = (
         (bboxes[:, 0] >= 0)
         & (bboxes[:, 1] >= 0)
         & (bboxes[:, 2] >= 0)
@@ -639,9 +687,9 @@ def enlarge_bounding_boxes(
         & (bboxes[:, 4] < imgsz[1])
         & (bboxes[:, 5] < imgsz[0])
     )
-    labels = labels[filter]
+    labels = labels[box_filter]
     if masks is not None:
-        masks = masks[filter]
+        masks = masks[box_filter]
 
     return image, labels, masks
 
@@ -667,9 +715,12 @@ def random_channel_dropout(
     Returns:
         (image, labels, masks) with possibly one channel dropped.
     """
-    C = image.shape[0]
-    if len(drop_probabilities) != C:
-        raise ValueError(f"drop_probabilities length {len(drop_probabilities)} must match channel count {C}")
+    channels = image.shape[0]
+    if len(drop_probabilities) != channels:
+        msg = f"drop_probabilities length {len(drop_probabilities)} must match channel count {channels}"
+        raise ValueError(
+            msg
+        )
 
     # Determine candidate channels
     probs = torch.tensor(drop_probabilities, dtype=torch.float32)
@@ -701,8 +752,8 @@ class GINNet(nn.Module):
         hidden_layers: int,
         hidden_channels: int,
         p_kernel_size_1: float = 0.5,
-    ):
-        super(GINNet, self).__init__()
+    ) -> None:
+        super().__init__()
 
         self._p_kernel_size_1 = p_kernel_size_1
 
@@ -710,11 +761,7 @@ class GINNet(nn.Module):
         self.layers_kernel_size_1 = nn.ModuleList()
         self.layers_activation_functions = nn.ModuleList()
 
-        layer_dims = (
-            [1]
-            + [hidden_channels] * (hidden_layers - 1)
-            + [1]
-        )
+        layer_dims = [1] + [hidden_channels] * (hidden_layers - 1) + [1]
 
         for i in range(len(layer_dims) - 1):
             self.layers_kernel_size_3.append(
@@ -734,7 +781,7 @@ class GINNet(nn.Module):
                 )
             )
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         for layer in self.layers_kernel_size_3:
             nn.init.kaiming_normal_(layer.weight)
             nn.init.normal_(layer.bias)
@@ -742,23 +789,26 @@ class GINNet(nn.Module):
             nn.init.kaiming_normal_(layer.weight)
             nn.init.normal_(layer.bias)
 
-        output = torch.zeros_like(input)
-        for channel in range(input.shape[0]):
-            input_i = x = input[channel].unsqueeze(0)
+        output = torch.zeros_like(input_tensor)
+        for channel in range(input_tensor.shape[0]):
+            input_i = x = input_tensor[channel].unsqueeze(0)
             for i in range(len(self.layers_kernel_size_3)):
                 if random.random() <= self._p_kernel_size_1:
                     x = self.layers_kernel_size_1[i](x)
                 else:
                     x = self.layers_kernel_size_3[i](x)
                 x = F.leaky_relu(x)
-                
+
             alpha = random.random()
             output_i = alpha * input_i + (1 - alpha) * x
-            output_i = output_i * (torch.norm(input_i, p="fro") / (torch.norm(output_i, p="fro") + 1e-6))
+            output_i = output_i * (
+                torch.norm(input_i, p="fro") / (torch.norm(output_i, p="fro") + 1e-6)
+            )
             output[channel] = output_i.squeeze(0)
 
         return output
-    
+
+
 def gin_augmentation(
     image: torch.Tensor,
     labels: torch.Tensor,
@@ -768,12 +818,10 @@ def gin_augmentation(
     p_kernel_size_1: float = 0.5,
     p: float = 0.2,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
-    """
-    Applies GIN (Global Intensity Non-linear) augumentation to input image.
-    """
+    """Applies GIN (Global Intensity Non-linear) augumentation to input image."""
     if random.random() >= p:
         return image, labels, masks
-    
+
     gin_model = GINNet(hidden_layers, hidden_channels, p_kernel_size_1)
     with torch.no_grad():
         augmented_image = gin_model.forward(image)
