@@ -36,6 +36,16 @@ The `test` command can be used to run a trained on the `test` split of the data 
 uv run -m yolo11_3d test <path_to_model_checkpoint> <path_to_dataset_folder>
 ```
 
+### Predict
+
+The `predict` command can be used for model inference. It is called as follows:
+
+```
+uv run -m yolo11_3d predict <path_to_model_checkpoint> <input_image_folder> <output_folder>
+```
+
+Here the `input_image_folder` is a folder of NifTi files, where the predict command expects each file to represent a case to run the model on. The resulting detections and optional segmentation masks are saved to the `output_folder`.
+
 ## Dataset Format
 
 The dataset format is organized as follows:
