@@ -79,7 +79,7 @@ class Validator():
         self.dice_count = 0
 
     def __call__(
-        self, trainer: Trainer | None, ema: ModelEMA, amp: bool = False
+        self, trainer: Trainer | None, ema: ModelEMA
     ) -> dict[str, float]:
         """Executes validation process, running inference on dataloader and computing performance metrics."""
         model = cast("HardcodedModel", ema.ema)
@@ -97,15 +97,13 @@ class Validator():
         for batch_i, raw_batch in enumerate(bar):
             batch: Batch = self.preprocess(raw_batch)
 
-            with torch.autocast(self.device.type):
-                # Inference 
+            with torch.autocast(self.device.type), torch.no_grad():
                 raw_preds: (
                     list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
                 ) = model(batch["img"])
                 if isinstance(raw_preds, torch.Tensor):
                     raise TypeError(raw_preds)
 
-                # Loss
                 if self.training:
                     validation_loss += cast(
                         "tuple[torch.Tensor, torch.Tensor]", model.loss(batch, raw_preds)

@@ -202,7 +202,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             save_predictions=True,
         )
 
-        validator(trainer=None, ema=ema, amp=False)
+        validator(trainer=None, ema=ema)
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1

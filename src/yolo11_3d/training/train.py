@@ -443,7 +443,7 @@ class Trainer:
                     f"{self.epoch + 1}/{self.epochs}",
                     f"{self._get_memory():.3g}G",
                     *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
-                    loss,
+                    loss.detach(),
                 )
 
             final_epoch = self.epoch + 1 >= self.epochs
@@ -453,7 +453,6 @@ class Trainer:
                     validator=validator,
                     ema=ema,
                     best_fitness=best_fitness,
-                    amp=self.device.type != "cpu",
                 )
                 self.save_metrics(
                     metrics={
@@ -630,9 +629,8 @@ class Trainer:
         validator: Validator,
         ema: ModelEMA,
         best_fitness: float | None,
-        amp: bool,
     ) -> tuple[dict[str, float], float, float]:
-        metrics = validator(self, ema=ema, amp=amp)
+        metrics = validator(self, ema=ema)
         map_val = metrics.get("metrics/mAP10-95(B)")
         if map_val is not None:
             if self.ewa_mAP1095 is None:
@@ -660,7 +658,7 @@ class Trainer:
     ) -> dict[str, float] | list[str]:
         keys: list[str] = [f"{prefix}/{x}" for x in self.loss_names]
         if loss_items is not None:
-            rounded_loss_items = [round(float(x), 5) for x in loss_items]
+            rounded_loss_items = [round(float(x.detach()), 5) for x in loss_items]
             return dict(zip(keys, rounded_loss_items, strict=True))
         return keys
 
