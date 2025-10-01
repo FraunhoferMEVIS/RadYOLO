@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# ruff: noqa: S101, TRY003
+import torch
 from conftest import run_cli
 
 
@@ -57,7 +57,6 @@ def test_test_command(cli_executable: list[str], trained_run: Path) -> None:
     model_path = trained_run / "weights" / "best.pt"
     dataset_root = None
     # Recover dataset path from train config stored in checkpoint
-    import torch
     ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
     config = ckpt["train_config"]
     dataset_root = Path(config.data)  # raw dict inside checkpoint

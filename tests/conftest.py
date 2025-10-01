@@ -6,26 +6,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+import nibabel as nib
 import numpy as np
 import pytest
-
-# Ensure project root in path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+import yaml
 
 # Import package to ensure entry point is importable during tests
-import yolo11_3d  # noqa: F401,E402
+import yolo11_3d  # noqa: F401
 
 
 def _write_nifti(path: Path, array: np.ndarray) -> None:
-    import nibabel as nib  # local import to avoid test import cost if unused
     img = nib.Nifti1Image(array.astype(np.float32), affine=np.eye(4))
     nib.save(img, str(path))
 
 
 def _write_mask(path: Path, array: np.ndarray) -> None:
-    import nibabel as nib  # local import
     img = nib.Nifti1Image(array.astype(np.uint8), affine=np.eye(4))
     nib.save(img, str(path))
 
@@ -151,7 +146,6 @@ def trained_run(minimal_train_config: Path, cli_executable: list[str]) -> Path:
             f"STDOUT:\n{proc.stdout}"
         )
         raise RuntimeError(msg)
-    import yaml
     with cfg.open() as f:
         data = yaml.safe_load(f)
     run_dir = Path(data["project"]) / data["name"]
