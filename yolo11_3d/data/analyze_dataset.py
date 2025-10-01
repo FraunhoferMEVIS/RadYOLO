@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, NamedTuple
-from tqdm.auto import tqdm
+from typing import TYPE_CHECKING, NamedTuple
 
 import nibabel as nib
 import numpy as np
+from tqdm.auto import tqdm
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,14 +58,16 @@ def _foreground_channel_stats_and_samples(
 
     Args:
         arr: channel array in (X, Y, Z) order, any numeric dtype.
-        mask: boolean array (X, Y, Z), True for foreground voxels.
+        foreground_mask: boolean array (X, Y, Z), True for foreground voxels.
         sample_cap: max number of intensities to sample from foreground for percentiles.
 
     Returns:
         (stats dict, samples 1D float32 array)
     """
     if foreground_mask is None or not np.any(foreground_mask):
-        return {"min": np.nan, "max": np.nan, "sum": 0.0, "sumsq": 0.0, "count": 0.0}, np.array([], dtype=np.float32)
+        return {"min": np.nan, "max": np.nan, "sum": 0.0, "sumsq": 0.0, "count": 0.0}, np.array(
+            [], dtype=np.float32
+        )
 
     # Extract foreground intensities
     fg = arr[foreground_mask].astype(np.float32, copy=False)
@@ -90,12 +96,14 @@ def _foreground_channel_stats_and_samples(
 def _load_nifti(path: Path) -> tuple[np.ndarray, tuple[float, float, float]]:
     img = nib.loadsave.load(str(path))
     if not isinstance(img, nib.nifti1.Nifti1Image):
-        raise TypeError(f"Unsupported NIfTI at {path}")
+        msg = f"Unsupported NIfTI at {path}"
+        raise TypeError(msg)
     data = np.asanyarray(img.dataobj)
     # spacing: nib loads affine, voxel sizes are diagonal of Zooms or from header
     zooms = img.header.get_zooms()
     # Expect at least (x,y,z)
-    if len(zooms) >= 3:
+    spatial_dims = 3
+    if len(zooms) >= spatial_dims:
         spacing_xyz = (float(zooms[2]), float(zooms[1]), float(zooms[0]))  # to (z,y,x)
     else:
         LOGGER.warning(f"Could not extract spacing from nifti header in file {path}")
@@ -111,18 +119,18 @@ def _labels_to_mask(
 
     Label format: class x y z w h d (normalized to [0,1] relative to X,Y,Z).
     """
-    X, Y, Z = shape_xyz
-    mask = np.zeros((X, Y, Z), dtype=bool)
+    x_shape, y_shape, z_shape = shape_xyz
+    mask = np.zeros((x_shape, y_shape, z_shape), dtype=bool)
     if not entries:
         return mask
     for _cls, x, y, z, w, h, d in entries:
         # Convert normalized center/size to voxel indices (half-open slices)
-        cx = x * X
-        cy = y * Y
-        cz = z * Z
-        wx = max(w * X, 0.0)
-        hy = max(h * Y, 0.0)
-        dz = max(d * Z, 0.0)
+        cx = x * x_shape
+        cy = y * y_shape
+        cz = z * z_shape
+        wx = max(w * x_shape, 0.0)
+        hy = max(h * y_shape, 0.0)
+        dz = max(d * z_shape, 0.0)
 
         x0 = int(np.floor(cx - wx / 2.0))
         x1 = int(np.ceil(cx + wx / 2.0))
@@ -132,12 +140,12 @@ def _labels_to_mask(
         z1 = int(np.ceil(cz + dz / 2.0))
 
         # clamp to bounds and skip empty
-        x0 = max(0, min(X, x0))
-        x1 = max(0, min(X, x1))
-        y0 = max(0, min(Y, y0))
-        y1 = max(0, min(Y, y1))
-        z0 = max(0, min(Z, z0))
-        z1 = max(0, min(Z, z1))
+        x0 = max(0, min(x_shape, x0))
+        x1 = max(0, min(x_shape, x1))
+        y0 = max(0, min(y_shape, y0))
+        y1 = max(0, min(y_shape, y1))
+        z0 = max(0, min(z_shape, z0))
+        z1 = max(0, min(z_shape, z1))
         if x1 <= x0 or y1 <= y0 or z1 <= z0:
             continue
         mask[x0:x1, y0:y1, z0:z1] = True
@@ -145,16 +153,19 @@ def _labels_to_mask(
 
 
 def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) -> ImageStats:
+    num_only_spatial_dims = 3
+    num_spatial_and_channel_dims = 4
+    heuristic_max_channel_number = 8
     data, spacing_zyx = _load_nifti(image_path)
 
     # Build per-channel arrays in (X, Y, Z) order
-    if data.ndim == 3:
+    if data.ndim == num_only_spatial_dims:
         data_per_channel = [data]  # (X, Y, Z)
         shape_zyx = (data.shape[2], data.shape[1], data.shape[0])  # (z,y,x)
         shape_xyz = (data.shape[0], data.shape[1], data.shape[2])  # (X,Y,Z)
-    elif data.ndim == 4:
-        # either (X,Y,Z,C) or (C,X,Y,Z); heuristic: if first dim small (<10) treat as channels-first
-        if data.shape[0] <= 5 and data.shape[0] < data.shape[-1]:
+    elif data.ndim == num_spatial_and_channel_dims:
+        # either (X,Y,Z,C) or (C,X,Y,Z); heuristic: if first dim small (<=8) treat as channels-first
+        if data.shape[0] <= heuristic_max_channel_number and data.shape[0] < data.shape[-1]:
             # (C,X,Y,Z)
             data_per_channel = [data[c, ...] for c in range(data.shape[0])]
             shape_zyx = (data.shape[3], data.shape[2], data.shape[1])  # (z,y,x)
@@ -165,7 +176,8 @@ def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) 
             shape_zyx = (data.shape[2], data.shape[1], data.shape[0])
             shape_xyz = (data.shape[0], data.shape[1], data.shape[2])
     else:
-        raise ValueError(f"Unsupported image ndim {data.ndim} at {image_path}")
+        msg = f"Unsupported image ndim {data.ndim} at {image_path}"
+        raise ValueError(msg)
 
     # Foreground mask from labels (in XYZ order)
     entries = _labels_for_case(labels_path)
@@ -189,11 +201,14 @@ def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) 
 def _parse_label_line(
     line: str,
 ) -> tuple[int, float, float, float, float, float, float]:
+    expected_line_parts = 7
     parts = line.strip().split()
-    if len(parts) != 7:
-        raise ValueError(
-            f"Label line must have 7 entries: class x y z w h d (normalized), but has {len(parts)} entries."
+    if len(parts) != expected_line_parts:
+        msg = (
+            "Label line must have 7 entries: class x y z w h d (normalized), "
+            f"but has {len(parts)} entries."
         )
+        raise ValueError(msg)
     cls = int(float(parts[0]))
     x, y, z, w, h, d = map(float, parts[1:])
     return cls, x, y, z, w, h, d
@@ -219,11 +234,11 @@ def _label_stats_for_case(
     if not entries:
         return LabelStats(n_by_class, sizes_by_class_mm)
 
-    Z, Y, X = image_shape_zyx
-    image_size = np.array([Z, Y, X], dtype=np.float64)
+    shape_z, shape_y, shape_x = image_shape_zyx
+    image_size = np.array([shape_z, shape_y, shape_x], dtype=np.float64)
     image_spacing = np.array(spacing_zyx, dtype=np.float64)  # (z,y,x) mm
 
-    for cls, x, y, z, w, h, d in entries:
+    for cls, _x, _y, _z, w, h, d in entries:
         cls_key = str(cls)
         # labels are normalized in [0,1], sizes relative to image size; convert to mm
         whd_norm = np.array([w, h, d], dtype=np.float64)
@@ -243,7 +258,8 @@ def _has_mask(mask_path: Path) -> bool:
 def _iter_cases(dataset_path: Path) -> Iterable[tuple[str, Path]]:
     images_dir = dataset_path / "images"
     if not images_dir.exists():
-        raise FileNotFoundError(f"Missing images directory at {images_dir}")
+        msg = f"Missing images directory at {images_dir}"
+        raise FileNotFoundError(msg)
     for p in sorted(images_dir.glob("*.nii.gz")):
         name = p.name
         # case id = filename without .nii.gz
@@ -262,13 +278,16 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     masks_dir = dataset_path / "masks"
 
     if not images_dir.exists():
-        raise FileNotFoundError(f"Missing images directory: {images_dir}")
+        msg = f"Missing images directory: {images_dir}"
+        raise FileNotFoundError(msg)
     if not labels_dir.exists():
-        raise FileNotFoundError(f"Missing labels directory: {labels_dir}")
+        msg = f"Missing labels directory: {labels_dir}"
+        raise FileNotFoundError(msg)
 
     cases = list(_iter_cases(dataset_path))
     if not cases:
-        raise RuntimeError("No cases found under images/")
+        msg = "No cases found under images/"
+        raise RuntimeError(msg)
 
     max_workers = os.cpu_count() or 1
     if workers and workers > 0:
@@ -279,9 +298,7 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     n_masks = 0
 
     total_cases = len(cases)
-    LOGGER.info(
-        "Starting dataset analysis: %d cases, %d workers", total_cases, max_workers
-    )
+    LOGGER.info("Starting dataset analysis: %d cases, %d workers", total_cases, max_workers)
     # Run image and label/mask computations in parallel per case to minimize IO bottlenecks
     executor = ProcessPoolExecutor(max_workers=max_workers)
     futures = {}
@@ -317,25 +334,20 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         LOGGER.warning("Interrupted by user. Cancelling pending tasks...")
         for f in futures:
             f.cancel()
-        try:
+        with contextlib.suppress(Exception):
             executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
         raise
     finally:
-        try:
+        with contextlib.suppress(Exception):
             pbar.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
 
     if not image_stats_results:
-        raise RuntimeError(
-            "No images could be read. Check that image filenames end with .nii.gz and are accessible."
+        msg = (
+            "No images could be read. Check if image filenames end with .nii.gz and are accessible."
         )
+        raise RuntimeError(msg)
 
     n_channels = max(len(stats.per_channel) for stats in image_stats_results)
 
@@ -402,12 +414,8 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         )
 
     # Median image size and voxel size
-    shapes = np.array(
-        [s.shape[:3] for s in image_stats_results], dtype=np.int64
-    )  # (N,3)
-    spacings = np.array(
-        [s.spacing for s in image_stats_results], dtype=np.float64
-    )  # (N,3)
+    shapes = np.array([s.shape[:3] for s in image_stats_results], dtype=np.int64)  # (N,3)
+    spacings = np.array([s.spacing for s in image_stats_results], dtype=np.float64)  # (N,3)
     median_shape = np.median(shapes, axis=0).astype(int).tolist()
     median_spacing = np.median(spacings, axis=0).astype(float).tolist()
 
