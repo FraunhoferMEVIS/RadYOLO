@@ -125,14 +125,14 @@ class DefaultConfig(BaseModel):
     do_batchgenerators_intensity_augmentation: bool = True
     do_intensity_augmentations_per_channel: bool = False
     intensity_noise_prob: float = 0.1
-    intensity_noise_variance: tuple[float, float] = (0.0, 1.0)
+    intensity_noise_variance: tuple[float, float] = (0.0, 0.1)
     intensity_blur_prob: float = 0.2
     intensity_blur_sigma: tuple[float, float] = (0.5, 1.0)
     intensity_mult_brightness_prob: float = 0.15
     intensity_mult_brightness_range: tuple[float, float] = (0.75, 1.25)
     intensity_add_brightness_prob: float = 0.15
     intensity_add_brightness_mu: float = 0.0
-    intensity_add_brightness_sigma: float = 2.0
+    intensity_add_brightness_sigma: float = 0.4
     intensity_contrast_prob: float = 0.15
     intensity_contrast_range: tuple[float, float] = (0.75, 1.25)
     intensity_lowres_prob: float = 0.25
@@ -145,7 +145,7 @@ class DefaultConfig(BaseModel):
     gin_layers: int = 4
     gin_channels: int = 2
     gin_prob_kernel_size_one: float = 0.8
-    gin_prob: float = 0.2
+    gin_prob: float = 0.3
 
     save_dir: Path | None = None
 
