@@ -4,7 +4,7 @@ YOLOv11 from ultralytics modified to work with 3D images.
 
 ## Installation
 
-This project uses `uv` for package managing and provides a `pyproject.toml`. It can therefore be installed using any standards compliant package manager, e. g.
+This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer) and provides a `pyproject.toml`. It can therefore be installed using any standards compliant package manager, e. g.
 
 `uv build .`
 
