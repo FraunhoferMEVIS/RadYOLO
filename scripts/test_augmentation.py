@@ -6,11 +6,10 @@ import sys
 
 import torch
 
-# Ensure local src is imported even if a site-packages version exists
+# Ensure repository root on sys.path
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = REPO_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from yolo11_3d.data.augmentations import (  # type: ignore  # noqa: E402
     batch_generators_intensity_augmentations,

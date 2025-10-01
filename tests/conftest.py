@@ -9,11 +9,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Ensure src in path
+# Ensure project root in path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import package to ensure entry point is importable during tests
 import yolo11_3d  # noqa: F401,E402

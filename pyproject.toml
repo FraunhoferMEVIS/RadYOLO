@@ -60,12 +60,12 @@ explicit = true
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/yolo11_3d"]
+packages = ["yolo11_3d"]
 
 [tool.ruff]
 line-length = 100
 required-version = ">=0.13.0"
-src = ["src"]
+src = ["."]
 
 [tool.ruff.lint]
 select = ["ALL"]

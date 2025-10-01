@@ -131,7 +131,7 @@ docker build -t yolo11-3d:latest .
 
 ## Development
 
-The source code can be found in `src/`
+The main source code lives in the `yolo11_3d/` package.
 
 ### Tests
 
