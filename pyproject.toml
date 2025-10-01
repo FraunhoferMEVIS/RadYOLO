@@ -4,29 +4,29 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yolo11-3d"
-version = "0.1.0.dev20250725"
+version = "0.1.0.dev20251001"
 authors = [
   { name = "Laurens Müller-Groh", email = "laurens.mueller-groh@mevis.fraunhofer.de" },
   { name = "Kai Geissler", email = "kai.geissler@mevis.fraunhofer.de" },
 ]
-description = "Add your description here"
+description = "A library to train 3D YOLO11 based deep learning models for object detection in medical images."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
   "batchgeneratorsv2>=0.3.0",
   "click>=8.1.8",
   "nibabel>=5.3.2",
-  "numpy>=2.2.1",
-  "onnx>=1.17.0",
+  "numpy>=2.3.0",
+  "onnx>=1.19.0",
   "onnxscript>=0.1.0.dev20250114",
   "opencv-python-headless>=4.11.0.86",
-  "pandas>=2.2.3",
+  "pandas>=2.3.0",
   "pillow>=9.2.0",
   "pydantic>=2.10.6",
   "pyyaml>=6.0.2",
   "seaborn>=0.13.2",
-  "torch>=2.5.1",
-  "torchvision>=0.20.1",
+  "torch>=2.8.0",
+  "torchvision>=0.23.0",
   "tqdm>=4.67.1",
   "tqdm-loggable>=0.2",
 ]
@@ -38,7 +38,7 @@ dependencies = [
 dev = [
   "jupyter>=1.1.1",
   "matplotlib>=3.10.0",
-  "ruff>=0.8.6",
+  "ruff>=0.13.0",
   "pytest>=8.3.0",
   "pytest-cov>=5.0.0",
 ]
@@ -53,8 +53,7 @@ torchvision = [{ index = "pytorch" }]
 
 [[tool.uv.index]]
 name = "pytorch"
-# url = "https://download.pytorch.org/whl/cu128"
-url = "https://download.pytorch.org/whl/cu118"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.hatch.metadata]
@@ -65,7 +64,7 @@ packages = ["src/yolo11_3d"]
 
 [tool.ruff]
 line-length = 100
-required-version = ">=0.8.6"
+required-version = ">=0.13.0"
 src = ["src"]
 
 [tool.ruff.lint]

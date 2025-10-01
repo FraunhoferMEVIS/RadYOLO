@@ -1,8 +1,8 @@
-ARG UV_VERSION="0.5.18"
+ARG UV_VERSION="0.8.22"
 
 FROM registry.fme.lan/ghcr/astral-sh/uv:${UV_VERSION} AS uv-base
 
-FROM registry.fme.lan/dockerhub/python:3.12-slim
+FROM registry.fme.lan/dockerhub/python:3.13-slim
 
 LABEL org.opencontainers.image.authors="Laurens Müller-Groh <laurens.mueller-groh@mevis.fraunhofer.de>"
 
