@@ -783,21 +783,23 @@ class GINNet(nn.Module):
 
     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         for layer in self.layers_kernel_size_3:
-            nn.init.kaiming_normal_(layer.weight)
+            nn.init.normal_(layer.weight)
             nn.init.normal_(layer.bias)
         for layer in self.layers_kernel_size_1:
-            nn.init.kaiming_normal_(layer.weight)
+            nn.init.normal_(layer.weight)
             nn.init.normal_(layer.bias)
 
         output = torch.zeros_like(input_tensor)
         for channel in range(input_tensor.shape[0]):
             input_i = x = input_tensor[channel].unsqueeze(0)
-            for i in range(len(self.layers_kernel_size_3)):
+            num_layers = len(self.layers_kernel_size_3)
+            for i in range(num_layers):
                 if random.random() <= self._p_kernel_size_1:
                     x = self.layers_kernel_size_1[i](x)
                 else:
                     x = self.layers_kernel_size_3[i](x)
-                x = F.leaky_relu(x)
+                if i < num_layers - 1:
+                    x = F.leaky_relu(x)
 
             alpha = random.random()
             output_i = alpha * input_i + (1 - alpha) * x
