@@ -16,8 +16,8 @@ from yolo11_3d.models.layers import (
     PrototypeMasksHighResolution,
     PrototypeMasksHighResolutionOneSkip,
 )
-from yolo11_3d.utils.util import intersect_dicts, make_divisible
 from yolo11_3d.training.loss import v8DetectionLoss
+from yolo11_3d.utils.util import intersect_dicts, make_divisible
 
 if TYPE_CHECKING:
     from yolo11_3d.config.config import ModelCheckpoint
@@ -211,10 +211,7 @@ class HardcodedModel(nn.Module):
         if self.enable_output_masks:
             if self.higher_resolution_prototypes:
                 self.prototype_layer = PrototypeMasksHighResolution(
-                    output_channels[16],
-                    output_channels[1],
-                    output_channels[0],
-                    num_prototype_masks
+                    output_channels[16], output_channels[1], output_channels[0], num_prototype_masks
                 )
             else:
                 self.prototype_layer = PrototypeMasks(
@@ -227,9 +224,7 @@ class HardcodedModel(nn.Module):
             if self.include_stride4_output:
                 detect_chs = [c_p2, c_p3, c_p4, c_p5]
                 self.prototype_layer = PrototypeMasksHighResolutionOneSkip(
-                    c_p2,
-                    output_channels[0],
-                    num_prototype_masks
+                    c_p2, output_channels[0], num_prototype_masks
                 )
             else:
                 detect_chs = [c_p3, c_p4, c_p5]
@@ -245,37 +240,40 @@ class HardcodedModel(nn.Module):
         # Detect head: order from highest resolution to lowest
         detect_chs = [c_p3, c_p4, c_p5]
         if self.include_stride4_output:
-            detect_chs = [c_p2] + detect_chs
-        self.l23 = Detect(num_classes,
-                          detect_chs,
-                          separate_objectness_head=self.separate_objectness_head)
+            detect_chs = [c_p2, *detect_chs]
+        self.l23 = Detect(
+            num_classes, detect_chs, separate_objectness_head=self.separate_objectness_head
+        )
         s = 256
         self.l23.stride = torch.tensor(
-            [
-                s / x.shape[-2]
-                for x in self.forward(torch.zeros(1, input_channels, s, s, s))[0]
-            ]
+            [s / x.shape[-2] for x in self.forward(torch.zeros(1, input_channels, s, s, s))[0]]
         )
         self.stride = self.l23.stride
         self.l23.bias_init()
 
         self.criterion = v8DetectionLoss(
-            self, box, cls, dfl, mask_gain, class_separate_gain, self.l23, device, tal_beta=1.0, tal_fallback=True,
-            enable_mask_loss=enable_output_masks, separate_objectness_head=self.separate_objectness_head,
-            objectness_loss=objectness_loss
+            self,
+            box,
+            cls,
+            dfl,
+            mask_gain,
+            class_separate_gain,
+            self.l23,
+            device,
+            tal_beta=1.0,
+            tal_fallback=True,
+            enable_mask_loss=enable_output_masks,
+            separate_objectness_head=self.separate_objectness_head,
+            objectness_loss=objectness_loss,
         )
 
     @overload
     def forward(
         self, x: torch.Tensor, *args, **kwargs
-    ) -> (
-        list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
-    ): ...
+    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
 
     @overload
-    def forward(
-        self, x: Batch, *args, **kwargs
-    ) -> tuple[torch.Tensor, torch.Tensor]: ...
+    def forward(self, x: Batch, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     def forward(
         self, x: torch.Tensor | Batch, *args, **kwargs
@@ -292,9 +290,7 @@ class HardcodedModel(nn.Module):
     def loss(
         self,
         batch: Batch,
-        preds: (
-            list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None
-        ) = None,
+        preds: (list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None) = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if preds is None:
             prediction = self.forward(batch["img"])
@@ -309,7 +305,9 @@ class HardcodedModel(nn.Module):
         csd = intersect_dicts(csd, self.state_dict())
         self.load_state_dict(csd, strict=False)
 
-    def predict(self, x: torch.Tensor) -> tuple[
+    def predict(
+        self, x: torch.Tensor
+    ) -> tuple[
         list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
         torch.Tensor | None,
         torch.Tensor | None,
@@ -395,6 +393,4 @@ class HardcodedModel(nn.Module):
                     2,
                 )
             return detections, mask_coefficients, prototype_masks
-        else:
-            return detections, None, None
-
+        return detections, None, None

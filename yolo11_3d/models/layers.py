@@ -58,7 +58,6 @@ def autopad[
     assert_never(kernel_size)
 
 
-
 class Conv(nn.Module):
     default_activation = nn.SiLU(inplace=True)
 
@@ -97,9 +96,8 @@ class Conv(nn.Module):
         return self.activation(self.batch_norm(self.conv(x)))
 
 
-
 class DWConv(Conv):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -117,7 +115,6 @@ class DWConv(Conv):
             dilation=dilation,
             activation=activation,
         )
-
 
 
 class DFL(nn.Module):
@@ -138,9 +135,8 @@ class DFL(nn.Module):
         return self.conv(x.view(b, 6, self.in_channels, a).transpose(2, 1).softmax(1)).view(b, 6, a)
 
 
-
 class Bottleneck(nn.Module):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -160,7 +156,7 @@ class Bottleneck(nn.Module):
 
 
 class C2f(nn.Module):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -200,7 +196,7 @@ class C2f(nn.Module):
 
 
 class C3k2(C2f):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -220,7 +216,7 @@ class C3k2(C2f):
 
 
 class C3(nn.Module):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -253,7 +249,7 @@ class C3(nn.Module):
 
 
 class C3k(C3):
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         in_channels: int,
         out_channels: int,
@@ -363,9 +359,7 @@ class PSABlock(nn.Module):
         """
         super().__init__()
 
-        self.attention = Attention(
-            channels, attention_ratio=attention_ratio, num_heads=num_heads
-        )
+        self.attention = Attention(channels, attention_ratio=attention_ratio, num_heads=num_heads)
         self.feed_forward_network = nn.Sequential(
             Conv(channels, channels * 2, 1), Conv(channels * 2, channels, 1, activation=False)
         )
@@ -377,16 +371,18 @@ class PSABlock(nn.Module):
         return x  # noqa: RET504
 
 
-
 class C2PSA(nn.Module):
     """Cross Stage Partial Self-Attention.
 
-    This module implements a convolutional block with a configurable number of Partial Self-Attention (PSA) blocks.
+    This module implements a convolutional block with a configurable number of
+    Partial Self-Attention (PSA) blocks.
 
     Attributes:
         hidden_channels (int): Number of hidden channels.
-        in_conv (Conv): The initial 1x1 convolution layer to adjust the number of input channels to 2*`hidden_channels`.
-        out_conv (Conv): The final 1x1 convolution layer to adjust the number of output channels to `hidden_channels`.
+        in_conv (Conv): Initial 1x1 convolution layer to adjust the number of input channels
+            to 2*`hidden_channels`.
+        out_conv (Conv): Final 1x1 convolution layer to adjust the number of output channels
+            to `hidden_channels`.
         m (nn.Sequential): Sequential container of `n_hidden_layers` times `PSABlock` modules.
     """
 
@@ -403,8 +399,11 @@ class C2PSA(nn.Module):
         """
         super().__init__()
         if in_channels != out_channels:
-            raise ValueError(f"Input channels have to be equals to output channels in C2PSA, "
-                             f"but were {in_channels} and {out_channels}.")
+            msg = (
+                f"Input channels have to be equals to output channels in C2PSA, "
+                f"but were {in_channels} and {out_channels}."
+            )
+            raise ValueError(msg)
         self.hidden_channels = int(in_channels * expansion)
         self.in_conv = Conv(in_channels, 2 * self.hidden_channels, 1, 1)
         self.out_conv = Conv(2 * self.hidden_channels, in_channels, 1)
@@ -440,13 +439,21 @@ class Detect(nn.Module):
     anchors = torch.empty(0)
     strides = torch.empty(0)
 
-    def __init__(self, num_classes: int = 80, ch: Sequence[int] = (), *, separate_objectness_head: bool = False) -> None:
+    def __init__(
+        self,
+        num_classes: int = 80,
+        ch: Sequence[int] = (),
+        *,
+        separate_objectness_head: bool = False,
+    ) -> None:
         super().__init__()
         self.nc = num_classes  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.separate_objectness_head = separate_objectness_head
-        self.no = (num_classes + 1 if self.separate_objectness_head else num_classes) + self.reg_max * 6  # number of outputs per anchor
+        self.no = (
+            num_classes + 1 if self.separate_objectness_head else num_classes
+        ) + self.reg_max * 6  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = (
             max((16, ch[0] // 4, self.reg_max * 6)),
@@ -511,17 +518,15 @@ class Detect(nn.Module):
             cls_prob = cls.softmax(1)
             obj_prob = obj.sigmoid()
             return (dbox, cls_prob, obj_prob)
-        else:
-            box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
-            dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-            cls_prob = cls.sigmoid()
-            return (dbox, cls_prob)
+        box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
+        dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+        cls_prob = cls.sigmoid()
+        return (dbox, cls_prob)
 
     def bias_init(self) -> None:
-        for idx, (box_convolutions, class_convolutions, stride) in enumerate(zip(self.cv_boxes,
-                                                                                 self.cv_classes,
-                                                                                 self.stride,
-                                                                                 strict=True)):
+        for idx, (box_convolutions, class_convolutions, stride) in enumerate(
+            zip(self.cv_boxes, self.cv_classes, self.stride, strict=True)
+        ):
             if not isinstance(box_convolutions, nn.Sequential):
                 raise TypeError
             box_last = box_convolutions[-1]
@@ -567,9 +572,8 @@ class PrototypeMasks(nn.Module):
         input_channels: int,
         intermediate_channels: int = 256,
         prototypes: int = 32,
-    ):
-        """
-        Initialize the PrototypeMasks module with specified number of prototypes.
+    ) -> None:
+        """Initialize the PrototypeMasks module with specified number of prototypes.
 
         Args:
             input_channels (int): Input channels.
@@ -587,7 +591,7 @@ class PrototypeMasks(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through layers using an upsampled input image."""
         return self.cv3(self.cv2(self.upsample(self.cv1(x))))
-    
+
 
 class PrototypeMasksHighResolution(nn.Module):
     """PrototypeMasks module for segmentation models."""
@@ -598,9 +602,8 @@ class PrototypeMasksHighResolution(nn.Module):
         input_channels_skip_connection_low: int,
         input_channels_skip_connection_high: int,
         prototypes: int = 32,
-    ):
-        """
-        Initialize the PrototypeMasks module with specified number of prototypes.
+    ) -> None:
+        """Initialize the PrototypeMasks module with specified number of prototypes.
 
         Args:
             input_channels (int): Input channels.
@@ -609,29 +612,30 @@ class PrototypeMasksHighResolution(nn.Module):
             prototypes (int): Output channels (number of protos).
         """
         super().__init__()
-        self.cv1 = Conv(input_channels, prototypes*4, kernel_size=3)
-        self.upsample1 = nn.ConvTranspose3d(
-            prototypes*4, prototypes*4, 2, 2, 0, bias=True
+        self.cv1 = Conv(input_channels, prototypes * 4, kernel_size=3)
+        self.upsample1 = nn.ConvTranspose3d(prototypes * 4, prototypes * 4, 2, 2, 0, bias=True)
+
+        self.cv_skip_low_1 = Conv(input_channels_skip_connection_low, prototypes * 4, kernel_size=3)
+        self.cv_skip_low_2 = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
+
+        self.cv2 = Conv(prototypes * 4, prototypes * 2, kernel_size=3)
+        self.cv3 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
+        self.upsample2 = nn.ConvTranspose3d(prototypes * 2, prototypes * 2, 2, 2, 0, bias=True)
+
+        self.cv_skip_high_1 = Conv(
+            input_channels_skip_connection_high, prototypes * 2, kernel_size=3
         )
+        self.cv_skip_high_2 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
 
-        self.cv_skip_low_1 = Conv(input_channels_skip_connection_low, prototypes*4, kernel_size=3)
-        self.cv_skip_low_2 = Conv(prototypes*4, prototypes*4, kernel_size=3)
-        
-        self.cv2 = Conv(prototypes*4, prototypes*2, kernel_size=3)
-        self.cv3 = Conv(prototypes*2, prototypes*2, kernel_size=3)
-        self.upsample2 = nn.ConvTranspose3d(
-            prototypes*2, prototypes*2, 2, 2, 0, bias=True
-        )
+        self.cv_out_1 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
+        self.cv_out_2 = Conv(prototypes * 2, prototypes)
 
-        self.cv_skip_high_1 = Conv(input_channels_skip_connection_high, prototypes*2, kernel_size=3)
-        self.cv_skip_high_2 = Conv(prototypes*2, prototypes*2, kernel_size=3)
-
-        self.cv_out_1 = Conv(prototypes*2, prototypes*2, kernel_size=3)
-        self.cv_out_2 = Conv(prototypes*2, prototypes)
-
-    def forward(self, x: torch.Tensor,
-                skip_connection_low_res: torch.Tensor,
-                skip_connection_high_res: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        skip_connection_low_res: torch.Tensor,
+        skip_connection_high_res: torch.Tensor,
+    ) -> torch.Tensor:
         """Perform a forward pass through layers using an upsampled input image."""
         x = self.cv1(x)
         x = self.upsample1(x)
@@ -648,9 +652,8 @@ class PrototypeMasksHighResolution(nn.Module):
         skip_high = self.cv_skip_high_2(skip_high)
 
         out = self.cv_out_1(x + skip_high)
-        out = self.cv_out_2(out)
-        return out
-    
+        return self.cv_out_2(out)
+
 
 class PrototypeMasksHighResolutionOneSkip(nn.Module):
     """PrototypeMasks module for segmentation models."""
@@ -660,9 +663,8 @@ class PrototypeMasksHighResolutionOneSkip(nn.Module):
         input_channels: int,
         input_channels_skip_connection: int,
         prototypes: int = 32,
-    ):
-        """
-        Initialize the PrototypeMasks module with specified number of prototypes.
+    ) -> None:
+        """Initialize the PrototypeMasks module with specified number of prototypes.
 
         Args:
             input_channels (int): Input channels.
@@ -670,21 +672,18 @@ class PrototypeMasksHighResolutionOneSkip(nn.Module):
             prototypes (int): Output channels (number of protos).
         """
         super().__init__()
-        
-        self.cv1 = Conv(input_channels, prototypes*4, kernel_size=3)
-        self.cv2 = Conv(prototypes*4, prototypes*4, kernel_size=3)
-        self.upsample2 = nn.ConvTranspose3d(
-            prototypes*4, prototypes*2, 2, 2, 0, bias=True
-        )
 
-        self.cv_skip_1 = Conv(input_channels_skip_connection, prototypes*2, kernel_size=3)
-        self.cv_skip_2 = Conv(prototypes*2, prototypes*2, kernel_size=3)
+        self.cv1 = Conv(input_channels, prototypes * 4, kernel_size=3)
+        self.cv2 = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
+        self.upsample2 = nn.ConvTranspose3d(prototypes * 4, prototypes * 2, 2, 2, 0, bias=True)
 
-        self.cv_out_1 = Conv(prototypes*2, prototypes*2, kernel_size=3)
-        self.cv_out_2 = Conv(prototypes*2, prototypes)
+        self.cv_skip_1 = Conv(input_channels_skip_connection, prototypes * 2, kernel_size=3)
+        self.cv_skip_2 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
 
-    def forward(self, x: torch.Tensor,
-                skip_connection: torch.Tensor) -> torch.Tensor:
+        self.cv_out_1 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
+        self.cv_out_2 = Conv(prototypes * 2, prototypes)
+
+    def forward(self, x: torch.Tensor, skip_connection: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through layers using an upsampled input image."""
         x = self.cv1(x)
         x = self.cv2(x)
@@ -694,5 +693,4 @@ class PrototypeMasksHighResolutionOneSkip(nn.Module):
         skip_high = self.cv_skip_2(skip_high)
 
         out = self.cv_out_1(x + skip_high)
-        out = self.cv_out_2(out)
-        return out
+        return self.cv_out_2(out)
