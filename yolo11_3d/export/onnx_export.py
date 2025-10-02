@@ -1,15 +1,22 @@
-import torch
+from __future__ import annotations
+
 from copy import deepcopy
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from yolo11_3d.models.model import HardcodedModel
-from yolo11_3d.models.layers import (
-    C2f,
-    Detect
-)
+import torch
+
+from yolo11_3d.models.layers import C2f, Detect
+
+if TYPE_CHECKING:
+    from yolo11_3d.models.model import HardcodedModel
+
 
 def export_model(
-    model: HardcodedModel, input_shape: tuple[int, ...], dest: Path | str, copy: bool = False
+    model: HardcodedModel,
+    input_shape: tuple[int, ...],
+    dest: Path | str,
+    copy: bool = False,
 ) -> Path:
     inputs = torch.randn((1, *input_shape)).to("cpu")
     if copy:
@@ -20,7 +27,7 @@ def export_model(
     model.eval()
     model.float()
 
-    # TODO: Make export to float16 with input and output layers as float32
+    # TODO(kgeissler): Make export to float16 with input and output layers as float32
 
     for _ in range(2):
         model(inputs)
@@ -38,7 +45,13 @@ def export_model(
     elif not model.enable_output_masks and model.separate_objectness_head:
         output_names = ["boxes", "classScores", "objectnessScores"]
     elif model.enable_output_masks and model.separate_objectness_head:
-        output_names = ["boxes", "classScores", "objectnessScores", "maskCoefficients", "prototypeMasks"]
+        output_names = [
+            "boxes",
+            "classScores",
+            "objectnessScores",
+            "maskCoefficients",
+            "prototypeMasks",
+        ]
     else:
         output_names = ["boxes", "classScores"]
 
