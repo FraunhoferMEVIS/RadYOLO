@@ -10,7 +10,7 @@ import nibabel as nib
 import torch
 import torch.nn.functional as F  # noqa: N812
 
-from yolo11_3d.config.config import model_checkpoint_from_torch
+from yolo11_3d.config.config import DefaultConfig, model_checkpoint_from_torch
 from yolo11_3d.models.model import HardcodedModel
 from yolo11_3d.utils import ops
 from yolo11_3d.utils.util import select_device
@@ -49,10 +49,9 @@ def _load_model(cfg: PredictionConfig) -> tuple[HardcodedModel, Any, dict[int, s
     model.to(device).float().eval()
     # Attach device attribute expected by downstream code
     try:
-        setattr(model, "device", device)
+        model.device = device
     except Exception:  # pragma: no cover - extremely unlikely
         LOGGER.warning("Could not set model.device attribute; continuing.")
-    #ModelEMA(model)  # ensures attributes like stride are set, ignoring returned ema instance
     # TODO(kgeissler): Implement loading of correct class names
     num_classes = model.num_classes
     names = {class_index: f"class_{class_index}" for class_index in range(num_classes)}
@@ -69,7 +68,13 @@ def _resize_image(img: torch.Tensor, size: tuple[int, int, int]) -> torch.Tensor
     return F.interpolate(img.unsqueeze(0), size=size, mode="trilinear").squeeze(0)
 
 
-def _postprocess_single(pred_class_box, pred_mask_coeff, pred_prototype_masks, train_config, num_classes: int):
+def _postprocess_single(
+    pred_class_box: tuple[torch.Tensor, ...],
+    pred_mask_coeff: torch.Tensor | None,
+    pred_prototype_masks: torch.Tensor | None,
+    train_config: DefaultConfig,
+    num_classes: int,
+):
     """Return NMS-filtered detections with single (argmax) class per box.
 
     Output tensor columns: x1,y1,z1,x2,y2,z2,conf,class,(optional mask coeffs...)
@@ -104,12 +109,11 @@ def _postprocess_single(pred_class_box, pred_mask_coeff, pred_prototype_masks, t
     prediction = torch.cat((dbox, cls_scores), 1)
 
     # Optionally append mask coefficients (shape (B, M, N)) if counts align
-    if isinstance(pred_mask_coeff, torch.Tensor):
-        if (
-            pred_mask_coeff.shape[0] == prediction.shape[0]
-            and pred_mask_coeff.shape[2] == prediction.shape[2]
-        ):
-            prediction = torch.cat((prediction, pred_mask_coeff), 1)
+    if isinstance(pred_mask_coeff, torch.Tensor) and (
+        pred_mask_coeff.shape[0] == prediction.shape[0]
+        and pred_mask_coeff.shape[2] == prediction.shape[2]
+    ):
+        prediction = torch.cat((prediction, pred_mask_coeff), 1)
 
     # Run NMS with multi_label=False to ensure argmax behaviour (ops handles selecting best class)
     detections = ops.non_max_suppression(
@@ -124,7 +128,9 @@ def _postprocess_single(pred_class_box, pred_mask_coeff, pred_prototype_masks, t
     return detections, pred_prototype_masks
 
 
-def _relative_box(box_image_xyzxyz: torch.Tensor, original_shape: tuple[int, int, int]) -> list[float]:
+def _relative_box(
+    box_image_xyzxyz: torch.Tensor, original_shape: tuple[int, int, int]
+) -> list[float]:
     rel_box = box_image_xyzxyz.clone()
     d, w, h = original_shape  # note tensor original ordering (D,W,H)
     rel_box[0] /= w
@@ -148,15 +154,13 @@ def _reconstruct_and_save_mask(
     nm = det.shape[0] - 8
     if nm <= 0:
         return None
-    coeff = det[8:8 + nm].to(dtype=proto.dtype, device=proto.device)
+    coeff = det[8 : 8 + nm].to(dtype=proto.dtype, device=proto.device)
     mask_logits = torch.einsum("n,nhwd->hwd", coeff, proto)
     mask_prob = mask_logits.sigmoid()
     mask_prob_r = mask_prob.permute(2, 0, 1).unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
-    mask_up = (
-        F.interpolate(
-            mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
-        )[0, 0].permute(1, 2, 0)
-    )
+    mask_up = F.interpolate(
+        mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
+    )[0, 0].permute(1, 2, 0)
     mask_bin = (mask_up >= MASK_THRESHOLD).cpu().numpy().astype("uint8")
     mask_affine = nifti_img.affine
     mask_img = nib.Nifti1Image(mask_bin.transpose(2, 0, 1), affine=mask_affine)
@@ -173,11 +177,7 @@ NDIM_3D = 3
 
 def _box_image_to_world(
     box_image_xyzxyz: torch.Tensor,
-    affine: (
-        torch.Tensor
-        | list[list[float]]
-        | tuple[tuple[float, ...], ...]
-    ),
+    affine: (torch.Tensor | list[list[float]] | tuple[tuple[float, ...], ...]),
 ) -> torch.Tensor:
     """Convert an axis-aligned image-space 3D box to world-space using the NIfTI affine.
 
@@ -203,12 +203,7 @@ def _box_image_to_world(
     x1, y1, z1, x2, y2, z2 = box_image_xyzxyz.tolist()
     # Generate 8 corners in voxel space
     corners = torch.tensor(
-        [
-            [xi, yi, zi]
-            for xi in (x1, x2)
-            for yi in (y1, y2)
-            for zi in (z1, z2)
-        ],
+        [[xi, yi, zi] for xi in (x1, x2) for yi in (y1, y2) for zi in (z1, z2)],
         dtype=torch.float32,
     )  # (8,3)
     ones = torch.ones((corners.shape[0], 1), dtype=corners.dtype)
@@ -251,9 +246,7 @@ def run_prediction(cfg: PredictionConfig) -> int:
             img_resized = _resize_image(img_tensor, target_size)
             device = model.device
             autocast_ctx = (
-                torch.autocast(device.type)
-                if device.type != "cpu"
-                else contextlib.nullcontext()
+                torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
             )
             with torch.no_grad(), autocast_ctx:
                 pred_class_box, pred_mask_coeff, pred_prototype_masks = model(
@@ -268,9 +261,7 @@ def run_prediction(cfg: PredictionConfig) -> int:
                 for det_i, det in enumerate(detections):
                     box_image_xyzxyz = det[:6]
                     try:
-                        box_world_xyzxyz = _box_image_to_world(
-                            box_image_xyzxyz, nifti_img.affine
-                        )
+                        box_world_xyzxyz = _box_image_to_world(box_image_xyzxyz, nifti_img.affine)
                     except (RuntimeError, ValueError, TypeError):  # pragma: no cover
                         box_world_xyzxyz = box_image_xyzxyz
                     entry: dict[str, object] = {

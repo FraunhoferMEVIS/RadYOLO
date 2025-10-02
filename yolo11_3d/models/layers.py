@@ -497,7 +497,7 @@ class Detect(nn.Module):
             return pred_with_final_layers
         return (pred_with_final_layers, pred_raw)
 
-    def _inference(self, x: list[torch.Tensor]) -> torch.Tensor:
+    def _inference(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, ...]:
         shape = x[0].shape
         if self.shape != shape:
             self.anchors, self.strides = (
