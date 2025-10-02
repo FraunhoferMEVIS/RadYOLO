@@ -25,7 +25,8 @@ class TaskAlignedAssigner(nn.Module):
         metric.
         beta (float): The beta parameter for the localization component of the task-aligned metric.
         eps (float): A small value to prevent division by zero.
-        anchor_inclusion_distance (float): Allow to match anchors that are slightly outside the gt_box. Should be set to half mininum model stride.
+        anchor_inclusion_distance (float): Allow to match anchors that are slightly outside
+            the gt_box. Should be set to half mininum model stride.
     """
 
     def __init__(
@@ -36,7 +37,7 @@ class TaskAlignedAssigner(nn.Module):
         beta: float = 6.0,
         eps: float = 1e-9,
         use_fallback_if_alignment_zero: bool = True,
-        anchor_inclusion_distance: float = -2
+        anchor_inclusion_distance: float = -2,
     ) -> None:
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
@@ -210,7 +211,9 @@ class TaskAlignedAssigner(nn.Module):
         """Get anchors_in_gts mask, (b, max_num_obj, num_anchors)."""
         # Create mask which contains for each ground truth bounding box all anchor points that are
         # included in respective bbox area. (b, max_num_obj, num_anchors)
-        anchors_in_gts__mask = self.select_candidates_in_gts(anchor_points, ground_truth_bboxes, self.anchor_inclusion_distance)
+        anchors_in_gts__mask = self.select_candidates_in_gts(
+            anchor_points, ground_truth_bboxes, self.anchor_inclusion_distance
+        )
 
         # Get anchor align_metric, (b, max_num_obj, num_anchors)
         align_metric, overlaps = self.get_box_metrics(
@@ -225,7 +228,7 @@ class TaskAlignedAssigner(nn.Module):
         mask_topk = self.select_topk_candidates(
             align_metric, topk_mask=ground_truth__mask.expand(-1, -1, self.topk).bool()
         )
-        
+
         # Boolean mask: (B, M) True if all align_metric entries are zero for this GT box
         zero_mask = (align_metric.sum(dim=2) == 0) & (ground_truth__mask.sum(dim=2) > 0)
 
@@ -234,11 +237,15 @@ class TaskAlignedAssigner(nn.Module):
                 f"Using fall back mechanism to assign alignment metrics because alignment for all "
                 f"grid cells was zero for {zero_mask.sum().item()} objects."
             )
-            B, M, A = align_metric.shape  # batch, max_num_obj, num_anchors
+            batch_size, max_num_objects, num_anchors = align_metric.shape
 
             # Expand GT and predicted boxes for broadcasting
-            gt_boxes_exp = ground_truth_bboxes.unsqueeze(2).expand(-1, -1, A, -1)  # (B, M, A, 6)
-            pred_boxes_exp = pred_bboxes.unsqueeze(1).expand(-1, M, -1, -1)        # (B, M, A, 6)
+            gt_boxes_exp = ground_truth_bboxes.unsqueeze(2).expand(
+                -1, -1, num_anchors, -1
+            )  # (B, M, A, 6)
+            pred_boxes_exp = pred_bboxes.unsqueeze(1).expand(
+                -1, max_num_objects, -1, -1
+            )  # (B, M, A, 6)
 
             # Compute Euclidean distance in 6D (between corners of GT and anchor boxes)
             distances = torch.norm(gt_boxes_exp - pred_boxes_exp, dim=3)  # (B, M, A)
@@ -246,20 +253,22 @@ class TaskAlignedAssigner(nn.Module):
             distances = torch.where(anchors_in_gts__mask == 0, max_distance, distances)
 
             # Loop over batch and GT boxes where zero_mask is True
-            for b in range(B):
-                for m in range(M):
+            for b in range(batch_size):
+                for m in range(max_num_objects):
                     if zero_mask[b, m]:
                         # Get indices of 10 closest anchors
                         topk_vals, topk_idx = torch.topk(distances[b, m], k=10, largest=False)
 
                         # Assign alignment metric based on inverse distance scaling
                         # Closest gets 0.1, farthest of the 10 gets proportionally less
-                        norm_dist = (topk_vals - topk_vals.min()) / (topk_vals.max() - topk_vals.min())
+                        norm_dist = (topk_vals - topk_vals.min()) / (
+                            topk_vals.max() - topk_vals.min()
+                        )
                         new_metrics = 0.1 * (1 - norm_dist)
 
-                        # Update align_metric, overlaps, mask_topk, anchors_in_gts__mask for these anchors
-                        # The resulting values are technically not correct, but allow the model to learn
-                        # some foreground anchors for the objects
+                        # Update align_metric, overlaps, mask_topk, anchors_in_gts__mask for these
+                        # anchors. The resulting values are technically not correct, but allow
+                        # the model to learn some foreground anchors for the objects
                         align_metric[b, m, topk_idx] = new_metrics
                         overlaps[b, m, topk_idx] = new_metrics
                         mask_topk[b, m, topk_idx] = 1
@@ -270,7 +279,9 @@ class TaskAlignedAssigner(nn.Module):
         boxes_without_anchor = ground_truth__mask.sum(2).gt(mask_pos.sum(2)).sum().item()
         if boxes_without_anchor:
             LOGGER.warning(
-                f"Did not find anchor points for {boxes_without_anchor} ground-truth bounding boxes. Your bounding boxes could be too small for the configured heads and input resolution."
+                f"Did not find anchor points for {boxes_without_anchor} ground-truth bounding "
+                f"boxes. Your bounding boxes could be too small for the configured heads and "
+                f"input resolution."
             )
 
         return mask_pos, align_metric, overlaps
@@ -297,7 +308,7 @@ class TaskAlignedAssigner(nn.Module):
         ind[0] = (
             torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)
         )  # b, max_num_obj
-        # Clamp unknown class (-1) to 0 only to avoid indexing errors; loss handles unknown classes (class -1)
+        # Clamp unknown class (-1) to 0 only to avoid indexing errors; loss handles unknown classes
         ind[1] = ground_truth_labels.squeeze(-1).clamp_min(0)  # b, max_num_obj
         # Get the scores of each grid for each gt cls
         bbox_scores[ground_truth__mask] = pred_scores[ind[0], :, ind[1]][
@@ -325,13 +336,13 @@ class TaskAlignedAssigner(nn.Module):
             metrics (Tensor): A tensor of shape (b, max_num_obj, h*w), where b is the batch size,
                               max_num_obj is the maximum number of objects, and h*w represents the
                               total number of anchor points.
-            largest (bool): If True, select the largest values; otherwise, select the smallest values.
+            largest (bool): If True, select the largest values; otherwise, select smallest values.
             topk_mask (Tensor): An optional boolean tensor of shape (b, max_num_obj, topk), where
                                 topk is the number of top candidates to consider. If not provided,
-                                the top-k values are automatically computed based on the given metrics.
+                                the top-k values are automatically computed based on given metrics.
 
         Returns:
-            (Tensor): A tensor of shape (b, max_num_obj, h*w) containing the selected top-k candidates.
+            (Tensor): Tensor of shape (b, max_num_obj, d*h*w) containing selected top-k candidates.
         """
         # (b, max_num_obj, topk)
         topk_metrics, topk_idxs = torch.topk(metrics, self.topk, dim=-1, largest=largest)
@@ -346,7 +357,6 @@ class TaskAlignedAssigner(nn.Module):
         for k in range(self.topk):
             # Expand topk_idxs for each value of k and add 1 at the specified positions
             count_tensor.scatter_add_(-1, topk_idxs[:, :, k : k + 1], ones)
-        # count_tensor.scatter_add_(-1, topk_idxs, torch.ones_like(topk_idxs, dtype=torch.int8, device=topk_idxs.device))
         # Filter invalid bboxes
         count_tensor.masked_fill_(count_tensor > 1, 0)
 
@@ -359,7 +369,7 @@ class TaskAlignedAssigner(nn.Module):
         target_gt_idx: torch.Tensor,
         fg_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute target labels, target bounding boxes, and target scores for the positive anchor points.
+        """Compute target labels, target bounding boxes, and target scores for positive anchor points.
 
         Args:
             gt_labels (Tensor): Ground truth labels of shape (b, max_num_obj, 1), where b is the
@@ -377,9 +387,9 @@ class TaskAlignedAssigner(nn.Module):
                                           positive anchor points.
                 - target_bboxes (Tensor): Shape (b, h*w*d, 6), containing the target bounding boxes
                                           for positive anchor points.
-                - target_scores (Tensor): Shape (b, h*w*d, num_classes), containing the target scores
-                                          for positive anchor points, where num_classes is the number
-                                          of object classes.
+                - target_scores (Tensor): Shape (b, h*w*d, num_classes), containing the target
+                                          scores for positive anchor points, where num_classes
+                                          is the number of object classes.
         """
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
@@ -409,14 +419,17 @@ class TaskAlignedAssigner(nn.Module):
     def select_candidates_in_gts(
         xy_centers: torch.Tensor, gt_bboxes: torch.Tensor, anchor_inclusion_distance: float
     ) -> torch.Tensor:
-        """Select positive anchor centers within ground truth bounding boxes.
-           The anchor_inclusion_distance ensures that there are also anchor candidates
-           for ground truth bounding boxes that are very small and fall between anchor centers.
+        """Selection of positive anchors within ground truth boxes.
+
+        Select positive anchor centers within ground truth bounding boxes.
+        The anchor_inclusion_distance ensures that there are also anchor candidates
+        for ground truth bounding boxes that are very small and fall between anchor centers.
 
         Args:
             xy_centers (torch.Tensor): Anchor center coordinates, shape (h*w*d, 3).
             gt_bboxes (torch.Tensor): Ground truth bounding boxes, shape (b, n_boxes, 6).
-            anchor_inclusion_distance (float, optional): Value to indicate the per axis minimal anchor inclusion distance
+            anchor_inclusion_distance (float, optional): Value to indicate the per axis minimal
+                anchor inclusion distance
 
         Returns:
             (torch.Tensor): Boolean mask of positive anchors, shape (b, n_boxes, h*w*d).
@@ -432,7 +445,7 @@ class TaskAlignedAssigner(nn.Module):
             bs, n_boxes, n_anchors, -1
         )
         pos_anchors = bbox_deltas.amin(3).gt_(anchor_inclusion_distance)
-        return pos_anchors
+        return pos_anchors  # noqa: RET504
 
     @staticmethod
     def select_highest_overlaps(
@@ -479,7 +492,7 @@ class TaskAlignedAssigner(nn.Module):
         # Ensure each GT with at least one candidate in the original mask retains at least one
         # unique anchor assignment after conflict resolution.
         # Shapes
-        B, M, A = mask_pos.shape
+        B, _M, A = mask_pos.shape
         # Count anchors per GT after conflict resolution
         per_gt_counts = mask_pos.sum(-1)  # (B, M)
 
@@ -524,7 +537,7 @@ class TaskAlignedAssigner(nn.Module):
                 cand_overlaps = overlaps[b, m]
                 cand_indices = torch.nonzero(candidates_mask, as_tuple=False).flatten()
                 # If for some reason overlaps are identical, torch.sort is deterministic
-                sorted_vals, order = torch.sort(cand_overlaps[cand_indices], descending=True)
+                _sorted_vals, order = torch.sort(cand_overlaps[cand_indices], descending=True)
                 sorted_candidates = cand_indices[order]
 
                 # Try to assign the best possible anchor to this GT.
@@ -539,7 +552,7 @@ class TaskAlignedAssigner(nn.Module):
                         owner[j] = m
                         assigned = True
                         break
-                    elif cur_owner != m and per_gt_counts[b, cur_owner] > 1:
+                    if cur_owner != m and per_gt_counts[b, cur_owner] > 1:
                         # Steal from current owner only if that owner will still have >=1 anchor
                         mask_pos[b, cur_owner, j] = 0.0
                         per_gt_counts[b, cur_owner] -= 1
@@ -572,7 +585,7 @@ class TaskAlignedAssigner(nn.Module):
         fg_mask = mask_pos.sum(-2)
         # Find each grid serve which gt(index)
         target_gt_idx = mask_pos.argmax(-2)  # (b, h*w*d)
-        return target_gt_idx, fg_mask, mask_pos    
+        return target_gt_idx, fg_mask, mask_pos
 
 
 def make_anchors(

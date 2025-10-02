@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast, Literal
 import logging
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional as F  # noqa: N812
 
-from yolo11_3d.validation.metrics import bbox_iou
-from yolo11_3d.utils.ops import xyzwhd2xyzxyz
 from yolo11_3d.training.tal import (
     TaskAlignedAssigner,
     bbox2dist,
     dist2bbox,
     make_anchors,
 )
+from yolo11_3d.utils.ops import xyzwhd2xyzxyz
+from yolo11_3d.validation.metrics import bbox_iou
 
 if TYPE_CHECKING:
     from yolo11_3d.data.data import Batch
@@ -27,15 +27,17 @@ LOGGER = logging.getLogger(__name__)
 
 
 class QualityFocalLoss(nn.Module):
-    """
-    Implements the Quality Focal Loss (https://arxiv.org/pdf/2006.04388) for addressing class imbalance
-    by down-weighting easy examples and focusing on hard negatives during training.
+    """Quality focal loss for classification.
+
+    Implements the Quality Focal Loss (https://arxiv.org/pdf/2006.04388) for addressing class
+    imbalance by down-weighting easy examples and focusing on hard negatives during training.
 
     Attributes:
-        gamma (float): The focusing parameter that controls how much the loss focuses on hard-to-classify examples.
+        gamma (float): The focusing parameter that controls how much the loss focuses on
+            hard-to-classify examples.
     """
 
-    def __init__(self, gamma: float = 2.0):
+    def __init__(self, gamma: float = 2.0) -> None:
         super().__init__()
         self.gamma = gamma
 
@@ -45,6 +47,7 @@ class QualityFocalLoss(nn.Module):
         modulating_factor = torch.abs(pred_prob - target) ** self.gamma
         loss *= modulating_factor
         return loss.sum()
+
 
 class DFLoss(nn.Module):
     """Criterion class for computing DFL losses during training."""
@@ -70,13 +73,15 @@ class DFLoss(nn.Module):
             + F.cross_entropy(pred_dist, tr.view(-1), reduction="none").view(tl.shape) * wr
         ).mean(-1, keepdim=True)
 
+
 class DiceLoss:
-    def __call__(self, pred: torch.Tensor, target: torch.Tensor, eps: float = 1):
+    def __call__(self, pred: torch.Tensor, target: torch.Tensor, eps: float = 1) -> torch.Tensor:
         pred = torch.sigmoid(pred)
-        intersection = (pred * target).sum(dim=(1,2,3))
-        summed = pred.sum(dim=(1,2,3)) + target.sum(dim=(1,2,3))
-        dice = ((2. * intersection + eps) / (summed + eps)).mean()
+        intersection = (pred * target).sum(dim=(1, 2, 3))
+        summed = pred.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
+        dice = ((2.0 * intersection + eps) / (summed + eps)).mean()
         return 1 - dice
+
 
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses during training."""
@@ -136,11 +141,14 @@ class v8DetectionLoss:  # noqa: N801
         tal_fallback: bool = True,
         enable_mask_loss: bool = False,
         separate_objectness_head: bool = False,
-        objectness_loss: Literal["focal", "bce"] = "bce"
+        objectness_loss: Literal["focal", "bce"] = "bce",
     ) -> None:  # model must be de-paralleled
-        """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
         m = detect_layer
-        self.objectness_loss = nn.BCEWithLogitsLoss(reduction="sum") if objectness_loss == "bce" else QualityFocalLoss()
+        self.objectness_loss = (
+            nn.BCEWithLogitsLoss(reduction="sum")
+            if objectness_loss == "bce"
+            else QualityFocalLoss()
+        )
         self.ce = nn.CrossEntropyLoss(reduction="none")
         self.box_gain = box
         self.classification_gain = cls
@@ -162,7 +170,7 @@ class v8DetectionLoss:  # noqa: N801
             alpha=tal_alpha,
             beta=tal_beta,
             use_fallback_if_alignment_zero=tal_fallback,
-            anchor_inclusion_distance= -2 if model.include_stride4_output else -4
+            anchor_inclusion_distance=-2 if model.include_stride4_output else -4,
         )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
@@ -201,25 +209,29 @@ class v8DetectionLoss:  # noqa: N801
 
     def __call__(
         self,
-        preds: tuple[list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
-                     torch.Tensor | None,
-                     torch.Tensor | None],
-        batch: Batch
+        preds: tuple[
+            list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
+            torch.Tensor | None,
+            torch.Tensor | None,
+        ],
+        batch: Batch,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls / objectness, dfl, mask, class separate multiplied by batch size."""
         loss = torch.zeros(5, device=self.device)  # box, cls_obj, dfl, mask, cls_sep
         feats = preds[0]
-        feats = feats[1] if isinstance(feats, tuple) else feats # Handling of inference pass
-        flat = torch.cat(
-            [xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2
-        )
+        feats = feats[1] if isinstance(feats, tuple) else feats  # Handling of inference pass
+        flat = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
         if self.separate_objectness_head:
-            pred_distri, pred_cls_logits, pred_obj_logit = flat.split((self.reg_max * 6, self.num_classes, 1), 1)
+            pred_distri, pred_cls_logits, pred_obj_logit = flat.split(
+                (self.reg_max * 6, self.num_classes, 1), 1
+            )
             pred_class_logits = pred_cls_logits.permute(0, 2, 1).contiguous()  # (B, A, C) logits
             pred_objectness_logit = pred_obj_logit.permute(0, 2, 1).contiguous()  # (B, A, 1) logit
         else:
             pred_distri, pred_class_logits = flat.split((self.reg_max * 6, self.num_classes), 1)
-            pred_class_logits = pred_class_logits.permute(0, 2, 1).contiguous()  # (B, A, C) logits for BCE-with-logits
+            pred_class_logits = pred_class_logits.permute(
+                0, 2, 1
+            ).contiguous()  # (B, A, C) logits for BCE-with-logits
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
 
         dtype = pred_class_logits.dtype
@@ -243,7 +255,8 @@ class v8DetectionLoss:  # noqa: N801
         pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyzxyz, (b, h*w*d, 6)
         pred_bboxes_image_coordinates = (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype)
 
-        # For assignment: use objectness when available so a prediction score exists even if no class selected
+        # For assignment: use objectness when available so a prediction score exists
+        # even if no class is selected / assigned
         if self.separate_objectness_head:
             assign_scores = pred_objectness_logit.detach().squeeze(-1).sigmoid()  # (B, A)
             # Expand to (B, A, C) so assigner API stays the same
@@ -267,34 +280,40 @@ class v8DetectionLoss:  # noqa: N801
         if self.separate_objectness_head:
             # For classification loss, build targets and ignore unknown class (-1)
             target_labels = target_scores.argmax(-1)  # (B, A)
-            target_objectness_scores = target_scores.amax(dim=-1, keepdim=True) # (B, A, 1)
+            target_objectness_scores = target_scores.amax(dim=-1, keepdim=True)  # (B, A, 1)
             target_objectness_scores_sum = max(target_objectness_scores.sum(), 1)
             # Determine unknown mask from gt_labels and assigned gt indices
-            B, A, C = target_scores.shape
-            # If there are no GT labels in this batch (e.g., empty images), avoid invalid gather on size-0 dim
+            batch_size, anchors, classes = target_scores.shape
+            # If there are no GT labels in this batch, avoid invalid gather on size-0 dim
             if gt_labels.shape[1] > 0:
-                safe_indices = target_gt_idx.unsqueeze(-1).clamp_min(0).clamp_max(gt_labels.shape[1] - 1)
+                safe_indices = (
+                    target_gt_idx.unsqueeze(-1).clamp_min(0).clamp_max(gt_labels.shape[1] - 1)
+                )
                 per_anchor_gt = gt_labels.gather(1, safe_indices)  # (B, A, 1)
                 unknown_mask = (per_anchor_gt.squeeze(-1) < 0) & fg_mask.bool()
             else:
-                unknown_mask = torch.zeros((B, A), dtype=torch.bool, device=fg_mask.device)
+                unknown_mask = torch.zeros(
+                    (batch_size, anchors), dtype=torch.bool, device=fg_mask.device
+                )
             # Cross entropy expects class indices and can take ignore_index
-            ce_loss = self.ce(
-                pred_class_logits.view(-1, C),
-                target_labels.view(-1)
-            )
+            ce_loss = self.ce(pred_class_logits.view(-1, classes), target_labels.view(-1))
             # Mask out ignored positions (unknown class)
-            ce_loss = ce_loss.view(B, A)
+            ce_loss = ce_loss.view(batch_size, anchors)
             ce_loss = ce_loss.masked_fill(unknown_mask, 0.0)
             # Only count fg anchors
             denom = fg_mask.sum().clamp_min(1)
             ce_loss = (ce_loss * fg_mask).sum() / denom
             loss[4] = ce_loss
             # BCE-with-logits on objectness score
-            loss[1] = self.objectness_loss(pred_objectness_logit, target_objectness_scores) / target_objectness_scores_sum
+            loss[1] = (
+                self.objectness_loss(pred_objectness_logit, target_objectness_scores)
+                / target_objectness_scores_sum
+            )
         else:
             # BCE-with-logits on multi-label scores as in YOLO
-            loss[1] = self.objectness_loss(pred_class_logits, target_scores.to(dtype)) / target_scores_sum
+            loss[1] = (
+                self.objectness_loss(pred_class_logits, target_scores.to(dtype)) / target_scores_sum
+            )
 
         # Bbox loss
         if fg_mask.sum():
@@ -320,21 +339,31 @@ class v8DetectionLoss:  # noqa: N801
                     fg_mask_batch = fg_mask[batch_index]
                     prototype_masks_batch = prototype_masks[batch_index]
                     if masks is not None and masks.shape[0] >= 1:
-                        masks = F.interpolate(masks[None, :], prototype_masks_batch.shape[1:], mode="nearest-exact")[0]
-                        for mask_index, gt_mask in enumerate(masks):
+                        masks_resampled = F.interpolate(
+                            masks[None, :], prototype_masks_batch.shape[1:], mode="nearest-exact"
+                        )[0]
+                        for mask_index, gt_mask in enumerate(masks_resampled):
                             if not gt_mask.any():
                                 LOGGER.warning("Empty mask after downsampling. Skipping this mask.")
                                 continue
-                            grid_cell_indices = torch.nonzero((target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)).squeeze(1)
+                            grid_cell_indices = torch.nonzero(
+                                (target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)
+                            ).squeeze(1)
                             if not grid_cell_indices.any():
                                 LOGGER.warning("No assinged grid cells. Skipping this mask.")
                                 continue
                             mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
-                            pred_masks_logits = torch.einsum("in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch)  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
-                            gt_mask = gt_mask.to(pred_masks_logits.dtype)
-                            gt_mask = gt_mask.expand(pred_masks_logits.shape[0], -1, -1, -1)
-                            mask_dice_loss = self.mask_dice_loss(pred_masks_logits, gt_mask)
-                            mask_bce_loss = self.mask_bce_loss(pred_masks_logits, gt_mask)
+                            pred_masks_logits = torch.einsum(
+                                "in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch
+                            )  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
+                            gt_mask_correct_dtype = gt_mask.to(pred_masks_logits.dtype)
+                            gt_mask_expanded = gt_mask_correct_dtype.expand(
+                                pred_masks_logits.shape[0], -1, -1, -1
+                            )
+                            mask_dice_loss = self.mask_dice_loss(
+                                pred_masks_logits, gt_mask_expanded
+                            )
+                            mask_bce_loss = self.mask_bce_loss(pred_masks_logits, gt_mask_expanded)
                             loss[3] += mask_dice_loss + mask_bce_loss
                             mask_loss_count += 1
                 if mask_loss_count > 0:
