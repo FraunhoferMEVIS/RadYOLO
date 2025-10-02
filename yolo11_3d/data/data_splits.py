@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
-from pathlib import Path
-import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -14,7 +17,8 @@ def _find_case_names(images_dir: Path) -> list[str]:
     Supports .nii.gz and .nii files. Ignores other files.
     """
     if not images_dir.exists() or not images_dir.is_dir():
-        raise FileNotFoundError(f"Images directory not found: {images_dir}")
+        msg = f"Images directory not found: {images_dir}"
+        raise FileNotFoundError(msg)
 
     cases: list[str] = []
     for p in sorted(images_dir.iterdir()):
@@ -28,13 +32,16 @@ def _find_case_names(images_dir: Path) -> list[str]:
         else:
             continue
     if not cases:
-        raise RuntimeError(f"No .nii or .nii.gz files found in {images_dir}")
+        msg = f"No .nii or .nii.gz files found in {images_dir}"
+        raise RuntimeError(msg)
     return cases
 
 
 def _kfold_chunks(items: list[str], k: int, seed: int) -> list[list[str]]:
-    if k <= 1:
-        raise ValueError("k must be >= 3")
+    min_splits = 2
+    if k < min_splits:
+        msg = "k must be >= 2"
+        raise ValueError(msg)
     items = list(items)
     rnd = random.Random(seed)
     rnd.shuffle(items)
@@ -51,7 +58,9 @@ def _kfold_chunks(items: list[str], k: int, seed: int) -> list[list[str]]:
     return chunks
 
 
-def _build_folds(cases: list[str], k: int = 5, seed: int = 42) -> list[dict[str, list[str]]]:
+def _build_folds(
+    cases: list[str], k: int = 5, seed: int = 42
+) -> list[dict[str, list[str]]]:
     """Create k folds with train/val/test per fold.
 
     For fold i: test = chunk i, val = chunk (i+1) mod k, train = remaining.
@@ -59,9 +68,16 @@ def _build_folds(cases: list[str], k: int = 5, seed: int = 42) -> list[dict[str,
     chunks = _kfold_chunks(cases, k=k, seed=seed)
     folds: list[dict[str, list[str]]] = []
     for i in range(k):
-        test = sorted(list(chunks[i]))
-        val = sorted(list(chunks[(i + 1) % k]))
-        train = sorted([c for j, chunk in enumerate(chunks) if j not in (i, (i + 1) % k) for c in chunk])
+        test = sorted(chunks[i])
+        val = sorted(chunks[(i + 1) % k])
+        train = sorted(
+            [
+                c
+                for j, chunk in enumerate(chunks)
+                if j not in (i, (i + 1) % k)
+                for c in chunk
+            ]
+        )
         folds.append({"train": train, "val": val, "test": test})
     return folds
 
@@ -103,7 +119,12 @@ def k_fold_data_splits(
             for i in range(k):
                 test_groups = group_chunks[i]
                 val_groups = group_chunks[(i + 1) % k]
-                train_groups = [g for j, ch in enumerate(group_chunks) if j not in (i, (i + 1) % k) for g in ch]
+                train_groups = [
+                    g
+                    for j, ch in enumerate(group_chunks)
+                    if j not in (i, (i + 1) % k)
+                    for g in ch
+                ]
 
                 test = sorted([c for g in test_groups for c in groups[g]])
                 val = sorted([c for g in val_groups for c in groups[g]])

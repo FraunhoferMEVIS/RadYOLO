@@ -1,22 +1,27 @@
 from __future__ import annotations
 
+import contextlib
+import csv
 import json
 import logging
 import os
+import pickle
 import re
 import shutil
+from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
 import yaml
+from nibabel.filebasedimages import ImageFileError
 from tqdm.auto import tqdm
-from collections import OrderedDict
-import pickle
-import csv
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,8 +37,7 @@ def _sanitize_name(name: str) -> str:
     """Return a filesystem and nnDetection friendly name (no dots)."""
     # Replace dots and spaces with underscores; collapse repeats
     name = re.sub(r"[\s.]+", "_", name.strip())
-    name = re.sub(r"_+", "_", name)
-    return name
+    return re.sub(r"_+", "_", name)
 
 
 def _load_dataset_names(dataset_yaml: Path) -> dict[int, str] | None:
@@ -65,17 +69,21 @@ def _read_splits(dataset_dir: Path, fold: int) -> SplitSets:
         # Fallback: all images -> train; none for val/test
         images = sorted((dataset_dir / "images").glob("*.nii.gz"))
         case_ids = [p.stem for p in images]
-        LOGGER.warning("data_splits.json not found; assigning all %d cases to train set.", len(case_ids))
+        LOGGER.warning(
+            "data_splits.json not found; assigning all %d cases to train set.", len(case_ids)
+        )
         return SplitSets(train=case_ids, val=[], test=[])
 
     with splits_path.open("r", encoding="utf-8") as f:
         splits = json.load(f)
     if not isinstance(splits, list) or fold >= len(splits):
-        raise ValueError(
-            f"Invalid fold {fold}; data_splits.json contains {len(splits) if isinstance(splits, list) else 'invalid'} entries"
-        )
+        number_of_splits = len(splits) if isinstance(splits, list) else "invalid"
+        msg = f"Invalid fold {fold}; data_splits.json contains {number_of_splits} entries"
+        raise ValueError(msg)
     entry = splits[fold]
-    return SplitSets(train=entry.get("train", []), val=entry.get("val", []), test=entry.get("test", []))
+    return SplitSets(
+        train=entry.get("train", []), val=entry.get("val", []), test=entry.get("test", [])
+    )
 
 
 def _ensure_dir(p: Path) -> None:
@@ -90,20 +98,26 @@ def _copy_image_to_nndet(image_path: Path, out_images_dir: Path, case_id: str) -
     return out_path
 
 
-def _labels_for_case(labels_dir: Path, case_id: str) -> list[tuple[int, float, float, float, float, float, float]]:
+def _labels_for_case(
+    labels_dir: Path, case_id: str
+) -> list[tuple[int, float, float, float, float, float, float]]:
     label_file = labels_dir / f"{case_id}.txt"
     if not label_file.exists():
         return []
     lines: list[str] = label_file.read_text(encoding="utf-8").strip().splitlines()
     tuples: list[tuple[int, float, float, float, float, float, float]] = []
+    required_label_parts = 7
     for ln in lines:
         if not ln.strip():
             continue
         parts = ln.split()
-        if len(parts) != 7:
-            raise ValueError(f"Invalid label line in {label_file}: '{ln}'")
+        if len(parts) != required_label_parts:
+            msg = f"Invalid label line in {label_file}: '{ln}'"
+            raise ValueError(msg)
         c, xc, yc, zc, sx, sy, sz = parts
-        tuples.append((int(float(c)), float(xc), float(yc), float(zc), float(sx), float(sy), float(sz)))
+        tuples.append(
+            (int(float(c)), float(xc), float(yc), float(zc), float(sx), float(sy), float(sz))
+        )
     return tuples
 
 
@@ -113,29 +127,28 @@ def _try_load_masks(masks_dir: Path, case_id: str) -> np.ndarray | None:
         return None
     try:
         nii = nib.load(mask_path)
-        arr = np.asanyarray(nii.dataobj)
-        return arr
-    except Exception as e:
+        return np.asanyarray(nii.dataobj)
+    except (FileNotFoundError, ImageFileError) as e:
         LOGGER.warning("Failed to load mask %s: %s", mask_path, e)
         return None
 
 
-def _compose_instance_seg_from_masks(
-    mask_arr: np.ndarray, num_instances: int
-) -> np.ndarray | None:
+def _compose_instance_seg_from_masks(mask_arr: np.ndarray, num_instances: int) -> np.ndarray | None:
     """Return a single-channel integer labelmap from multi-channel mask array.
 
     Supports both channel-first (K, X, Y, Z) and channel-last (X, Y, Z, K) layouts.
     Returns None if dimensions are not compatible.
     """
-    if mask_arr.ndim == 3:
+    single_mask_dims = 3
+    multiple_mask_dims = 4
+    if mask_arr.ndim == single_mask_dims:
         # Single mask provided but multiple instances expected; skip
         if num_instances <= 1:
             labelmap = (mask_arr > 0).astype(np.uint16)
             labelmap[labelmap > 0] = 1
             return labelmap
         return None
-    if mask_arr.ndim != 4:
+    if mask_arr.ndim != multiple_mask_dims:
         return None
 
     k_last = mask_arr.shape[-1]
@@ -168,21 +181,21 @@ def _compose_instance_seg_from_boxes(
     image_shape is (X, Y, Z) in nibabel array convention.
     bboxes are normalized (xc, yc, zc, sx, sy, sz) in [0, 1] relative to image size.
     """
-    X, Y, Z = image_shape
-    out = np.zeros((X, Y, Z), dtype=np.uint16)
+    width, height, depth = image_shape
+    out = np.zeros((width, height, depth), dtype=np.uint16)
     for idx, (xc, yc, zc, sx, sy, sz) in enumerate(bboxes, start=1):
-        cx = xc * X
-        cy = yc * Y
-        cz = zc * Z
-        rx = (sx * X) / 2.0
-        ry = (sy * Y) / 2.0
-        rz = (sz * Z) / 2.0
+        cx = xc * width
+        cy = yc * height
+        cz = zc * depth
+        rx = (sx * width) / 2.0
+        ry = (sy * height) / 2.0
+        rz = (sz * depth) / 2.0
         x0 = max(0, int(np.floor(cx - rx)))
-        x1 = min(X, int(np.ceil(cx + rx)))
+        x1 = min(width, int(np.ceil(cx + rx)))
         y0 = max(0, int(np.floor(cy - ry)))
-        y1 = min(Y, int(np.ceil(cy + ry)))
+        y1 = min(height, int(np.ceil(cy + ry)))
         z0 = max(0, int(np.floor(cz - rz)))
-        z1 = min(Z, int(np.ceil(cz + rz)))
+        z1 = min(depth, int(np.ceil(cz + rz)))
         if x1 <= x0 or y1 <= y0 or z1 <= z0:
             continue
         out[x0:x1, y0:y1, z0:z1] = idx
@@ -197,18 +210,17 @@ def _write_label_files(
     ref_nii: nib.Nifti1Image,
 ) -> None:
     _ensure_dir(out_labels_dir)
-    # Save nifty label (uint16)
     lab_path = out_labels_dir / f"{case_id}.nii.gz"
-    lab_img = nib.Nifti1Image(labelmap.astype(np.uint16), affine=ref_nii.affine, header=ref_nii.header)
-    # Ensure datatype is an integer type in header
+    lab_img = nib.Nifti1Image(
+        labelmap.astype(np.uint16), affine=ref_nii.affine, header=ref_nii.header
+    )
     lab_img.set_data_dtype(np.uint16)
     nib.save(lab_img, lab_path)
 
-    # Save JSON properties
-    props = {str(i + 1): int(c) for i, c in enumerate(instance_classes)}
+    properties = {str(i + 1): int(c) for i, c in enumerate(instance_classes)}
     json_path = out_labels_dir / f"{case_id}.json"
     with json_path.open("w", encoding="utf-8") as f:
-        json.dump({"instances": props}, f, indent=4)
+        json.dump({"instances": properties}, f, indent=4)
 
 
 def convert_dataset_to_nndetection(
@@ -233,10 +245,10 @@ def convert_dataset_to_nndetection(
     task_dir = out_root / f"Task{task_id:03d}_{task_name}"
 
     raw = task_dir / "raw_splitted"
-    imagesTr = raw / "imagesTr"
-    labelsTr = raw / "labelsTr"
-    imagesTs = raw / "imagesTs"
-    labelsTs = raw / "labelsTs"
+    imagesTr = raw / "imagesTr"  # noqa: N806
+    labelsTr = raw / "labelsTr"  # noqa: N806
+    imagesTs = raw / "imagesTs"  # noqa: N806
+    labelsTs = raw / "labelsTs"  # noqa: N806
     _ensure_dir(imagesTr)
     _ensure_dir(labelsTr)
     # test folders are created only if needed later
@@ -251,20 +263,22 @@ def convert_dataset_to_nndetection(
     train_cases = sorted(set(train_cases))
 
     # Process Train
-    img_dir = dataset_dir / "images"
-    lbl_dir = dataset_dir / "labels"
-    msk_dir = dataset_dir / "masks"
+    label_dir = dataset_dir / "labels"
 
     total_cases = len(train_cases) + len(splits.test)
     max_workers = os.cpu_count() or 1
     if workers and workers > 0:
         max_workers = workers
 
-    def _submit_cases(executor: ProcessPoolExecutor, cases: Iterable[str], out_img: Path, out_lbl: Path):
+    def _submit_cases(
+        executor: ProcessPoolExecutor, cases: Iterable[str], out_img: Path, out_lbl: Path
+    ) -> dict:
         futures = {}
-        for cid in cases:
-            fut = executor.submit(_convert_one_case, str(dataset_dir), cid, str(out_img), str(out_lbl))
-            futures[fut] = cid
+        for case_id in cases:
+            fut = executor.submit(
+                _convert_one_case, str(dataset_dir), case_id, str(out_img), str(out_lbl)
+            )
+            futures[fut] = case_id
         return futures
 
     processed_train = 0
@@ -284,11 +298,13 @@ def convert_dataset_to_nndetection(
                 futures.update(_submit_cases(executor, splits.test, imagesTs, labelsTs))
 
             for fut in as_completed(futures):
-                cid = futures[fut]
+                case_id = futures[fut]
                 try:
-                    ok, split, src_image_name, dst_image_names, src_case_id, dst_case_id = fut.result()
+                    ok, split, src_image_name, dst_image_names, src_case_id, dst_case_id = (
+                        fut.result()
+                    )
                 except Exception:
-                    LOGGER.exception("Failed to convert case %s", cid)
+                    LOGGER.exception("Failed to convert case %s", case_id)
                 else:
                     if ok:
                         if split == "train":
@@ -296,8 +312,8 @@ def convert_dataset_to_nndetection(
                         elif split == "test":
                             processed_test += 1
                         # Write one row per nnDetection image (one per modality/channel)
-                        for dn in (dst_image_names or []):
-                            mapping_rows.append(
+                        for dn in dst_image_names or []:
+                            mapping_rows.append(  # noqa: PERF401
                                 {
                                     "yolo_case_id": src_case_id,
                                     "yolo_image": src_image_name,
@@ -309,14 +325,10 @@ def convert_dataset_to_nndetection(
                 finally:
                     pbar.update(1)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 pbar.close()
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:
-                pass
     n_tr = processed_train
     n_ts = processed_test
 
@@ -325,8 +337,8 @@ def convert_dataset_to_nndetection(
     if not labels_map:
         # Infer number of classes from train labels if names missing
         cls_set: set[int] = set()
-        for cid in train_cases:
-            for c, *_ in _labels_for_case(lbl_dir, cid):
+        for case_id in train_cases:
+            for c, *_ in _labels_for_case(label_dir, case_id):
                 cls_set.add(int(c))
         if cls_set:
             labels_map = {str(i): f"class_{i}" for i in sorted(cls_set)}
@@ -366,18 +378,15 @@ def convert_dataset_to_nndetection(
         with (dataset_dir / "data_splits.json").open("r", encoding="utf-8") as f:
             all_splits = json.load(f)
         if not isinstance(all_splits, list):
-            raise ValueError("data_splits.json malformed: expected a list")
+            msg = "data_splits.json malformed: expected a list"
+            raise TypeError(msg)
         n_folds = len(all_splits)
         if n_folds < 5:
             LOGGER.warning("Only %d folds found in data_splits.json; writing %d.", n_folds, n_folds)
         result_list: list[OrderedDict[str, np.ndarray]] = []
         for i, fold_entry in enumerate(all_splits[:5]):
-            train_list = [
-                _sanitize_name(cid) for cid in fold_entry.get("train", [])
-            ]
-            val_list = [
-                _sanitize_name(cid) for cid in fold_entry.get("val", [])
-            ]
+            train_list = [_sanitize_name(cid) for cid in fold_entry.get("train", [])]
+            val_list = [_sanitize_name(cid) for cid in fold_entry.get("val", [])]
             result_list.append(OrderedDict([("train", train_list), ("val", val_list)]))
         splits_pkl = task_dir / "splits_final.pkl"
         with splits_pkl.open("wb") as f:
@@ -397,7 +406,9 @@ def convert_dataset_to_nndetection(
 __all__ = ["convert_dataset_to_nndetection"]
 
 
-def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str) -> tuple[bool, str, str, list[str], str, str]:
+def _convert_one_case(
+    dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str
+) -> tuple[bool, str, str, list[str], str, str]:
     """Worker to convert a single case. Returns (success, split) where split is 'train' or 'test'.
 
     The split is inferred from target directory name.
@@ -419,7 +430,6 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
 
     case_id = _sanitize_name(cid)
     try:
-        # Ensure output dirs
         _ensure_dir(out_img_dir)
         _ensure_dir(out_lbl_dir)
 
@@ -433,31 +443,59 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
         if ref_data.ndim == 3:
             # Single channel
             dst_name = f"{case_id}_0000.nii.gz"
-            nib.save(nib.Nifti1Image(ref_data.astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+            nib.save(
+                nib.Nifti1Image(
+                    ref_data.astype(np.float32, copy=False),
+                    affine=ref_nii.affine,
+                    header=ref_nii.header,
+                ),
+                out_img_dir / dst_name,
+            )
             dst_names.append(dst_name)
         elif ref_data.ndim == 4:
             # Could be (C,X,Y,Z) or (X,Y,Z,C)
             if ref_data.shape[0] <= 5 and ref_data.shape[0] < ref_data.shape[-1]:
                 # (C,X,Y,Z)
-                C = ref_data.shape[0]
-                for c in range(C):
+                channels = ref_data.shape[0]
+                for c in range(channels):
                     dst_name = f"{case_id}_{c:04d}.nii.gz"
-                    nib.save(nib.Nifti1Image(ref_data[c, ...].astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+                    nib.save(
+                        nib.Nifti1Image(
+                            ref_data[c, ...].astype(np.float32, copy=False),
+                            affine=ref_nii.affine,
+                            header=ref_nii.header,
+                        ),
+                        out_img_dir / dst_name,
+                    )
                     dst_names.append(dst_name)
                 # Use spatial shape for labels
                 ref_shape = tuple(ref_data.shape[1:4])
             else:
                 # (X,Y,Z,C)
-                C = ref_data.shape[-1]
-                for c in range(C):
+                channels = ref_data.shape[-1]
+                for c in range(channels):
                     dst_name = f"{case_id}_{c:04d}.nii.gz"
-                    nib.save(nib.Nifti1Image(ref_data[..., c].astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+                    nib.save(
+                        nib.Nifti1Image(
+                            ref_data[..., c].astype(np.float32, copy=False),
+                            affine=ref_nii.affine,
+                            header=ref_nii.header,
+                        ),
+                        out_img_dir / dst_name,
+                    )
                     dst_names.append(dst_name)
                 ref_shape = tuple(ref_data.shape[0:3])
         else:
             # Unexpected dimensionality; copy as single channel fallback
             dst_name = f"{case_id}_0000.nii.gz"
-            nib.save(nib.Nifti1Image(ref_data.astype(np.float32, copy=False), affine=ref_nii.affine, header=ref_nii.header), out_img_dir / dst_name)
+            nib.save(
+                nib.Nifti1Image(
+                    ref_data.astype(np.float32, copy=False),
+                    affine=ref_nii.affine,
+                    header=ref_nii.header,
+                ),
+                out_img_dir / dst_name,
+            )
             dst_names.append(dst_name)
 
         # Gather labels
@@ -477,7 +515,9 @@ def _convert_one_case(dataset_dir_str: str, cid: str, out_img_dir_str: str, out_
             labelmap = _compose_instance_seg_from_boxes(ref_shape, boxes)
 
         _write_label_files(out_lbl_dir, case_id, labelmap, instance_classes, ref_nii)
-        return (True, split, img_path.name, dst_names, cid, case_id)
     except Exception:
         # Let caller log the exception if needed
         return (False, split, img_path.name, [], cid, case_id)
+    else:
+        return (True, split, img_path.name, dst_names, cid, case_id)
+

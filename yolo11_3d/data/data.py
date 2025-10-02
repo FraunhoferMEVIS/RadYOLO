@@ -95,7 +95,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             splits = json.load(file)
         if fold >= len(splits):
             msg = f"There are only {len(splits)} folds defined, but fold index {fold} was selected."
-            raise Exception(msg)
+            raise ValueError(msg)
         self.cases: list[str] = splits[fold][group]
 
     def __len__(self) -> int:
@@ -273,15 +273,18 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         """
         if image.ndim != 4:
             return image
-        C = image.shape[0]
+        channels = image.shape[0]
         normalization_cfg = self.normalization
 
         eps = 1e-6
         if isinstance(normalization_cfg, list):
-            if len(normalization_cfg) != C:
-                msg = f"Normalization config length ({len(normalization_cfg)}) does not match number of channels ({C})."
+            if len(normalization_cfg) != channels:
+                msg = (
+                    f"Normalization config length ({len(normalization_cfg)}) does not "
+                    f"match number of channels ({channels})."
+                )
                 raise ValueError(msg)
-            for c in range(C):
+            for c in range(channels):
                 entry = normalization_cfg[c]
                 if not isinstance(entry, dict) or "type" not in entry:
                     msg = "Invalid normalization entry; expected dict with 'type'"
@@ -347,7 +350,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             string_labels = [line.split() for line in lines if len(line)]
             if any(len(label) not in (0, 7) for label in string_labels):
                 msg = f"Labels in wrong fomat in file {label_path}"
-                raise Exception(msg)
+                raise ValueError(msg)
             labels = np.array(string_labels, dtype=np.float32)
         else:
             labels = np.zeros((0, 7))

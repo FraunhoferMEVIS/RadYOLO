@@ -99,12 +99,12 @@ def tensor_cutout(
         im[:, zmin:zmax, ymin:ymax, xmin:xmax] = random.uniform(image_min, image_max)
 
         # remove obscured labels
-        if len(labels) and scale > 0.03:
+        if len(labels):
             box = torch.as_tensor(
                 [xmin, ymin, zmin, xmax, ymax, zmax], dtype=labels.dtype, device=labels.device
             )
-            iov = bbox_iov(box, labels[:, 1:7])  # intersection over volume
-            keep_mask = iov < 0.60
+            intersection_over_volume = bbox_iov(box, labels[:, 1:7])
+            keep_mask = intersection_over_volume < 0.60  # noqa: PLR2004
             labels = labels[keep_mask]  # remove >60% obscured labels
             if masks is not None:
                 masks = masks[keep_mask]
@@ -185,7 +185,7 @@ def random_zoom(
     pad_starts: list[int] = []  # start index in final canvas to place resized (if padding)
     final_indices: list[slice] = []
     cropped_dims = []  # keep track which dims were cropped (for filtering labels later)
-    for dim, (orig, new) in enumerate(zip(orig_sizes, new_sizes)):
+    for dim, (orig, new) in enumerate(zip(orig_sizes, new_sizes, strict=True)):
         if new >= orig:  # crop
             max_start = new - orig
             start = 0 if max_start == 0 else random.randint(0, max_start)
@@ -209,7 +209,7 @@ def random_zoom(
         masks_cropped = None
 
     # If any padding needed (i.e., any new < orig), create canvas and place
-    if any(new < orig for orig, new in zip(orig_sizes, new_sizes)):
+    if any(new < orig for orig, new in zip(orig_sizes, new_sizes, strict=True)):
         # prepare canvas
         if out_zoom_padding == "random":
             canvas = torch.rand(channels, d, h, w) * (
@@ -245,15 +245,13 @@ def random_zoom(
         masks = masks_cropped
 
     # Adjust labels: subtract crop_starts for cropped dims, add pad_starts for padded dims
-    # crop_starts list contains either crop start (if cropped) else 0; pad_starts has placement start (0 if cropped)
-    # mapping dim indices: 0->z,1->h(y),2->w(x) ; label order x,y,z
+    # crop_starts list contains either crop start (if cropped) else 0;
+    # pad_starts has placement start (0 if cropped)
+    # mapping dim indices: 0->z/d, 1->h/y, 2->w/x ; label order x,y,z
     # First subtract crop starts for each axis where cropping occurred
     z_crop, y_crop, x_crop = crop_starts
     z_pad, y_pad, x_pad = pad_starts
-    # subtract crop
-    augmented_labels[:, [3, 6]] -= (
-        z_crop  # z1,z2 at indices 3,6? actually order x1(1) y1(2) z1(3) x2(4) y2(5) z2(6)
-    )
+    augmented_labels[:, [3, 6]] -= z_crop
     augmented_labels[:, [2, 5]] -= y_crop
     augmented_labels[:, [1, 4]] -= x_crop
     # add padding offsets
@@ -267,12 +265,13 @@ def random_zoom(
         label_center_y = (augmented_labels[:, 2] + augmented_labels[:, 5]) / 2
         label_center_z = (augmented_labels[:, 3] + augmented_labels[:, 6]) / 2
         # base valid range
+        allowed_center_min = -8
         valid = (
-            (label_center_x >= -8)
+            (label_center_x >= allowed_center_min)
             & (label_center_x <= w + 8)
-            & (label_center_y >= -8)
+            & (label_center_y >= allowed_center_min)
             & (label_center_y <= h + 8)
-            & (label_center_z >= -8)
+            & (label_center_z >= allowed_center_min)
             & (label_center_z <= d + 8)
         )
         augmented_labels = augmented_labels[valid]
@@ -300,19 +299,17 @@ def random_rotation(
         (-20.0, 20.0),
     ),
     p: float = 0.5,
-    mode: str = "bilinear",
     keep_box_volume: bool = True,
     fill_value: float = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    """Randomly rotate the 3D volume about its center with independent angles per axis.
+    """Randomly rotate the 3D volume around its center with independent angles per axis.
 
     Args:
         image: Tensor (C, D, H, W)
         labels: Tensor (N, 7) with columns [cls, x1, y1, z1, x2, y2, z2] in absolute voxel coords.
         masks: Optional tensor (M, D, H, W) of per-instance masks aligned with image.
-        angle_ranges: ((min_x,max_x),(min_y,max_y),(min_z,max_z)) in degrees for rotations about x,y,z axes.
+        angle_ranges: ((min_x,max_x),(min_y,max_y),(min_z,max_z)) in degrees for rotations each axis
         p: Probability of applying the rotation.
-        mode: Interpolation mode for image ("bilinear" or "nearest"). Masks always rotated with nearest.
         keep_box_volume (bool): Reduce box size after rotation to preserve box volume
         fill_value (float): Fill value for padded area.
 
@@ -324,17 +321,17 @@ def random_rotation(
 
     device = image.device
     dtype = image.dtype
-    C, D, H, W = image.shape
+    channels, depth, height, width = image.shape
 
     # Sample angles in radians
     ax = random.uniform(*angle_ranges[0]) * math.pi / 180.0
     ay = random.uniform(*angle_ranges[1]) * math.pi / 180.0
     az = random.uniform(*angle_ranges[2]) * math.pi / 180.0
 
-    cx, cy, cz = (W - 1) / 2.0, (H - 1) / 2.0, (D - 1) / 2.0
+    cx, cy, cz = (width - 1) / 2.0, (height - 1) / 2.0, (depth - 1) / 2.0
 
     # Rotation matrices (x,y,z axes) operating on [x,y,z]
-    Rx = torch.tensor(
+    rotation_x = torch.tensor(
         [
             [1, 0, 0],
             [0, math.cos(ax), -math.sin(ax)],
@@ -343,7 +340,7 @@ def random_rotation(
         device=device,
         dtype=dtype,
     )
-    Ry = torch.tensor(
+    rotation_y = torch.tensor(
         [
             [math.cos(ay), 0, math.sin(ay)],
             [0, 1, 0],
@@ -352,7 +349,7 @@ def random_rotation(
         device=device,
         dtype=dtype,
     )
-    Rz = torch.tensor(
+    rotation_z = torch.tensor(
         [
             [math.cos(az), -math.sin(az), 0],
             [math.sin(az), math.cos(az), 0],
@@ -361,28 +358,26 @@ def random_rotation(
         device=device,
         dtype=dtype,
     )
-    R = Rz @ Ry @ Rx  # combined forward rotation
+    rotation = rotation_z @ rotation_y @ rotation_x  # combined forward rotation
 
     # For grid_sample we need inverse transform (maps output -> input)
-    R_inv = R.T  # rotation matrices are orthonormal so inverse = transpose
+    rotation_inverse = rotation.T  # rotation matrices are orthonormal so inverse = transpose
 
     # Rotate image using affine_grid/grid_sample (normalized coordinates in [-1,1])
     affine = torch.zeros(1, 3, 4, device=device, dtype=dtype)
-    affine[0, :, :3] = R_inv
-    grid = F.affine_grid(affine, size=(1, C, D, H, W), align_corners=True)
-    # grid coords order is (x,y,z); our rotation matrix acts about center (0,0,0) in normalized space already
+    affine[0, :, :3] = rotation_inverse
+    grid = F.affine_grid(affine, size=(1, channels, depth, height, width), align_corners=True)
     # padding only possible with constant 0, so subtract fill value before rotation and add after
     image = image - fill_value
     image_rot = F.grid_sample(
         image.unsqueeze(0),
         grid,
-        mode=mode,
+        mode="bilinear",
         padding_mode="zeros",
         align_corners=True,
     ).squeeze(0)
     image_rot = image + fill_value
 
-    masks_rot: torch.Tensor | None
     if masks is not None:
         masks_rot = F.grid_sample(
             masks.unsqueeze(0).float(),
@@ -391,13 +386,12 @@ def random_rotation(
             padding_mode="zeros",
             align_corners=True,
         ).squeeze(0)
-        # ensure binary nature retained
-        masks_rot = (masks_rot > 0.5).to(masks.dtype)
+        masks_rot_binary = (masks_rot > 0.5).to(masks.dtype)  # noqa: PLR2004
     else:
-        masks_rot = None
+        masks_rot_binary = None
 
     if labels.shape[0] == 0:
-        return image_rot, labels, masks_rot
+        return image_rot, labels, masks_rot_binary
 
     # Rotate bounding boxes: compute 8 corners, rotate, get new AABB
     x1, y1, z1, x2, y2, z2 = (
@@ -429,17 +423,17 @@ def random_rotation(
     corners_centered[..., 1] -= cy
     corners_centered[..., 2] -= cz
     # Apply forward rotation (row-vector formulation p' = p * R^T)
-    rot_corners = torch.matmul(corners_centered, R.T)
+    rot_corners = torch.matmul(corners_centered, rotation.T)
     rot_corners[..., 0] += cx
     rot_corners[..., 1] += cy
     rot_corners[..., 2] += cz
 
-    new_x1 = rot_corners[..., 0].min(dim=1).values.clamp_(0, W - 1)
-    new_y1 = rot_corners[..., 1].min(dim=1).values.clamp_(0, H - 1)
-    new_z1 = rot_corners[..., 2].min(dim=1).values.clamp_(0, D - 1)
-    new_x2 = rot_corners[..., 0].max(dim=1).values.clamp_(0, W - 1)
-    new_y2 = rot_corners[..., 1].max(dim=1).values.clamp_(0, H - 1)
-    new_z2 = rot_corners[..., 2].max(dim=1).values.clamp_(0, D - 1)
+    new_x1 = rot_corners[..., 0].min(dim=1).values.clamp_(0, width - 1)
+    new_y1 = rot_corners[..., 1].min(dim=1).values.clamp_(0, height - 1)
+    new_z1 = rot_corners[..., 2].min(dim=1).values.clamp_(0, depth - 1)
+    new_x2 = rot_corners[..., 0].max(dim=1).values.clamp_(0, width - 1)
+    new_y2 = rot_corners[..., 1].max(dim=1).values.clamp_(0, height - 1)
+    new_z2 = rot_corners[..., 2].max(dim=1).values.clamp_(0, depth - 1)
 
     rotated_labels = labels.clone()
     rotated_labels[:, 1] = new_x1
@@ -478,12 +472,12 @@ def random_rotation(
         nz1 = cz_b - hz
         nz2 = cz_b + hz
         # Clamp to image bounds
-        nx1.clamp_(0, W - 1)
-        nx2.clamp_(0, W - 1)
-        ny1.clamp_(0, H - 1)
-        ny2.clamp_(0, H - 1)
-        nz1.clamp_(0, D - 1)
-        nz2.clamp_(0, D - 1)
+        nx1.clamp_(0, width - 1)
+        nx2.clamp_(0, width - 1)
+        ny1.clamp_(0, height - 1)
+        ny2.clamp_(0, height - 1)
+        nz1.clamp_(0, depth - 1)
+        nz2.clamp_(0, depth - 1)
         # Write back
         rotated_labels[:, 1] = nx1
         rotated_labels[:, 2] = ny1
@@ -499,10 +493,10 @@ def random_rotation(
         & (rotated_labels[:, 6] - rotated_labels[:, 3] > 1)
     )
     rotated_labels = rotated_labels[keep]
-    if masks_rot is not None:
-        masks_rot = masks_rot[keep] if keep.numel() == masks_rot.shape[0] else masks_rot
+    if masks_rot_binary is not None and keep.numel() == masks_rot_binary.shape[0]:
+        masks_rot_binary =  masks_rot_binary[keep]
 
-    return image_rot, rotated_labels, masks_rot
+    return image_rot, rotated_labels, masks_rot_binary
 
 
 def random_mirroring(
@@ -531,8 +525,9 @@ def random_mirroring(
     flip_dims = []
     new_labels = labels.clone()
 
+    prob_per_axis = 0.5
     for axis in mirror_axes:
-        if random.random() < 0.5:
+        if random.random() < prob_per_axis:
             idx = ["x", "y", "z"].index(axis) + 1
             flip_dims.append(4 - idx)
             new_labels[:, idx] = 1 - labels[:, idx]
@@ -708,7 +703,7 @@ def random_channel_dropout(
     drop_probabilities: list[float] | tuple[float, ...],
     fill_value: float | None = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    """Randomly drop (zero-out or constant-fill) at most one channel based on per-channel probabilities.
+    """Drop (zero-out or constant-fill) at most one channel based on per-channel probabilities.
 
     Args:
         image: (C, D, H, W) tensor.
@@ -724,10 +719,8 @@ def random_channel_dropout(
     """
     channels = image.shape[0]
     if len(drop_probabilities) != channels:
-        msg = f"drop_probabilities length {len(drop_probabilities)} must match channel count {channels}"
-        raise ValueError(
-            msg
-        )
+        msg = f"drop_probabilities length {len(drop_probabilities)} must match channels {channels}"
+        raise ValueError(msg)
 
     # Determine candidate channels
     probs = torch.tensor(drop_probabilities, dtype=torch.float32)
