@@ -70,17 +70,17 @@ src = ["."]
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "ERA001", # auto-removal of commented out code affects development and vscode integration
-  "FBT001", # we like to use booleans as function parameters
-  "FBT002", # ^^^
-  "FBT003", # ^^^
-  "G004",   # Allow f-strings in logging messages
-  "TD003",  # we do not work with issues
-  "D10",    # document later, or so they said...
-  # "TRY",
-  "COM812", # we use the magic trailing comma
-  "S101",   # Allow asserts
-  "S311",   # we have no requirements for cryptographically secure randomness
+  "ERA001",  # auto-removal of commented out code affects development and vscode integration
+  "FBT001",  # we like to use booleans as function parameters
+  "FBT002",  # ^^^
+  "FBT003",  # ^^^
+  "G004",    # Allow f-strings in logging messages
+  "TD003",   # we do not work with issues
+  "D10",     # document later, or so they said...
+  "COM812",  # we use the magic trailing comma
+  "PLR2004", # Allow magic constant numbers
+  "S101",    # Allow asserts
+  "S311",    # we have no requirements for cryptographically secure randomness
 ]
 
 [tool.ruff.lint.flake8-annotations]

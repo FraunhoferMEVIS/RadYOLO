@@ -5,14 +5,12 @@ import math
 import os
 import platform
 import random
-import numpy as np
-import torch
-import torch.nn.functional as F
-from collections.abc import Collection
 from copy import deepcopy
 from typing import Any
-from torch import nn
 
+import numpy as np
+import torch
+from torch import nn
 
 PYTHON_VERSION = platform.python_version()
 NUM_THREADS = min(8, max(1, (os.cpu_count() or 1) - 1))
@@ -154,7 +152,5 @@ class ModelEMA:
             msd = model.state_dict()  # model state_dict
             for k, v in self.ema.state_dict().items():
                 if v.dtype.is_floating_point:  # true for FP16 and FP32
-                    v *= d
-                    v += (1 - d) * msd[k].detach()
-
-
+                    v *= d                          # noqa: PLW2901
+                    v += (1 - d) * msd[k].detach()  # noqa: PLW2901
