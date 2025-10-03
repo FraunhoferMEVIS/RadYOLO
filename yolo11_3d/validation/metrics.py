@@ -6,16 +6,13 @@ import logging
 import math
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
-import seaborn
+import seaborn as sns
 import torch
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,7 +44,6 @@ def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.
     return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 
-
 def bbox_iou(
     box1: torch.Tensor,
     box2: torch.Tensor,
@@ -62,7 +58,7 @@ def bbox_iou(
     Args:
         box1 (torch.Tensor): A tensor representing a single bounding box with shape (1, 6).
         box2 (torch.Tensor): A tensor representing n bounding boxes with shape (n, 6).
-        xywh (bool, optional): If True, input boxes are in (x, y, z, w, h, h) format. If False,
+        xyzwhd (bool, optional): If True, input boxes are in (x, y, z, w, h, h) format. If False,
                                input boxes are in (x1, y1, z1, x2, y2, z2) format. Defaults to True.
         GIoU (bool, optional): If True, calculate Generalized IoU. Defaults to False.
         DIoU (bool, optional): If True, calculate Distance IoU. Defaults to False.
@@ -161,7 +157,7 @@ class ConfusionMatrix:
         nc: int,
         conf: float = 0.1,
         iou_thres: float = 0.2,
-    ):
+    ) -> None:
         """Initialize a confusion matrix that always includes an 'unclassified' slot.
 
         Layout (indices):
@@ -183,9 +179,10 @@ class ConfusionMatrix:
         """Update confusion matrix for object detection task.
 
         Args:
-            detections (Array[N, 6] | Array[N, 7]): Detected bounding boxes and their associated information.
-                                      Each row should contain (x1, y1, x2, y2, conf, class)
-            gt_bboxes (Array[M, 4]| Array[N, 5]): Ground truth bounding boxes with xyxy/xyxyr format.
+            detections (Array[N, 7] | Array[N, 8]): Detected bounding boxes and their associated
+                information. Each row should contain (x1, y1, z1, x2, y2, z2, conf, class)
+            gt_bboxes (Array[M, 6] | Array[N, 7]): Ground truth bounding boxes with
+                xyzxyz/xyzxyzr format.
             gt_cls (Array[M]): The class labels.
         """
         # Keep -1 (unclassified) GT boxes if requested, else filter them out as before
@@ -263,7 +260,6 @@ class ConfusionMatrix:
             save_dir (str): Directory where the plot will be saved.
             names (tuple): Names of classes, used as labels on the plot.
         """
-
         array = self.matrix_ / (
             (self.matrix_.sum(0).reshape(1, -1) + 1e-9) if normalize else 1
         )  # normalize columns
@@ -272,7 +268,7 @@ class ConfusionMatrix:
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
         # Number of *display* classes excludes background but includes unclassified
         display_nc = self.nc + 1  # include unclassified in display (exclude background)
-        seaborn.set_theme(font_scale=1.0 if display_nc < 50 else 0.8)
+        sns.set_theme(font_scale=1.0 if display_nc < 50 else 0.8)
         # Prepare tick labels
         names_list = list(names)
         # Append unclassified name if not supplied already (len check ensures backward compat)
@@ -285,7 +281,7 @@ class ConfusionMatrix:
             warnings.simplefilter(
                 "ignore"
             )  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
-            seaborn.heatmap(
+            sns.heatmap(
                 array,
                 ax=ax,
                 annot=display_nc < 30,
@@ -305,18 +301,19 @@ class ConfusionMatrix:
         fig.savefig(plot_fname, dpi=250)
         plt.close(fig)
 
-    def print(self):
+    def print(self) -> None:
         """Print the confusion matrix to the console (including unclassified and background)."""
         for i in range(self.matrix_.shape[0]):
             LOGGER.info(" ".join(map(str, self.matrix_[i])))
 
 
-def smooth(y, f: float = 0.05):
+def smooth(y: np.ndarray, fraction: float = 0.05) -> np.ndarray:
     """Box filter of fraction f."""
-    nf = round(len(y) * f * 2) // 2 + 1  # number of filter elements (must be odd)
-    p = np.ones(nf // 2)  # ones padding
-    yp = np.concatenate((p * y[0], y, p * y[-1]), 0)  # y padded
-    return np.convolve(yp, np.ones(nf) / nf, mode="valid")  # y-smoothed
+    num_filtered_elements = round(len(y) * fraction * 2) // 2 + 1  # must be odd
+    padding_ones = np.ones(num_filtered_elements // 2)
+    y_padded = np.concatenate((padding_ones * y[0], y, padding_ones * y[-1]), 0)
+    smoothing_filter = np.ones(num_filtered_elements) / num_filtered_elements
+    return np.convolve(y_padded, smoothing_filter, mode="valid")
 
 
 def plot_pr_curve(
@@ -434,8 +431,10 @@ def ap_per_class(
     """Computes the average precision per class for object detection evaluation.
 
     Args:
-        tp (np.ndarray): Binary array indicating whether the detection is correct (True) or not (False).
-        fp (np.ndarray): Binary array indicating whether the detection is a false positive (True) or not (False).
+        tp (np.ndarray): Binary array indicating whether the detection is correct (True)
+            or not (False).
+        fp (np.ndarray): Binary array indicating whether the detection is a false positive (True)
+            or not (False).
         conf (np.ndarray): Array of confidence scores of the detections.
         pred_cls (np.ndarray): Array of predicted classes of the detections.
         target_cls (np.ndarray): Array of true classes of the references.
@@ -443,15 +442,21 @@ def ap_per_class(
         save_dir (Path, optional): Directory to save the PR curves. Defaults to an empty path.
         names (dict, optional): Dict of class names to plot PR curves. Defaults to an empty tuple.
         eps (float, optional): A small value to avoid division by zero. Defaults to 1e-16.
-        prefix (str, optional): A prefix string for saving the plot files. Defaults to an empty string.
+        prefix (str, optional): Prefix string for saving plot files. Defaults to an empty string.
 
     Returns:
-        tp (np.ndarray): True positive counts at threshold given by max F1 metric for each class.Shape: (nc,).
-        fp (np.ndarray): False positive counts at threshold given by max F1 metric for each class. Shape: (nc,).
-        p (np.ndarray): Precision values at threshold given by max F1 metric for each class. Shape: (nc,).
-        r (np.ndarray): Recall values at threshold given by max F1 metric for each class. Shape: (nc,).
-        f1 (np.ndarray): F1-score values at threshold given by max F1 metric for each class. Shape: (nc,).
-        ap (np.ndarray): Average precision for each class at different IoU thresholds. Shape: (nc, 18).
+        tp (np.ndarray): True positive counts at threshold given by max F1 metric for each class.
+            Shape: (nc,).
+        fp (np.ndarray): False positive counts at threshold given by max F1 metric for each class.
+            Shape: (nc,).
+        p (np.ndarray): Precision values at threshold given by max F1 metric for each class.
+            Shape: (nc,).
+        r (np.ndarray): Recall values at threshold given by max F1 metric for each class.
+            Shape: (nc,).
+        f1 (np.ndarray): F1-score values at threshold given by max F1 metric for each class.
+            Shape: (nc,).
+        ap (np.ndarray): Average precision for each class at different IoU thresholds.
+            Shape: (nc, 18).
         unique_classes (np.ndarray): An array of unique classes that have data. Shape: (nc,).
         p_curve (np.ndarray): Precision curves for each class. Shape: (nc, 1000).
         r_curve (np.ndarray): Recall curves for each class. Shape: (nc, 1000).
@@ -461,11 +466,15 @@ def ap_per_class(
     """
     # Sort by objectness
     indices_sorted: npt.NDArray[np.intp] = np.argsort(-conf)
-    tp, fp, conf, pred_cls = tp[indices_sorted], fp[indices_sorted], conf[indices_sorted], pred_cls[indices_sorted]
+    tp, fp, conf, pred_cls = (
+        tp[indices_sorted],
+        fp[indices_sorted],
+        conf[indices_sorted],
+        pred_cls[indices_sorted],
+    )
 
-    # Find unique classes
     unique_classes, counts = np.unique(target_cls, return_counts=True)
-    # If objects without class (class = -1) are present, don't compute mAP for class -1 as it is never predicted
+    # If objects without class (class = -1) are present, don't compute mAP for class -1
     if unique_classes[0] == -1:
         unique_classes = unique_classes[1:]
         counts = counts[1:]
@@ -483,19 +492,18 @@ def ap_per_class(
         if number_of_predictions == 0 or number_of_labels == 0:
             continue
 
-        # Accumulate FPs and TPs
-        fpc = fp[indices].cumsum(0)
-        tpc = tp[indices].cumsum(0)
+        fp_accumulated = fp[indices].cumsum(0)
+        tp_accumulated = tp[indices].cumsum(0)
 
-        # Recall
-        recall = tpc / (number_of_labels + eps)  # recall curve
+        recall = tp_accumulated / (number_of_labels + eps)
         r_curve[class_index] = np.interp(
             -x, -conf[indices], recall[:, 0], left=0
-        )  # negative x, xp because xp decreases
+        )  # negative x, conf because conf decreases
 
-        # Precision
-        precision = tpc / (tpc + fpc + eps)  # precision curve
-        p_curve[class_index] = np.interp(-x, -conf[indices], precision[:, 0], left=1)  # p at pr_score
+        precision = tp_accumulated / (tp_accumulated + fp_accumulated + eps)
+        p_curve[class_index] = np.interp(
+            -x, -conf[indices], precision[:, 0], left=1
+        )  # precision at pr_score
 
         # AP from recall-precision curve
         for j in range(tp.shape[1]):
@@ -510,7 +518,7 @@ def ap_per_class(
     names_ = [
         v for k, v in names.items() if k in unique_classes
     ]  # list: only classes that have data
-    names = dict(enumerate(names_))  # to dict
+    names = dict(enumerate(names_))
     if plot:
         plot_pr_curve(
             x,
@@ -591,7 +599,8 @@ class Metric:
         """Returns the Average Precision (AP) at an IoU threshold of 0.1 for all classes.
 
         Returns:
-            (np.ndarray, list): Array of shape (nc,) with AP10 values per class, or an empty list if not available.
+            (np.ndarray, list): Array of shape (nc,) with AP10 values per class, or an empty list
+                if not available.
         """
         return self.all_ap[:, 0] if isinstance(self.all_ap, np.ndarray) else []
 
@@ -600,7 +609,8 @@ class Metric:
         """Returns the Average Precision (AP) at an IoU threshold of 0.1-0.95 for all classes.
 
         Returns:
-            (np.ndarray, list): Array of shape (nc,) with AP10-95 values per class, or an empty list if not available.
+            (np.ndarray, list): Array of shape (nc,) with AP10-95 values per class, or an empty
+                list if not available.
         """
         return self.all_ap.mean(1) if isinstance(self.all_ap, np.ndarray) else []
 
@@ -633,7 +643,7 @@ class Metric:
 
     @property
     def map(self) -> float:
-        """Returns the mean Average Precision (mAP) over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
+        """Returns mean Average Precision (mAP) over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
 
         Returns:
             (float): The mAP over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
@@ -684,8 +694,8 @@ class Metric:
                 - ap_class_index (list): Index of class for each AP score. Shape: (nc,).
 
         Side Effects:
-            Updates the class attributes `self.p`, `self.r`, `self.f1`, `self.all_ap`, and `self.ap_class_index` based
-            on the values provided in the `results` tuple.
+            Updates the class attributes `self.p`, `self.r`, `self.f1`, `self.all_ap`, and
+            `self.ap_class_index` based on the values provided in the `results` tuple.
         """
         (
             self.p,
@@ -722,31 +732,30 @@ class DetMetrics:
     Provides metrics `such as precision, recall, and mean average precision (mAP).
 
     Args:
-        save_dir (Path): A path to the directory where the output plots will be saved. Defaults to current directory.
-        plot (bool): A flag that indicates whether to plot precision-recall curves for each class. Defaults to False.
-        on_plot (func): An optional callback to pass plots path and data when they are rendered. Defaults to None.
-        names (dict of str): A dict of strings that represents the names of the classes. Defaults to an empty tuple.
+        save_dir (Path): Path to the directory where the output plots will be saved.
+            Defaults to current directory.
+        plot (bool): Flag that indicates whether to plot precision-recall curves for each class.
+            Defaults to False.
+        names (dict of str): Dict of strings that represents the names of the classes.
+            Defaults to an empty tuple.
 
     Attributes:
         save_dir (Path): A path to the directory where the output plots will be saved.
-        plot (bool): A flag that indicates whether to plot the precision-recall curves for each class.
-        on_plot (func): An optional callback to pass plots path and data when they are rendered.
+        plot (bool): Flag that indicates whether to plot the precision-recall curves for each class.
         names (dict of str): A dict of strings that represents the names of the classes.
-        box (Metric): An instance of the Metric class for storing the results of the detection metrics.
-        speed (dict): A dictionary for storing the execution time of different parts of the detection process.
+        box (Metric): Instance of the Metric class for storing the results of the detection metrics.
+        speed (dict): Dictionary for storing execution time of different parts of detection process.
     """
 
     def __init__(
         self,
         save_dir: Path = Path(),
         plot: bool = False,
-        on_plot: Callable[[Path, Any], None] | None = None,
         names: dict[int, str] = {},
     ) -> None:
-        """Initialize a DetMetrics instance with a save directory, plot flag, callback function, and class names."""
+        """Initialize with save directory, plot flag, callback function, and class names."""
         self.save_dir: Path = save_dir
         self.plot: bool = plot
-        self.on_plot: Callable[[Path, Any], None] | None = on_plot
         self.names: dict[int, str] = names
         self.box = Metric()
         self.speed: dict[str, float] = {
@@ -793,8 +802,8 @@ class DetMetrics:
         """Calculate mean of detected objects & return precision, recall, mAP10, and mAP10-95."""
         return self.box.mean_results()
 
-    def class_result(self, i) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-        """Return the result of evaluating the performance of an object detection model on a specific class."""
+    def class_result(self, i: int) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
+        """Return performance of an object detection model on a specific class."""
         return self.box.class_result(i)
 
     @property
@@ -826,4 +835,3 @@ class DetMetrics:
     def curves_results(self) -> list[list[Any | str]]:
         """Returns dictionary of computed performance metrics and statistics."""
         return self.box.curves_results
-

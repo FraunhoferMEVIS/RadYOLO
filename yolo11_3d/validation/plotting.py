@@ -12,6 +12,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 import torch
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,8 +29,8 @@ class Colors:
 
     https://docs.ultralytics.com/reference/utils/plotting/#ultralytics.utils.plotting.Colors.
 
-    This class provides methods to work with the Ultralytics color palette, including converting hex color codes to
-    RGB values.
+    This class provides methods to work with the Ultralytics color palette, including converting
+    hex color codes to RGB values.
 
     Attributes:
         palette (list of tuple): List of RGB color values.
@@ -74,19 +75,17 @@ class Colors:
         return tuple(int(h[1 + i : 1 + i + 2], 16) for i in (0, 2, 4))
 
 
-colors = Colors()  # create instance for 'from utils.plots import colors'
+colors = Colors()
 
 
 class Annotator:
     """Ultralytics Annotator for train/val mosaics and JPGs and predictions annotations.
 
     Attributes:
-        im (Image.Image or numpy array): The image to annotate.
+        image (Image.Image or numpy array): The image to annotate.
         pil (bool): Whether to use PIL or cv2 for drawing annotations.
         font (ImageFont.truetype or ImageFont.load_default): Font used for text annotations.
-        lw (float): Line width for drawing.
-        limb_color (List[int]): Color palette for limbs.
-        kpt_color (List[int]): Color palette for keypoints.
+        line_width (float): Line width for drawing.
     """
 
     def __init__(
@@ -96,20 +95,18 @@ class Annotator:
         font_size: float | None = None,
         font: str = "Arial.ttf",
         pil: bool = False,
-        # example: str = "abc",
     ) -> None:
-        """Initialize the Annotator class with image and line width along with color palette for keypoints and limbs."""
-        self.lw: int = line_width or max(
+        """Initialize Annotator class with image and line width along with color palette."""
+        self.line_width: int = line_width or max(
             round(sum(im.size if isinstance(im, Image.Image) else im.shape) / 2 * 0.003), 2
         )
-        self.im: Image.Image | npt.NDArray[np.uint8 | np.float32]
+        self.image: Image.Image | npt.NDArray[np.uint8 | np.float32]
         if isinstance(im, Image.Image) or pil:  # use PIL
             self.pil = True
-            self.im = im if isinstance(im, Image.Image) else Image.fromarray(im)
-            self.draw: ImageDraw.ImageDraw = ImageDraw.Draw(self.im)
+            self.image = im if isinstance(im, Image.Image) else Image.fromarray(im)
+            self.draw: ImageDraw.ImageDraw = ImageDraw.Draw(self.image)
             try:
-                # font = check_font("Arial.Unicode.ttf" if non_ascii else font)
-                size = font_size or max(round(sum(self.im.size) / 2 * 0.035), 12)
+                size = font_size or max(round(sum(self.image.size) / 2 * 0.035), 12)
                 self.font = ImageFont.truetype(str(font), size)
             except Exception:
                 self.font = ImageFont.load_default()
@@ -121,9 +118,9 @@ class Annotator:
             assert im.data.contiguous, (
                 "Image not contiguous. Apply np.ascontiguousarray(im) to Annotator input images."
             )
-            self.im = im if im.flags.writeable else im.copy()
-            self.tf: int = max(self.lw - 1, 1)  # font thickness
-            self.sf: float = self.lw / 3  # font scale
+            self.image = im if im.flags.writeable else im.copy()
+            self.font_thickness: int = max(self.line_width - 1, 1)
+            self.font_scale: float = self.line_width / 3
         self.dark_colors = {
             (235, 219, 11),
             (243, 243, 243),
@@ -173,55 +170,6 @@ class Annotator:
             return 255, 255, 255
         return txt_color
 
-    def circle_label(
-        self,
-        box: tuple[float, float, float, float],
-        label: str = "",
-        color: tuple[int, int, int] = (128, 128, 128),
-        txt_color: tuple[int, int, int] = (255, 255, 255),
-        margin: int = 2,
-    ) -> None:
-        """Draws a label with a background circle centered within a given bounding box.
-
-        Args:
-            box (tuple): The bounding box coordinates (x1, y1, x2, y2).
-            label (str): The text label to be displayed.
-            color (tuple, optional): The background color of the rectangle (B, G, R).
-            txt_color (tuple, optional): The color of the text (R, G, B).
-            margin (int, optional): The margin between the text and the rectangle border.
-        """
-        # If label have more than 3 characters, skip other characters, due to circle size
-        if len(label) > 3:
-            print(
-                f"Length of label is {len(label)}, initial 3 label characters will be considered for circle annotation!"
-            )
-            label = label[:3]
-
-        # Calculate the center of the box
-        x_center, y_center = int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)
-        # Get the text size
-        text_size = cv2.getTextSize(str(label), cv2.FONT_HERSHEY_SIMPLEX, self.sf - 0.15, self.tf)[
-            0
-        ]
-        # Calculate the required radius to fit the text with the margin
-        required_radius = int(((text_size[0] ** 2 + text_size[1] ** 2) ** 0.5) / 2) + margin
-        # Draw the circle with the required radius
-        cv2.circle(self.im, (x_center, y_center), required_radius, color, -1)
-        # Calculate the position for the text
-        text_x = x_center - text_size[0] // 2
-        text_y = y_center + text_size[1] // 2
-        # Draw the text
-        cv2.putText(
-            self.im,
-            str(label),
-            (text_x, text_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            self.sf - 0.15,
-            self.get_txt_color(color, txt_color),
-            self.tf,
-            lineType=cv2.LINE_AA,
-        )
-
     def text_label(
         self,
         box: tuple[float, float, float, float],
@@ -242,7 +190,9 @@ class Annotator:
         # Calculate the center of the bounding box
         x_center, y_center = int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)
         # Get the size of the text
-        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, self.sf - 0.1, self.tf)[0]
+        text_size = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, self.font_scale - 0.1, self.font_thickness
+        )[0]
         # Calculate the top-left corner of the text (to center it)
         text_x = x_center - text_size[0] // 2
         text_y = y_center + text_size[1] // 2
@@ -252,16 +202,16 @@ class Annotator:
         rect_x2 = text_x + text_size[0] + margin
         rect_y2 = text_y + margin
         # Draw the background rectangle
-        cv2.rectangle(self.im, (rect_x1, rect_y1), (rect_x2, rect_y2), color, -1)
+        cv2.rectangle(self.image, (rect_x1, rect_y1), (rect_x2, rect_y2), color, -1)
         # Draw the text on top of the rectangle
         cv2.putText(
-            self.im,
+            self.image,
             label,
             (text_x, text_y),
             cv2.FONT_HERSHEY_SIMPLEX,
-            self.sf - 0.1,
+            self.font_scale - 0.1,
             self.get_txt_color(color, txt_color),
-            self.tf,
+            self.font_thickness,
             lineType=cv2.LINE_AA,
         )
 
@@ -283,52 +233,56 @@ class Annotator:
         txt_color = self.get_txt_color(color, txt_color)
         if isinstance(box, torch.Tensor):
             box = box.tolist()
-        if self.pil:  # or not is_ascii(label):
+        if self.pil:
             p1 = (box[0], box[1])
-            self.draw.rectangle(box, width=self.lw, outline=color)  # box
+            self.draw.rectangle(box, width=self.line_width, outline=color)  # box
             if label:
-                w, h = self.getsize(label)  # text width, height
-                outside = p1[1] >= h  # label fits outside box
+                text_width, text_height = self.getsize(label)  # text width, height
+                outside = p1[1] >= text_height  # label fits outside box
                 if (
-                    p1[0] > self.im.size[0] - w
+                    p1[0] > self.image.size[0] - text_width
                 ):  # size is (w, h), check if label extend beyond right side of image
-                    p1 = self.im.size[0] - w, p1[1]
+                    p1 = self.image.size[0] - text_width, p1[1]
                 self.draw.rectangle(
                     (
                         p1[0],
-                        p1[1] - h if outside else p1[1],
-                        p1[0] + w + 1,
-                        p1[1] + 1 if outside else p1[1] + h + 1,
+                        p1[1] - text_height if outside else p1[1],
+                        p1[0] + text_width + 1,
+                        p1[1] + 1 if outside else p1[1] + text_height + 1,
                     ),
                     fill=color,
                 )
-                # self.draw.text((box[0], box[1]), label, fill=txt_color, font=self.font, anchor='ls')  # for PIL>8.0
                 self.draw.text(
-                    (p1[0], p1[1] - h if outside else p1[1]), label, fill=txt_color, font=self.font
+                    (p1[0], p1[1] - text_height if outside else p1[1]),
+                    label,
+                    fill=txt_color,
+                    font=self.font,
                 )
         else:  # cv2
             p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
-            cv2.rectangle(self.im, p1, p2, color, thickness=self.lw, lineType=cv2.LINE_AA)
+            cv2.rectangle(
+                self.image, p1, p2, color, thickness=self.line_width, lineType=cv2.LINE_AA
+            )
             if label:
-                w, h = cv2.getTextSize(label, 0, fontScale=self.sf, thickness=self.tf)[
-                    0
-                ]  # text width, height
-                h += 3  # add pixels to pad text
-                outside = p1[1] >= h  # label fits outside box
+                text_width, text_height = cv2.getTextSize(
+                    label, 0, fontScale=self.font_scale, thickness=self.font_thickness
+                )[0]
+                text_height += 3  # add pixels to pad text
+                outside = p1[1] >= text_height  # label fits outside box
                 if (
-                    p1[0] > self.im.shape[1] - w
-                ):  # shape is (h, w), check if label extend beyond right side of image
-                    p1 = self.im.shape[1] - w, p1[1]
-                p2 = p1[0] + w, p1[1] - h if outside else p1[1] + h
-                cv2.rectangle(self.im, p1, p2, color, -1, cv2.LINE_AA)  # filled
+                    p1[0] > self.image.shape[1] - text_width
+                ):  # check if label extend beyond right image side
+                    p1 = self.image.shape[1] - text_width, p1[1]
+                p2 = p1[0] + text_width, p1[1] - text_height if outside else p1[1] + text_height
+                cv2.rectangle(self.image, p1, p2, color, -1, cv2.LINE_AA)
                 cv2.putText(
-                    self.im,
+                    self.image,
                     label,
-                    (p1[0], p1[1] - 2 if outside else p1[1] + h - 1),
+                    (p1[0], p1[1] - 2 if outside else p1[1] + text_height - 1),
                     0,
-                    self.sf,
+                    self.font_scale,
                     txt_color,
-                    thickness=self.tf,
+                    thickness=self.font_thickness,
                     lineType=cv2.LINE_AA,
                 )
 
@@ -346,56 +300,65 @@ class Annotator:
     ) -> None:
         """Adds text to an image using PIL or cv2."""
         if anchor == "bottom":  # start y from font bottom
-            w, h = self.getsize(text)  # text width, height
-            xy[1] += 1 - h
+            text_width, text_height = self.getsize(text)
+            xy[1] += 1 - text_height
         if self.pil:
             if box_style:
-                w, h = self.getsize(text)
-                self.draw.rectangle((xy[0], xy[1], xy[0] + w + 1, xy[1] + h + 1), fill=txt_color)
+                text_width, text_height = self.getsize(text)
+                self.draw.rectangle(
+                    (xy[0], xy[1], xy[0] + text_width + 1, xy[1] + text_height + 1), fill=txt_color
+                )
                 # Using `txt_color` for background and draw fg with white color
                 txt_color = (255, 255, 255)
             if "\n" in text:
                 lines = text.split("\n")
-                _, h = self.getsize(text)
+                _, text_height = self.getsize(text)
                 for line in lines:
                     self.draw.text(xy, line, fill=txt_color, font=self.font)
-                    xy[1] += h
+                    xy[1] += text_height
             else:
                 self.draw.text(xy, text, fill=txt_color, font=self.font)
         else:
             if box_style:
-                w, h = cv2.getTextSize(text, 0, fontScale=self.sf, thickness=self.tf)[
-                    0
-                ]  # text width, height
-                h += 3  # add pixels to pad text
-                outside = xy[1] >= h  # label fits outside box
-                p2 = xy[0] + w, xy[1] - h if outside else xy[1] + h
-                cv2.rectangle(self.im, xy, p2, txt_color, -1, cv2.LINE_AA)  # filled
+                text_width, text_height = cv2.getTextSize(
+                    text, 0, fontScale=self.font_scale, thickness=self.font_thickness
+                )[0]  # text width, height
+                text_height += 3  # add pixels to pad text
+                outside = xy[1] >= text_height  # label fits outside box
+                p2 = xy[0] + text_width, xy[1] - text_height if outside else xy[1] + text_height
+                cv2.rectangle(self.image, xy, p2, txt_color, -1, cv2.LINE_AA)  # filled
                 # Using `txt_color` for background and draw fg with white color
                 txt_color = (255, 255, 255)
             cv2.putText(
-                self.im, text, xy, 0, self.sf, txt_color, thickness=self.tf, lineType=cv2.LINE_AA
+                self.image,
+                text,
+                xy,
+                0,
+                self.font_scale,
+                txt_color,
+                thickness=self.font_thickness,
+                lineType=cv2.LINE_AA,
             )
 
     def fromarray(self, im: npt.NDArray[np.uint8 | np.float32]) -> None:
         """Update self.im from a numpy array."""
-        self.im = im if isinstance(im, Image.Image) else Image.fromarray(im)
-        self.draw = ImageDraw.Draw(self.im)
+        self.image = im if isinstance(im, Image.Image) else Image.fromarray(im)
+        self.draw = ImageDraw.Draw(self.image)
 
     def result(self) -> npt.NDArray:
         """Return annotated image as array."""
-        return np.asarray(self.im)
+        return np.asarray(self.image)
 
     def show(self, title: str | None = None) -> None:
         """Show the annotated image."""
         im = Image.fromarray(
-            np.asarray(self.im)[..., ::-1]
+            np.asarray(self.image)[..., ::-1]
         )  # Convert numpy array to PIL Image with RGB to BGR
         im.show(title=title)
 
     def save(self, filename: str = "image.jpg") -> None:
         """Save the annotated image to 'filename'."""
-        cv2.imwrite(filename, np.asarray(self.im))
+        cv2.imwrite(filename, np.asarray(self.image))
 
     def get_bbox_dimension(
         self, bbox: tuple[float, float, float, float]
@@ -438,10 +401,10 @@ def plot_images(
         cls: Class labels for each detection. Shape: (num_detections,).
         bboxes: Bounding boxes for each detection. Shape: (num_detections, 4)
         confs: Confidence scores for each detection. Shape: (num_detections,).
-        masks: Instance segmentation masks. Shape: (num_detections, height, width) or (1, height, width).
+        masks: Instance segmentation masks. Shape: (num_detections, height, width)
+            or (1, height, width).
         fname: Output filename for the plotted image grid.
         names: Dictionary mapping class indices to class names.
-        on_plot: Optional callback function to be called after saving the plot.
         max_size: Maximum size of the output image grid.
         max_subplots: Maximum number of subplots in the image grid.
         save: Whether to save the plotted image grid to a file.
@@ -525,8 +488,8 @@ def plot_images(
             elif len(classes):
                 for c in classes:
                     color = colors(c)
-                    c = names.get(c, c) if names else c
-                    annotator.text((x, y), f"{c}", txt_color=color, box_style=True)
+                    class_text = names.get(c, c) if names else c
+                    annotator.text((x, y), f"{class_text}", txt_color=color, box_style=True)
 
             # Plot masks
             if len(masks):
@@ -539,7 +502,7 @@ def plot_images(
                     image_masks = np.repeat(image_masks, nl, axis=0)
                     image_masks = np.where(image_masks == index, 1.0, 0.0)
 
-                im = np.asarray(annotator.im).copy()
+                im = np.asarray(annotator.image).copy()
                 for j in range(len(image_masks)):
                     if labels or conf[j] > conf_thres:
                         color = colors(classes[j])
@@ -556,15 +519,15 @@ def plot_images(
                             )
                 annotator.fromarray(im)
     if not save:
-        return np.asarray(annotator.im)
-    annotator.im.save(fname)
+        return np.asarray(annotator.image)
+    annotator.image.save(fname)
     return None
 
 
 def plot_results(
     file: Path | str | None = "path/to/results.csv",
-    dir: Path | str = "",
-):
+    directory: Path | str = "",
+) -> None:
     """Plot training results from a results CSV file.
 
     Plots are saved as 'results.png' in the directory where the CSV is located.
@@ -572,7 +535,7 @@ def plot_results(
     Args:
         file (str, optional): Path to the CSV file containing the training results. Defaults to
             'path/to/results.csv'.
-        dir (str, optional): Directory where the CSV file is located if 'file' is not provided.
+        directory (str, optional): Directory where CSV file is located if 'file' is not provided.
             Defaults to ''.
 
     Example:
@@ -582,15 +545,9 @@ def plot_results(
         plot_results("path/to/results.csv", segment=True)
         ```
     """
-    import pandas as pd  # scope for faster import of parent modules
-
-    save_dir = Path(file).parent if file else Path(dir)
-    fig, ax = plt.subplots(3, 5, figsize=(16, 7), tight_layout=True, sharex='col')
-    indices = [
-        2,  3,  4,  5,  6,
-        12, 13, 14, 15, 16,
-        7,  8,  9,  10, 11
-    ]
+    save_dir = Path(file).parent if file else Path(directory)
+    fig, ax = plt.subplots(3, 5, figsize=(16, 7), tight_layout=True, sharex="col")
+    indices = [2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 7, 8, 9, 10, 11]
 
     ax = ax.ravel()
     files = list(save_dir.glob("results*.csv"))
@@ -598,10 +555,10 @@ def plot_results(
     for f in files:
         data = pd.read_csv(f)
         column_names = [name.strip() for name in data.columns]
-        epochs = data.values[:, 0]
+        epochs = data.to_numpy()[:, 0]
         for plot_index, csv_index in enumerate(indices):
             try:
-                y = data.values[:, csv_index].astype("float")
+                y = data.to_numpy()[:, csv_index].astype("float")
                 ax[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
                 ax[plot_index].set_ylabel(column_names[csv_index])
                 if "metrics" in column_names[csv_index]:
@@ -619,7 +576,7 @@ def plot_results(
 def output_to_target(
     output: list[torch.Tensor], max_det: int = 300, axis: int = 2
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-    """Convert model output to target format [batch_id, class_id, x, y, z, w, h, d conf] for plotting.
+    """Convert model output to plotting target format [batch_id, class_id, x, y, z, w, h, d conf].
 
     Results are flattened to 2d for easier visualization.
     """

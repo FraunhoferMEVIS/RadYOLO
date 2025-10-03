@@ -71,8 +71,8 @@ class Validator:
         self.nt_per_image: npt.NDArray | None = None
         self.metrics = DetMetrics(
             save_dir=self.save_dir,
-            names=self.names,
             plot=self.config.plots,
+            names=self.names,
         )
         self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
         self.niou = self.iouv.numel()
