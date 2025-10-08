@@ -1,5 +1,6 @@
 # Model Parameters
 input_channels: 1 # number of input channels for model
+num_classes: 15   # number of classes to predict
 model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Train settings -------------------------------------------------------------------------------------------------------

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import datetime
 import logging
-import pathlib
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, TypedDict
 
@@ -18,7 +17,7 @@ from pydantic import (
 )
 
 if TYPE_CHECKING:
-    import datetime
+    from yolo11_3d.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +46,7 @@ def _validate_normalization_entry(entry: dict) -> dict:
 
 class DefaultConfig(BaseModel):
     input_channels: int
+    num_classes: int
     model_scale: Literal["n", "s", "m", "l", "x"]
 
     # Train settings
@@ -227,34 +227,54 @@ class DatasetConfig(BaseModel):
 class ModelCheckpoint(TypedDict):
     epoch: int
     best_fitness: float
-    model: None
-    ema: torch.nn.Module
-    updates: int
-    optimizer: dict | None
-    scaler: dict | None
+    model_state_dict: dict
+    ema_updates: int
+    optimizer_state_dict: dict
+    scaler_state_dict: dict
     train_config: DefaultConfig
     train_metrics: dict
-    train_results: dict
     date: datetime.datetime
 
 
-def model_checkpoint_from_torch(checkpoint: Path) -> ModelCheckpoint:
-    if sys.platform == "win32":
-        pathlib.PosixPath = pathlib.WindowsPath
-    ckpt = torch.load(checkpoint, map_location="cpu", weights_only=False)
+def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
+    checkpoint = torch.load(checkpoint, map_location="cpu")
     return ModelCheckpoint(
-        epoch=ckpt["epoch"],
-        best_fitness=ckpt["best_fitness"],
-        model=ckpt["model"],
-        ema=ckpt["ema"],
-        updates=ckpt["updates"],
-        optimizer=ckpt["optimizer"],
-        scaler=ckpt["scaler"],
-        train_config=DefaultConfig.model_validate(ckpt["train_config"]),
-        train_metrics=ckpt["train_metrics"],
-        train_results=ckpt["train_results"],
-        date=ckpt["date"],
+        epoch=checkpoint["epoch"],
+        best_fitness=checkpoint["best_fitness"],
+        model_state_dict=checkpoint["model_state_dict"],
+        ema_updates=checkpoint["ema_updates"],
+        optimizer_state_dict=checkpoint["optimizer_state_dict"],
+        scaler_state_dict=checkpoint["scaler_state_dict"],
+        train_config=DefaultConfig.model_validate_json(checkpoint["train_config"]),
+        train_metrics=checkpoint["train_metrics"],
+        date=datetime.datetime.fromisoformat(checkpoint["date"]),
     )
+
+
+def save_model_checkpoint(  # noqa: PLR0913
+    paths: list[Path],
+    epoch: int,
+    best_fitness: float,
+    model: HardcodedModel,
+    ema_updates: int,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.GradScaler,
+    train_config: DefaultConfig,
+    train_metrics: dict[str, float],
+) -> None:
+    checkpoint = ModelCheckpoint(
+        epoch=epoch,
+        best_fitness=best_fitness,
+        model_state_dict=model.state_dict(),
+        ema_updates=ema_updates,
+        optimizer_state_dict=optimizer.state_dict(),
+        scaler_state_dict=scaler.state_dict(),
+        train_config=train_config.model_dump_json(),
+        train_metrics=train_metrics,
+        date=datetime.datetime.now(tz=datetime.UTC).isoformat(),
+    )
+    for path in paths:
+        torch.save(checkpoint, path)
 
 
 def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:

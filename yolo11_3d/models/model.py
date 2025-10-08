@@ -20,7 +20,6 @@ from yolo11_3d.training.loss import v8DetectionLoss
 from yolo11_3d.utils.util import intersect_dicts, make_divisible
 
 if TYPE_CHECKING:
-    from yolo11_3d.config.config import ModelCheckpoint
     from yolo11_3d.data.data import Batch
 
 
@@ -299,11 +298,9 @@ class HardcodedModel(nn.Module):
             preds = prediction
         return self.criterion(preds, batch)
 
-    def load(self, weights: ModelCheckpoint | nn.Module) -> None:
-        model = weights["ema"] if isinstance(weights, dict) else weights
-        csd = model.float().state_dict()
-        csd = intersect_dicts(csd, self.state_dict())
-        self.load_state_dict(csd, strict=False)
+    def load(self, state_dict: dict) -> None:
+        state_dict_intersected = intersect_dicts(state_dict, self.state_dict())
+        self.load_state_dict(state_dict_intersected, strict=False)
 
     def predict(
         self, x: torch.Tensor

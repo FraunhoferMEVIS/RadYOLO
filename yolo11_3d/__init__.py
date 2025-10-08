@@ -12,13 +12,14 @@ import tqdm_loggable.utils
 import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
-from yolo11_3d.config.config import DatasetConfig, model_checkpoint_from_torch
+from yolo11_3d.config.config import DatasetConfig, load_model_checkpoint
 from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from yolo11_3d.data.convert_to_nndetection import convert_dataset_to_nndetection
 from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
 from yolo11_3d.data.data_splits import k_fold_data_splits
 from yolo11_3d.export.onnx_export import export_model
 from yolo11_3d.inference.predict import PredictionConfig, run_prediction
+from yolo11_3d.models.model import HardcodedModel
 from yolo11_3d.training.train import Trainer
 from yolo11_3d.utils.util import ModelEMA, select_device
 from yolo11_3d.validation.plotting import plot_results as plot_results_
@@ -167,7 +168,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
 
-        checkpoint = model_checkpoint_from_torch(model_path)
+        checkpoint = load_model_checkpoint(model_path)
         model = checkpoint["ema"]
         train_config = checkpoint["train_config"]
         device = select_device(train_config.device)
@@ -234,15 +235,32 @@ def onnx_export(model_path: Path) -> int:
     """
     try:
         LOGGER.info(f"Exporting model {model_path} to onnx...")
-        checkpoint = model_checkpoint_from_torch(model_path)
-
-        model = checkpoint["ema"]
+        checkpoint = load_model_checkpoint(model_path)
         train_config = checkpoint["train_config"]
-        input_channels = getattr(model, "input_channels", 3)
-        input_shape = (input_channels, *train_config.imgsz)
+        state_dict = checkpoint["model_state_dict"]
 
-        export_model(model, input_shape, model_path, copy=False)
-    except Exception as e:
+        model = HardcodedModel(
+            input_channels=train_config.input_channels,
+            num_classes=train_config.num_classes,
+            scale=train_config.model_scale,
+            box=train_config.box,
+            cls=train_config.cls,
+            dfl=train_config.dfl,
+            mask_gain=train_config.mask_gain,
+            class_separate_gain=train_config.class_separate_gain,
+            device=torch.device("cpu"),
+            enable_output_masks=train_config.segmentation_output,
+            num_prototype_masks=train_config.prototype_masks,
+            higher_resolution_prototypes=train_config.higher_resolution_prototypes,
+            separate_objectness_head=train_config.separate_objectness_head,
+            include_stride4_output=train_config.include_stride4_output,
+            objectness_loss=train_config.objectness_loss,
+        )
+        model.load(state_dict)
+
+        input_shape = (train_config.input_channels, *train_config.imgsz)
+        export_model(model, input_shape, model_path)
+    except Exception as e:  # pragma: no cover
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1
     else:

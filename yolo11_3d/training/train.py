@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import gc
-import io
 import logging
 import time
 from contextlib import nullcontext
@@ -22,7 +21,8 @@ from yolo11_3d.config.config import (
     DefaultConfig,
     ModelCheckpoint,
     get_cfg,
-    model_checkpoint_from_torch,
+    load_model_checkpoint,
+    save_model_checkpoint,
 )
 from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
 from yolo11_3d.models.model import HardcodedModel
@@ -116,9 +116,7 @@ class Trainer:
                     self.resume = False
                     return
 
-                checkpoint_config = model_checkpoint_from_torch(self.last_model_path)[
-                    "train_config"
-                ]
+                checkpoint_config = load_model_checkpoint(self.last_model_path)["train_config"]
                 if not Path(checkpoint_config.data).exists():
                     checkpoint_config.data = self.config.data
 
@@ -134,24 +132,22 @@ class Trainer:
         self,
         num_classes: int,
         device: torch.device,
-        input_channels: int = 3,
-        scale: Literal["n", "s", "m", "l", "x"] = "n",
     ) -> tuple[ModelCheckpoint | None, HardcodedModel]:
         if isinstance(self.model, HardcodedModel):
             return None, self.model
 
         checkpoint_path = self.last_model_path
-        weights_ema = None
+        model_state_dict = None
         checkpoint: ModelCheckpoint | None = None
         if self.resume and checkpoint_path.suffix == ".pt" and checkpoint_path.exists():
-            checkpoint = model_checkpoint_from_torch(checkpoint_path)
+            checkpoint = load_model_checkpoint(checkpoint_path)
             self.config = self.config.model_copy(update=checkpoint["train_config"].model_dump())
-            weights_ema = checkpoint["ema"].to(self.device).float()
+            model_state_dict = checkpoint["model_state_dict"]
 
         model = HardcodedModel(
-            input_channels=input_channels,
+            input_channels=self.config.input_channels,
             num_classes=num_classes,
-            scale=scale,
+            scale=self.config.model_scale,
             box=self.config.box,
             cls=self.config.cls,
             dfl=self.config.dfl,
@@ -165,8 +161,8 @@ class Trainer:
             include_stride4_output=self.config.include_stride4_output,
             objectness_loss=self.config.objectness_loss,
         )
-        if weights_ema:
-            model.load(weights_ema)
+        if model_state_dict:
+            model.load(model_state_dict)
         return checkpoint, model
 
     def _setup_scheduler(
@@ -197,8 +193,6 @@ class Trainer:
     ]:
         ckpt, model = self.setup_model(
             self.data.nc,
-            input_channels=self.config.input_channels,
-            scale=self.config.model_scale,
             device=self.device,
         )
         model = model.to(self.device)
@@ -469,12 +463,10 @@ class Trainer:
 
             if self.config.save or final_epoch:
                 self.save_model(
-                    epoch=self.epoch,
                     best_fitness=best_fitness or 0.0,
                     ema=ema,
                     optimizer=optimizer,
                     scaler=scaler,
-                    train_config=self.config,
                     metrics=metrics,
                     fitness=fitness,
                 )
@@ -573,42 +565,35 @@ class Trainer:
 
     def save_model(
         self,
-        epoch: int,
         best_fitness: float,
         ema: ModelEMA,
         optimizer: torch.optim.Optimizer,
         scaler: torch.GradScaler,
-        train_config: DefaultConfig,
         metrics: dict[str, float],
         fitness: float,
     ) -> None:
-        buffer = io.BytesIO()
-        checkpoint = ModelCheckpoint(
-            epoch=epoch,
-            best_fitness=best_fitness,
-            model=None,
-            ema=ema.ema,
-            updates=ema.updates,
-            optimizer=optimizer.state_dict(),
-            scaler=scaler.state_dict(),
-            train_config=train_config,
-            train_metrics={
+        save_paths = [self.last_model_path]
+        if best_fitness == fitness:
+            save_paths.append(self.best_model_path)
+        if (self.save_period > 0) and (self.epoch % self.save_period == 0):
+            save_paths.append(self.wdir / f"epoch{self.epoch}.pt")
+        save_model_checkpoint(
+            save_paths,
+            self.epoch,
+            best_fitness,
+            ema.ema,
+            ema.updates,
+            optimizer,
+            scaler,
+            self.config,
+            {
                 **metrics,
                 "metrics/mAP-ewa(B)": float(self.ewa_mAP1095)
                 if self.ewa_mAP1095 is not None
                 else 0.0,
             },
-            train_results={},
-            date=datetime.datetime.now(tz=datetime.UTC),
         )
-        torch.save(dict(checkpoint), buffer)
-        serialized_checkpoint = buffer.getvalue()
 
-        self.last_model_path.write_bytes(serialized_checkpoint)
-        if best_fitness == fitness:
-            self.best_model_path.write_bytes(serialized_checkpoint)
-        if (self.save_period > 0) and (epoch % self.save_period == 0):
-            (self.wdir / f"epoch{epoch}.pt").write_bytes(serialized_checkpoint)
 
     def get_validator(
         self,
@@ -664,25 +649,22 @@ class Trainer:
 
     def resume_training(
         self,
-        ckpt: ModelCheckpoint | None,
+        checkpoint: ModelCheckpoint | None,
         optimizer: torch.optim.Optimizer,
         scaler: torch.GradScaler,
         ema: ModelEMA,
         best_fitness: float | None = None,
     ) -> tuple[float | None, int]:
-        if ckpt is None:  # or not self.resume:
+        """Loads the state dicts for optimizer, scaler and model ema to resume training."""
+        if checkpoint is None:
             return best_fitness, 0
-        start_epoch = ckpt["epoch"] + 1
-        if ckpt["optimizer"] is not None:
-            optimizer.load_state_dict(ckpt["optimizer"])
-            best_fitness = ckpt["best_fitness"]
-        if ckpt["scaler"] is not None:
-            scaler.load_state_dict(ckpt["scaler"])
-        if ckpt["ema"] is not None:
-            ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
-            ema.updates = ckpt["updates"]
-
-        self.ewa_mAP1095 = ckpt.get("train_metrics", {}).get("metrics/mAP-ewa(B)")
+        start_epoch = checkpoint["epoch"] + 1
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        best_fitness = checkpoint["best_fitness"]
+        scaler.load_state_dict(checkpoint["scaler_state_dict"])
+        ema.ema.load_state_dict(checkpoint["model_state_dict"])
+        ema.updates = checkpoint["ema_updates"]
+        self.ewa_mAP1095 = checkpoint.get("train_metrics", {}).get("metrics/mAP-ewa(B)")
 
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",
@@ -694,7 +676,7 @@ class Trainer:
             LOGGER.info(
                 "%s has been trained for %d epochs. Fine-tuning for %d more epochs.",
                 self.model,
-                ckpt["epoch"],
+                checkpoint["epoch"],
                 self.epochs,
             )
         return best_fitness, start_epoch

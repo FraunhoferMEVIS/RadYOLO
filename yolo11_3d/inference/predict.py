@@ -4,13 +4,14 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import nibabel as nib
 import torch
 import torch.nn.functional as F  # noqa: N812
 
-from yolo11_3d.config.config import DefaultConfig, model_checkpoint_from_torch
+from yolo11_3d.config.config import DefaultConfig, load_model_checkpoint
 from yolo11_3d.models.model import HardcodedModel
 from yolo11_3d.utils import ops
 from yolo11_3d.utils.util import select_device
@@ -34,27 +35,44 @@ class PredictionConfig:
     device: str | None = None  # optional device override (e.g. "cpu", "cuda:0")
 
 
-def _load_model(cfg: PredictionConfig) -> tuple[HardcodedModel, Any, dict[int, str]]:
-    checkpoint = model_checkpoint_from_torch(cfg.model_path)
+def _build_model_from_config(
+    train_config: DefaultConfig, state_dict: dict[str, Any], device: torch.device
+) -> HardcodedModel:
+    """Instantiate HardcodedModel using stored hyperparameters and load weights."""
+    model = HardcodedModel(
+        input_channels=train_config.input_channels,
+        num_classes=train_config.num_classes,
+        scale=train_config.model_scale,
+        box=train_config.box,
+        cls=train_config.cls,
+        dfl=train_config.dfl,
+        mask_gain=train_config.mask_gain,
+        class_separate_gain=train_config.class_separate_gain,
+        device=device,
+        enable_output_masks=train_config.segmentation_output,
+        num_prototype_masks=train_config.prototype_masks,
+        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
+        separate_objectness_head=train_config.separate_objectness_head,
+        include_stride4_output=train_config.include_stride4_output,
+        objectness_loss=train_config.objectness_loss,
+    )
+    model.load(state_dict)
+    return model
+
+
+def _load_model(cfg: PredictionConfig) -> tuple[HardcodedModel, DefaultConfig, dict[int, str]]:
+    checkpoint = load_model_checkpoint(cfg.model_path)
     train_config = checkpoint["train_config"]
-    model = checkpoint["ema"]
-    if not isinstance(model, HardcodedModel):  # fallbacks
-        alt = checkpoint.get("model")
-        if isinstance(alt, HardcodedModel):
-            model = alt
-        else:  # type: ignore[unreachable]
-            msg = "Unsupported model type in checkpoint"
-            raise TypeError(msg)
-    device = select_device(cfg.device)
-    model.to(device).float().eval()
-    # Attach device attribute expected by downstream code
-    try:
+    device = select_device(cfg.device or getattr(train_config, "device", ""))
+    model: HardcodedModel | None = None
+    state_dict = checkpoint["model_state_dict"]
+    model = _build_model_from_config(train_config, state_dict, device)
+    model.eval().to(device)
+    with contextlib.suppress(AttributeError):
         model.device = device
-    except Exception:  # pragma: no cover - extremely unlikely
-        LOGGER.warning("Could not set model.device attribute; continuing.")
-    # TODO(kgeissler): Implement loading of correct class names
-    num_classes = model.num_classes
-    names = {class_index: f"class_{class_index}" for class_index in range(num_classes)}
+    num_classes = train_config.num_classes
+    names = {i: f"class_{i}" for i in range(num_classes)}
+
     return model, train_config, names
 
 
@@ -74,7 +92,7 @@ def _postprocess_single(
     pred_prototype_masks: torch.Tensor | None,
     train_config: DefaultConfig,
     num_classes: int,
-):
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Return NMS-filtered detections with single (argmax) class per box.
 
     Output tensor columns: x1,y1,z1,x2,y2,z2,conf,class,(optional mask coeffs...)

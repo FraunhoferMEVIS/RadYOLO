@@ -16,11 +16,8 @@ def export_model(
     model: HardcodedModel,
     input_shape: tuple[int, ...],
     dest: Path | str,
-    copy: bool = False,
 ) -> Path:
     inputs = torch.randn((1, *input_shape)).to("cpu")
-    if copy:
-        model = deepcopy(model)
     model.to("cpu")
     for p in model.parameters():
         p.requires_grad = False
