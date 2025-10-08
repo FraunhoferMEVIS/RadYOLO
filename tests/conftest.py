@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import nibabel as nib
@@ -11,8 +8,15 @@ import numpy as np
 import pytest
 import yaml
 
-# Import package to ensure entry point is importable during tests
-import yolo11_3d  # noqa: F401
+from yolo11_3d.config.config import DatasetConfig, load_model_checkpoint
+from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
+from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
+from yolo11_3d.data.data_splits import k_fold_data_splits
+from yolo11_3d.export.onnx_export import export_model
+from yolo11_3d.models.model import HardcodedModel
+from yolo11_3d.training.train import Trainer
+from yolo11_3d.utils.util import ModelEMA, select_device
+from yolo11_3d.validation.validate import Validator
 
 
 def _write_nifti(path: Path, array: np.ndarray) -> None:
@@ -41,11 +45,11 @@ def synthetic_dataset(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for d in ("images", "labels", "masks"):
         (root / d).mkdir()
 
-    vol_shape = (64, 64, 64)
+    vol_shape = (32, 32, 64)
     cases = ["case1", "case2", "case3", "case4", "case5"]
     for case in cases:
         vol = np.zeros(vol_shape, dtype=np.float32)
-        vol[8:24, 8:24, 8:24] = 1.0
+        vol[8:24, 8:24, 16:48] = 1.0
         _write_nifti(root / "images" / f"{case}.nii.gz", vol)
         (root / "labels" / f"{case}.txt").write_text(
             "0 0.5 0.5 0.5 0.5 0.5 0.5\n", encoding="utf-8"
@@ -73,6 +77,7 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
     cfg_path.write_text(
         (
             f"input_channels: 1\n"
+            f"num_classes: 1\n"
             f"model_scale: n\n"
             f"data: {synthetic_dataset.as_posix()}\n"
             f"fold: 0\n"
@@ -81,7 +86,7 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"warmup_epochs: 0.5\n"
             f"patience: 1\n"
             f"batch_size: 1\n"
-            f"imgsz: [64, 64, 64]\n"
+            f"imgsz: [64, 32, 32]\n"
             f"normalization: {{type: 'none'}}\n"
             f"device: cpu\n"
             f"workers: 0\n"
@@ -104,51 +109,18 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
     return cfg_path
 
 
-@pytest.fixture(scope="session")
-def cli_executable() -> list[str]:
-    # Use module invocation for consistency
-    return [sys.executable, "-m", "yolo11_3d"]
-
-
-def run_cli(
-    args: list[str],
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-    timeout: int = 300,
-) -> subprocess.CompletedProcess[str]:
-    full_env = os.environ.copy()
-    if env:
-        full_env.update(env)
-    # We intentionally do not use check=True to capture stdout/stderr for assertions.
-    return subprocess.run(  # noqa: S603
-        args,
-        cwd=cwd,
-        env=full_env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
-
 @pytest.fixture
-def trained_run(minimal_train_config: Path, cli_executable: list[str]) -> Path:
+def trained_run(minimal_train_config: Path) -> Path:
     """Train a minimal model and return the run directory.
 
     Fails fast if training does not produce both last.pt and best.pt.
     """
     cfg = minimal_train_config
-    command = [*cli_executable, "train", str(cfg)]
-    proc = run_cli(command)
-    if proc.returncode != 0:
-        msg = (
-            "Training failed.\n"
-            f"STDERR:\n{proc.stderr}\n"
-            f"STDOUT:\n{proc.stdout}"
-        )
-        raise RuntimeError(msg)
-    with cfg.open() as f:
+    trainer = Trainer(cfg=cfg)
+    trainer.train()
+    with cfg.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    run_dir = Path(data["project"]) / data["name"]
+    run_dir = Path(data["project"]) / str(data["name"])
     weights_dir = run_dir / "weights"
     if not (weights_dir / "last.pt").exists():
         msg_last = "last.pt missing after training"
@@ -157,3 +129,107 @@ def trained_run(minimal_train_config: Path, cli_executable: list[str]) -> Path:
         msg_best = "best.pt missing after training"
         raise FileNotFoundError(msg_best)
     return run_dir
+
+
+# Helper functions for tests to call CLI-accessed functionality
+
+def create_data_splits(dataset_path: Path, k: int = 5, seed: int = 0) -> Path:
+    return k_fold_data_splits(
+        dataset_path=dataset_path,
+        seed=seed,
+        k=k,
+        group_by_prefix=False,
+        prefix_sep="_",
+    )
+
+
+def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
+    return analyze_dataset_fn(dataset_path=dataset_path, workers=workers)
+
+
+def export_onnx(last_model_path: Path) -> Path:
+    checkpoint = load_model_checkpoint(last_model_path)
+    train_config = checkpoint["train_config"]
+    state_dict = checkpoint["model_state_dict"]
+    model = HardcodedModel(
+        input_channels=train_config.input_channels,
+        num_classes=train_config.num_classes,
+        scale=train_config.model_scale,
+        box=train_config.box,
+        cls=train_config.cls,
+        dfl=train_config.dfl,
+        mask_gain=train_config.mask_gain,
+        class_separate_gain=train_config.class_separate_gain,
+        device=select_device(train_config.device),
+        enable_output_masks=train_config.segmentation_output,
+        num_prototype_masks=train_config.prototype_masks,
+        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
+        separate_objectness_head=train_config.separate_objectness_head,
+        include_stride4_output=train_config.include_stride4_output,
+        objectness_loss=train_config.objectness_loss,
+    )
+    model.load(state_dict)
+    model.eval()
+    input_shape = (train_config.input_channels, *train_config.imgsz)
+    export_model(model, input_shape, last_model_path)
+    return last_model_path.with_suffix(".onnx")
+
+
+def run_validation(best_model_path: Path, group: str) -> Path:
+    checkpoint = load_model_checkpoint(best_model_path)
+    train_config = checkpoint["train_config"]
+    state_dict = checkpoint["model_state_dict"]
+    device = select_device(train_config.device)
+    model = HardcodedModel(
+        input_channels=train_config.input_channels,
+        num_classes=train_config.num_classes,
+        scale=train_config.model_scale,
+        box=train_config.box,
+        cls=train_config.cls,
+        dfl=train_config.dfl,
+        mask_gain=train_config.mask_gain,
+        class_separate_gain=train_config.class_separate_gain,
+        device=device,
+        enable_output_masks=train_config.segmentation_output,
+        num_prototype_masks=train_config.prototype_masks,
+        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
+        separate_objectness_head=train_config.separate_objectness_head,
+        include_stride4_output=train_config.include_stride4_output,
+        objectness_loss=train_config.objectness_loss,
+    )
+    model.load(state_dict)
+    model.to(device)
+    model.device = device  # type: ignore[attr-defined]
+    dataset_root = Path(train_config.data)
+    dataset_yaml = dataset_root / "dataset.yaml"
+    with dataset_yaml.open(encoding="utf-8") as f:
+        yaml_config = yaml.safe_load(f)
+    dataset_config = DatasetConfig.model_validate(yaml_config)
+    dataset = NIfTIDatasetWithMasks(
+        src_path=dataset_root,
+        fold=train_config.fold,
+        group=group,
+        imgsz=tuple(train_config.imgsz),
+        augment=False,
+        min_stride=int(model.stride.min().item()) if hasattr(model, "stride") else 8,
+        normalization=train_config.normalization,
+        load_masks=train_config.segmentation_output,
+    )
+    dataloader = build_dataloader(
+        dataset=dataset,
+        batch_size=1,
+        workers=0,
+        shuffle=False,
+        device=device,
+    )
+    save_dir = best_model_path.parents[1] / "validation" / group
+    validator = Validator(
+        dataloader=dataloader,
+        save_dir=save_dir,
+        config=train_config,
+        names=dataset_config.names or {0: "class_0"},
+        save_predictions=True,
+    )
+    ema = ModelEMA(model)
+    validator(trainer=None, ema=ema)
+    return save_dir
