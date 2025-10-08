@@ -50,7 +50,7 @@ class DefaultConfig(BaseModel):
     model_scale: Literal["n", "s", "m", "l", "x"]
 
     # Train settings
-    data: DirectoryPath  # path to data folder containing dataset.yaml
+    data: Path  # path to data folder containing dataset.yaml
     fold: int  # fold from data_splits.json to use
     epochs: int = 1000  # number of epochs to train for
     patience: int = (
@@ -115,6 +115,7 @@ class DefaultConfig(BaseModel):
     prototype_masks: int = 8  # number of prototype masks for segmentation output
     # use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
     higher_resolution_prototypes: bool = True
+
     # Detection head options
     # add separate objectness output, use cross entropy loss for softmax class probabilities
     separate_objectness_head: bool = False

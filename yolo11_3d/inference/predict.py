@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 
 from yolo11_3d.config.config import DefaultConfig, load_model_checkpoint
+from yolo11_3d.data.normalization import normalize_image
 from yolo11_3d.models.model import HardcodedModel
 from yolo11_3d.utils import ops
 from yolo11_3d.utils.util import select_device
@@ -91,6 +92,7 @@ def _postprocess_single(
     pred_mask_coeff: torch.Tensor | None,
     pred_prototype_masks: torch.Tensor | None,
     train_config: DefaultConfig,
+    prediction_config: PredictionConfig,
     num_classes: int,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Return NMS-filtered detections with single (argmax) class per box.
@@ -113,8 +115,8 @@ def _postprocess_single(
         prediction = pred_class_box
         detections = ops.non_max_suppression(
             prediction,
-            train_config.conf if train_config.conf is not None else 0.001,
-            train_config.iou,
+            prediction_config.conf,
+            prediction_config.iou,
             multi_label=False,
             agnostic=train_config.agnostic_nms,
             max_det=train_config.max_det,
@@ -136,8 +138,8 @@ def _postprocess_single(
     # Run NMS with multi_label=False to ensure argmax behaviour (ops handles selecting best class)
     detections = ops.non_max_suppression(
         prediction,
-        train_config.conf if train_config.conf is not None else 0.001,
-        train_config.iou,
+        prediction_config.conf,
+        prediction_config.iou,
         multi_label=False,
         agnostic=train_config.agnostic_nms,
         max_det=train_config.max_det,
@@ -243,15 +245,15 @@ def _box_image_to_world(
     return world_box.to(dtype=box_image_xyzxyz.dtype)
 
 
-def run_prediction(cfg: PredictionConfig) -> int:
+def run_prediction(prediction_cfg: PredictionConfig) -> int:
     try:
-        if not cfg.output_dir.exists():
-            cfg.output_dir.mkdir(parents=True, exist_ok=True)
-        model, train_config, names = _load_model(cfg)
+        if not prediction_cfg.output_dir.exists():
+            prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
+        model, train_config, names = _load_model(prediction_cfg)
         target_size = tuple(train_config.imgsz)
-        files = list(_iter_nifti(cfg.input_dir))
+        files = list(_iter_nifti(prediction_cfg.input_dir))
         if not files:
-            LOGGER.error("No .nii.gz files found in %s", cfg.input_dir)
+            LOGGER.error("No .nii.gz files found in %s", prediction_cfg.input_dir)
             return 1
         for img_path in files:
             case_name = img_path.stem.replace(".nii", "")
@@ -262,16 +264,17 @@ def run_prediction(cfg: PredictionConfig) -> int:
                 img_tensor = img_tensor.unsqueeze(0)
             original_shape = img_tensor.shape[1:]
             img_resized = _resize_image(img_tensor, target_size)
+            img_resized_normalized = normalize_image(img_resized, train_config.normalization)
             device = model.device
             autocast_ctx = (
                 torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
             )
             with torch.no_grad(), autocast_ctx:
                 pred_class_box, pred_mask_coeff, pred_prototype_masks = model(
-                    img_resized.unsqueeze(0).to(device)
+                    img_resized_normalized.unsqueeze(0).to(device)
                 )
             detections, proto_masks = _postprocess_single(
-                pred_class_box, pred_mask_coeff, pred_prototype_masks, train_config, len(names)
+                pred_class_box, pred_mask_coeff, pred_prototype_masks, train_config, prediction_cfg, len(names)
             )
             image_results: list[dict[str, object]] = []
             if detections.numel():
@@ -297,7 +300,7 @@ def run_prediction(cfg: PredictionConfig) -> int:
                             proto,
                             original_shape,
                             nifti_img,
-                            cfg.output_dir / "masks",
+                            prediction_cfg.output_dir / "masks",
                             det_i,
                             case_name,
                         )
@@ -305,10 +308,10 @@ def run_prediction(cfg: PredictionConfig) -> int:
                             entry["mask_path"] = mask_filename
                     image_results.append(entry)
             # Write per-image JSON
-            out_json = cfg.output_dir / f"{case_name}.json"
+            out_json = prediction_cfg.output_dir / f"{case_name}.json"
             with out_json.open("w") as jf:
                 json.dump(image_results, jf, indent=2)
-        LOGGER.info("Saved predictions for %d volumes to %s", len(files), cfg.output_dir)
+        LOGGER.info("Saved predictions for %d volumes to %s", len(files), prediction_cfg.output_dir)
     except Exception as e:  # pragma: no cover - defensive
         LOGGER.exception("Prediction failed", exc_info=e)
         return 1
