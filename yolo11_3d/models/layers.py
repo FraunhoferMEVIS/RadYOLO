@@ -260,8 +260,8 @@ class C3k(C3):
         kernel_size: int | tuple[int, int, int] = 3,
     ) -> None:
         super().__init__(in_channels, out_channels, n_bottlenecks, shortcut, n_groups, expansion)
-        hidden_channels = int(out_channels * 3)
-        self.m = nn.Sequential(
+        hidden_channels = int(out_channels * expansion)
+        self.hidden_layer = nn.Sequential(
             *(
                 Bottleneck(
                     hidden_channels,
