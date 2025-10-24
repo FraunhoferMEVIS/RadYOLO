@@ -9,7 +9,7 @@ fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
 batch_size: 2 # (int) number of images per batch
-imgsz: [96, 96, 96] # (list[int]) input images size as int for or list [d,h,w] for predict and export modes
+imgsz: [96, 96, 96] # (list[int]) input images size for model as list [d,h,w]
 normalization: {type: "zscore"} # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 save: True # (bool) save train checkpoints
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
@@ -28,8 +28,8 @@ use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True whi
 
 # Val/Test settings ----------------------------------------------------------------------------------------------------
 val: True # (bool) validate/test during training
-conf: # (float, optional) object confidence threshold for detection (default 0.25 predict, 0.001 val)
-iou: 0.2 # (float) intersection over union (IoU) threshold for NMS
+conf: # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
+iou: 0.2 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
 max_det: 300 # (int) maximum number of detections per image
 half: False # (bool) use half precision (FP16)
 plots: True # (bool) save plots and images during train/val
