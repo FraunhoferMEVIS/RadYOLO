@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal, overload
 import torch
 from torch import nn
 
-from yolo11_3d.models.layers import (
+from radyolo.models.layers import (
     C2PSA,
     SPPF,
     C3k2,
@@ -16,11 +16,11 @@ from yolo11_3d.models.layers import (
     PrototypeMasksHighResolution,
     PrototypeMasksHighResolutionOneSkip,
 )
-from yolo11_3d.training.loss import v8DetectionLoss
-from yolo11_3d.utils.util import intersect_dicts, make_divisible
+from radyolo.training.loss import v8DetectionLoss
+from radyolo.utils.util import intersect_dicts, make_divisible
 
 if TYPE_CHECKING:
-    from yolo11_3d.data.data import Batch
+    from radyolo.data.data import Batch
 
 
 class HardcodedModel(nn.Module):

@@ -10,24 +10,24 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from tqdm_loggable.auto import tqdm
 
-from yolo11_3d.utils import ops
-from yolo11_3d.validation.metrics import (
+from radyolo.utils import ops
+from radyolo.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
     box_iou,
 )
-from yolo11_3d.validation.plotting import output_to_target, plot_images
+from radyolo.validation.plotting import output_to_target, plot_images
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from torch.utils.data import DataLoader
 
-    from yolo11_3d.config.config import DatasetConfig, DefaultConfig
-    from yolo11_3d.data.data import Batch
-    from yolo11_3d.models.model import HardcodedModel
-    from yolo11_3d.training.train import Trainer
-    from yolo11_3d.utils.util import ModelEMA
+    from radyolo.config.config import DatasetConfig, DefaultConfig
+    from radyolo.data.data import Batch
+    from radyolo.models.model import HardcodedModel
+    from radyolo.training.train import Trainer
+    from radyolo.utils.util import ModelEMA
 
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)

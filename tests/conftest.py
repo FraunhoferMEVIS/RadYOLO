@@ -8,15 +8,15 @@ import numpy as np
 import pytest
 import yaml
 
-from yolo11_3d.config.config import DatasetConfig, load_model_checkpoint
-from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
-from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
-from yolo11_3d.data.data_splits import k_fold_data_splits
-from yolo11_3d.export.onnx_export import export_model
-from yolo11_3d.models.model import HardcodedModel
-from yolo11_3d.training.train import Trainer
-from yolo11_3d.utils.util import ModelEMA, select_device
-from yolo11_3d.validation.validate import Validator
+from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
+from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.data.data_splits import k_fold_data_splits
+from radyolo.export.onnx_export import export_model
+from radyolo.models.model import HardcodedModel
+from radyolo.training.train import Trainer
+from radyolo.utils.util import ModelEMA, select_device
+from radyolo.validation.validate import Validator
 
 
 def _write_nifti(path: Path, array: np.ndarray) -> None:

@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from yolo11_3d.models.layers import C2f, Detect
+from radyolo.models.layers import C2f, Detect
 
 if TYPE_CHECKING:
-    from yolo11_3d.models.model import HardcodedModel
+    from radyolo.models.model import HardcodedModel
 
 
 def export_model(

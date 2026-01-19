@@ -2408,7 +2408,7 @@ wheels = [
 ]
 
 [[package]]
-name = "yolo11-3d"
+name = "radyolo"
 version = "0.1.0.dev20251001"
 source = { editable = "." }
 dependencies = [

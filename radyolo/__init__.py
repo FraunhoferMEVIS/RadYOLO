@@ -12,18 +12,18 @@ import tqdm_loggable.utils
 import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
-from yolo11_3d.config.config import DatasetConfig, load_model_checkpoint
-from yolo11_3d.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
-from yolo11_3d.data.convert_to_nndetection import convert_dataset_to_nndetection
-from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
-from yolo11_3d.data.data_splits import k_fold_data_splits
-from yolo11_3d.export.onnx_export import export_model
-from yolo11_3d.inference.predict import PredictionConfig, run_prediction
-from yolo11_3d.models.model import HardcodedModel
-from yolo11_3d.training.train import Trainer
-from yolo11_3d.utils.util import ModelEMA, select_device
-from yolo11_3d.validation.plotting import plot_results as plot_results_
-from yolo11_3d.validation.validate import Validator
+from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
+from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
+from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.data.data_splits import k_fold_data_splits
+from radyolo.export.onnx_export import export_model
+from radyolo.inference.predict import PredictionConfig, run_prediction
+from radyolo.models.model import HardcodedModel
+from radyolo.training.train import Trainer
+from radyolo.utils.util import ModelEMA, select_device
+from radyolo.validation.plotting import plot_results as plot_results_
+from radyolo.validation.validate import Validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class StdoutFilter(logging.Filter):
         return record.levelno < logging.WARNING
 
 
-@click.group("yolo11-3d")
+@click.group("radyolo")
 @click.version_option()
 @click.option("-v", "--verbose", "verbose", is_flag=True, help="Enable verbose logging.")
 @click.option("-d", "--debug", "debug", is_flag=True, help="Enable debug logging.")
@@ -93,7 +93,7 @@ def main(verbose: bool, debug: bool) -> None:
 @main.command("train")
 @click.argument(
     "config",
-    envvar="YOLO113D_TRAIN_CONFIG",
+    envvar="RADYOLO_TRAIN_CONFIG",
     type=click.Path(
         exists=True,
         file_okay=True,
@@ -104,7 +104,7 @@ def main(verbose: bool, debug: bool) -> None:
     ),
 )
 def train(config: Path) -> int:
-    """Train a yolo11-3d model.
+    """Train a radyolo model.
 
     CONFIG specifies the path to a training configuration.
     """
@@ -147,7 +147,7 @@ def train(config: Path) -> int:
     "--group", default="test", help="Group from datas splits to use. Can be train, val or test."
 )
 def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
-    """Test a yolo11-3d model.
+    """Test a radyolo model.
 
     MODEL: specifies the path to a model checkpoint.
     dataset_folder: specifies the path to a dataset folder.
@@ -432,7 +432,7 @@ def convert_to_nndetection(
     modality: str,
     workers: int,
 ) -> int:
-    """Convert a YOLO11_3D dataset to nnDetection Task folder structure.
+    """Convert a RadYOLO dataset to nnDetection Task folder structure.
 
     DATASET_PATH must contain images/ (.nii.gz), labels/ (.txt) and optional masks/ (.nii.gz).
     """

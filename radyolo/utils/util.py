@@ -49,7 +49,7 @@ def select_device(
     if isinstance(device, torch.device):
         return device
 
-    s = f"yolo11-3d Python-{PYTHON_VERSION} torch-{torch.__version__}"
+    s = f"radyolo Python-{PYTHON_VERSION} torch-{torch.__version__}"
     device = str(device).lower()
     for remove in "cuda:", "none", "(", ")", "[", "]", "'", " ":
         device.replace(remove, "")  # to string, 'cuda:0' -> '0' and '(0, 1)' -> '0,1'

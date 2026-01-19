@@ -16,7 +16,7 @@ import yaml
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
-from yolo11_3d.config.config import (
+from radyolo.config.config import (
     DatasetConfig,
     DefaultConfig,
     ModelCheckpoint,
@@ -24,12 +24,12 @@ from yolo11_3d.config.config import (
     load_model_checkpoint,
     save_model_checkpoint,
 )
-from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
-from yolo11_3d.models.model import HardcodedModel
-from yolo11_3d.utils.torch_utils import EarlyStopping
-from yolo11_3d.utils.util import ModelEMA, init_seeds, select_device
-from yolo11_3d.validation.plotting import plot_results
-from yolo11_3d.validation.validate import Validator
+from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.models.model import HardcodedModel
+from radyolo.utils.torch_utils import EarlyStopping
+from radyolo.utils.util import ModelEMA, init_seeds, select_device
+from radyolo.validation.plotting import plot_results
+from radyolo.validation.validate import Validator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -338,7 +338,7 @@ class Trainer:
             loss_length: int = 1
             loss: torch.Tensor | None = None
             with (
-                logging_redirect_tqdm(loggers=[logging.root, logging.getLogger("yolo11-3d")])
+                logging_redirect_tqdm(loggers=[logging.root, logging.getLogger("radyolo")])
                 if tqdm_loggable.utils.is_interactive_session()
                 else nullcontext()
             ):

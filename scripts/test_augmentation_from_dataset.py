@@ -9,9 +9,9 @@ from typing import Any
 import nibabel as nib
 import torch
 
-from yolo11_3d.config.config import DefaultConfig, get_cfg, get_dataset_cfg
-from yolo11_3d.data.data import NIfTIDatasetWithMasks, build_dataloader
-from yolo11_3d.utils.ops import xyzwhd2xyzxyz
+from radyolo.config.config import DefaultConfig, get_cfg, get_dataset_cfg
+from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.utils.ops import xyzwhd2xyzxyz
 
 LOGGER = logging.getLogger("test_augmentation_from_dataset")
 

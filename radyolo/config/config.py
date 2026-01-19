@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 if TYPE_CHECKING:
-    from yolo11_3d.models.model import HardcodedModel
+    from radyolo.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
 

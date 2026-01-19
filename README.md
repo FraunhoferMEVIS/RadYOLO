@@ -1,6 +1,6 @@
-# YOLO11-3D
+# RadYOLO
 
-YOLOv11 from ultralytics modified to work with 3D images.
+A library to train RadYOLO, a 3D YOLO11-based deep learning model for object detection, classification and segmentation in medical images.
 
 ## Installation
 
@@ -12,7 +12,7 @@ This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-
 
 ## Usage
 
-After installation this project provides a cli `yolo11-3d` with built-in help.
+After installation this project provides a cli `radyolo` with built-in help.
 
 Available commands are `train`, `test`, `predict`, `analyze-dataset`, `create-data-splits`, `onnx-export` and `convert-to-nndetection`.
 
@@ -23,7 +23,7 @@ For further details please refer to the respective `--help` invocation.
 To train a model, call
 
 ```
-uv run -m yolo11_3d train <path_to_config_yaml>
+uv run -m radyolo train <path_to_config_yaml>
 ```
 
 where `<path_to_config_yaml>` points to the path of a configuration file for the desired training.
@@ -33,7 +33,7 @@ where `<path_to_config_yaml>` points to the path of a configuration file for the
 The `test` command can be used to run a trained on the `test` split of the data (and also the `train` and `val` splits):
 
 ```
-uv run -m yolo11_3d test <path_to_model_checkpoint> <path_to_dataset_folder>
+uv run -m radyolo test <path_to_model_checkpoint> <path_to_dataset_folder>
 ```
 
 ### Predict
@@ -41,7 +41,7 @@ uv run -m yolo11_3d test <path_to_model_checkpoint> <path_to_dataset_folder>
 The `predict` command can be used for model inference. It is called as follows:
 
 ```
-uv run -m yolo11_3d predict <path_to_model_checkpoint> <input_image_folder> <output_folder>
+uv run -m radyolo predict <path_to_model_checkpoint> <input_image_folder> <output_folder>
 ```
 
 Here the `input_image_folder` is a folder of NifTi files, where the predict command expects each file to represent a case to run the model on. The resulting detections and optional segmentation masks are saved to the `output_folder`.
@@ -98,7 +98,7 @@ names:
 To automatically analyze the dataset to get statistics about the image sizes, intensities and labels, you can call the command:
 
 ```
-uv run -m yolo11_3d analyze-dataset <path_to_dataset_folder>
+uv run -m radyolo analyze-dataset <path_to_dataset_folder>
 ```
 
 ### Create data splits
@@ -106,17 +106,17 @@ uv run -m yolo11_3d analyze-dataset <path_to_dataset_folder>
 To automtically create a data split file, you can call:
 
 ```
-uv run -m yolo11_3d create-data-splits <path_to_dataset_folder>
+uv run -m radyolo create-data-splits <path_to_dataset_folder>
 ```
 
 By default it splits the data using a 5-fold cross validation scheme, where each group uses three of the folds as `train` set, one as `val` set and one as `test` set. The `val` set is used to compute the validation metrics during training and select the best model, while the `test` set is left out of the training to serve as independent test data in the end.
 
-### Convert YOLO11_3D dataset to nnDetection
+### Convert RadYOLO dataset to nnDetection
 
 You can convert a dataset in this repo's format into nnDetection's Task structure:
 
 ```pwsh
-uv run -m yolo11_3d convert-to-nndetection <path-to-yolo11_3d-dataset> --out-root <det_data_root> --task-id 100 --task-name MyDataset --fold 0
+uv run -m radyolo convert-to-nndetection <path-to-radyolo-dataset> --out-root <det_data_root> --task-id 100 --task-name MyDataset --fold 0
 ```
 
 This creates `<det_data_root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, `labelsTr` and optional `imagesTs`, `labelsTs`, plus a `dataset.yaml`.
@@ -126,12 +126,12 @@ This creates `<det_data_root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, 
 You can build the docker image using the command
 
 ```bash
-docker build -t yolo11-3d:latest .
+docker build -t radyolo:latest .
 ```
 
 ## Development
 
-The main source code lives in the `yolo11_3d/` package.
+The main source code lives in the `radyolo/` package.
 
 ### Tests
 
@@ -151,5 +151,5 @@ pytest
 
 Optional coverage:
 ```bash
-pytest --cov=yolo11_3d --cov-report=term-missing
+pytest --cov=radyolo --cov-report=term-missing
 ```

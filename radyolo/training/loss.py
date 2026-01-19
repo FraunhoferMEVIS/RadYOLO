@@ -9,19 +9,19 @@ import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
-from yolo11_3d.training.tal import (
+from radyolo.training.tal import (
     TaskAlignedAssigner,
     bbox2dist,
     dist2bbox,
     make_anchors,
 )
-from yolo11_3d.utils.ops import xyzwhd2xyzxyz
-from yolo11_3d.validation.metrics import bbox_iou
+from radyolo.utils.ops import xyzwhd2xyzxyz
+from radyolo.validation.metrics import bbox_iou
 
 if TYPE_CHECKING:
-    from yolo11_3d.data.data import Batch
-    from yolo11_3d.models.layers import Detect
-    from yolo11_3d.models.model import HardcodedModel
+    from radyolo.data.data import Batch
+    from radyolo.models.layers import Detect
+    from radyolo.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
 

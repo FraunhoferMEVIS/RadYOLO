@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from yolo11_3d.data.augmentations import (
+from radyolo.data.augmentations import (
     batch_generators_intensity_augmentations,
     enlarge_bounding_boxes,
     gin_augmentation,
@@ -15,7 +15,7 @@ from yolo11_3d.data.augmentations import (
     random_zoom,
     tensor_cutout,
 )
-from yolo11_3d.validation.plotting import plot_images
+from radyolo.validation.plotting import plot_images
 
 
 def seed_everything(seed: int = 0) -> None:

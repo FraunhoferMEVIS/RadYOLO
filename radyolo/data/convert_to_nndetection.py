@@ -233,7 +233,7 @@ def convert_dataset_to_nndetection(
     modality_name: str = "CT",
     workers: int = 0,
 ) -> Path:
-    """Convert YOLO11_3D dataset to nnDetection format.
+    """Convert RadYOLO dataset to nnDetection format.
 
     Returns the path to the created Task folder.
     """

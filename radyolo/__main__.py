@@ -2,6 +2,6 @@ from __future__ import annotations
 
 import sys
 
-import yolo11_3d
+import radyolo
 
-sys.exit(yolo11_3d.main())
+sys.exit(radyolo.main())

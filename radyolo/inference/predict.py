@@ -11,11 +11,11 @@ import nibabel as nib
 import torch
 import torch.nn.functional as F  # noqa: N812
 
-from yolo11_3d.config.config import DefaultConfig, load_model_checkpoint
-from yolo11_3d.data.normalization import normalize_image
-from yolo11_3d.models.model import HardcodedModel
-from yolo11_3d.utils import ops
-from yolo11_3d.utils.util import select_device
+from radyolo.config.config import DefaultConfig, load_model_checkpoint
+from radyolo.data.normalization import normalize_image
+from radyolo.models.model import HardcodedModel
+from radyolo.utils import ops
+from radyolo.utils.util import select_device
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

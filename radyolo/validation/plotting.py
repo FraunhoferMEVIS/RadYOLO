@@ -16,7 +16,7 @@ import pandas as pd
 import torch
 from PIL import Image, ImageDraw, ImageFont
 
-from yolo11_3d.utils import ops
+from radyolo.utils import ops
 
 if TYPE_CHECKING:
     from collections.abc import Callable

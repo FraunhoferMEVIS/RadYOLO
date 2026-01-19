@@ -19,7 +19,7 @@ from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.random import RandomTransform
 from torch import nn
 
-from yolo11_3d.utils.ops import xyzwhd2xyzxyz
+from radyolo.utils.ops import xyzwhd2xyzxyz
 
 if TYPE_CHECKING:
     from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform

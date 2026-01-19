@@ -8,7 +8,7 @@ from tests.conftest import (
     export_onnx,
     run_validation,
 )
-from yolo11_3d.data.convert_to_nndetection import convert_dataset_to_nndetection
+from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 
 if TYPE_CHECKING:  # pragma: no cover
     from pathlib import Path

@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "yolo11-3d"
+name = "radyolo"
 version = "0.1.0.dev20251001"
 authors = [
   { name = "Laurens Müller-Groh", email = "laurens.mueller-groh@mevis.fraunhofer.de" },
   { name = "Kai Geissler", email = "kai.geissler@mevis.fraunhofer.de" },
 ]
-description = "A library to train 3D YOLO11 based deep learning models for object detection in medical images."
+description = "A library to train RadYOLO, a 3D YOLO11-based deep learning model for object detection, classification and segmentation in medical images."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.scripts]
-"yolo11-3d" = "yolo11_3d:main"
+"radyolo" = "radyolo:main"
 
 [dependency-groups]
 dev = [
@@ -60,7 +60,7 @@ explicit = true
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["yolo11_3d"]
+packages = ["radyolo"]
 
 [tool.ruff]
 line-length = 100

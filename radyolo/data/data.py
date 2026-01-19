@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from torch.utils.data import DataLoader, Dataset
 
-from yolo11_3d.data.augmentations import (
+from radyolo.data.augmentations import (
     batch_generators_intensity_augmentations,
     enlarge_bounding_boxes,
     gin_augmentation,
@@ -23,11 +23,11 @@ from yolo11_3d.data.augmentations import (
     random_zoom,
     tensor_cutout,
 )
-from yolo11_3d.data.normalization import NormalizationConfig, normalize_image
-from yolo11_3d.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
+from radyolo.data.normalization import NormalizationConfig, normalize_image
+from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 if TYPE_CHECKING:
-    from yolo11_3d.config.config import DefaultConfig
+    from radyolo.config.config import DefaultConfig
 
 LOGGER = logging.getLogger(__name__)
 

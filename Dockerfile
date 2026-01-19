@@ -15,4 +15,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project --no-dev --compile-bytecode --link-mode=copy
 
-ADD yolo11_3d/ /app/yolo11_3d
+ADD radyolo/ /app/radyolo
