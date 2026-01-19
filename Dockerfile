@@ -4,7 +4,7 @@ FROM registry.fme.lan/ghcr/astral-sh/uv:${UV_VERSION} AS uv-base
 
 FROM registry.fme.lan/dockerhub/python:3.13-slim
 
-LABEL org.opencontainers.image.authors="Laurens Müller-Groh <laurens.mueller-groh@mevis.fraunhofer.de>"
+LABEL org.opencontainers.image.authors="Laurens Müller-Groh <laurens.mueller-groh@mevis.fraunhofer.de>, Kai Geissler <kai.geissler@mevis.fraunhofer.de"
 
 COPY --from=uv-base /uv /bin/
 
