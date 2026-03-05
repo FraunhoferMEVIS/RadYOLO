@@ -510,7 +510,7 @@ class TaskAlignedAssigner(nn.Module):
 
             LOGGER.warning(
                 f"Using fall back mechanism to assign targets for {need_assign.numel()} objects "
-                f"because they had no anchors left are highest overlap filtering."
+                f"because they had no anchors left after highest overlap filtering."
             )
 
             # For fast lookup of current owner per anchor (unique after conflict resolution)
