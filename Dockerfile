@@ -16,3 +16,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev --compile-bytecode --link-mode=copy
 
 ADD radyolo/ /app/radyolo
+ADD scripts/ /app/scripts
