@@ -18,7 +18,6 @@ from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import (
     DatasetConfig,
-    DefaultConfig,
     ModelCheckpoint,
     get_cfg,
     load_model_checkpoint,
@@ -323,6 +322,7 @@ class Trainer:
         optimizer.zero_grad()
         while True:
             model.train()
+            timing_values = self._create_epoch_timing_values()
 
             LOGGER_YOLO.info(
                 "%11s" * (3 + len(self.loss_names)),
@@ -337,6 +337,8 @@ class Trainer:
             tloss: torch.Tensor | None = None
             loss_length: int = 1
             loss: torch.Tensor | None = None
+            previous_gpu_steps_end: float | None = None
+            has_previous_batch_in_epoch = False
             with (
                 logging_redirect_tqdm(loggers=[logging.root, logging.getLogger("radyolo")])
                 if tqdm_loggable.utils.is_interactive_session()
@@ -373,6 +375,11 @@ class Trainer:
                                     [self.config.warmup_momentum, self.config.momentum],
                                 )
 
+                    all_gpu_steps_start = time.perf_counter()
+                    if has_previous_batch_in_epoch and previous_gpu_steps_end is not None:
+                        timing_values["timing/post_gpu_to_next_gpu_steps_s"] += (
+                            all_gpu_steps_start - previous_gpu_steps_end
+                        )
                     # Forward
                     with torch.autocast(self.device.type):
                         batch["img"] = batch["img"].to(self.device, non_blocking=True)
@@ -406,6 +413,11 @@ class Trainer:
                     if num_iterations - last_opt_step >= accumulate:
                         self.optimizer_step(scaler, optimizer, model, ema)
                         last_opt_step = num_iterations
+
+                    gpu_steps_end = time.perf_counter()
+                    timing_values["timing/gpu_steps_total_s"] += gpu_steps_end - all_gpu_steps_start
+                    previous_gpu_steps_end = gpu_steps_end
+                    has_previous_batch_in_epoch = True
 
                     # Log
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
@@ -448,16 +460,18 @@ class Trainer:
                     ema=ema,
                     best_fitness=best_fitness,
                 )
-                self.save_metrics(
-                    metrics={
-                        **(self.label_loss_items(tloss) if tloss is not None else {}),
-                        **metrics,
-                    },
-                    train_time_start=train_time_start,
-                )
             else:
                 metrics = {}
                 fitness = 0.0
+
+            self.save_metrics(
+                metrics={
+                    **(self.label_loss_items(tloss) if tloss is not None else {}),
+                    **metrics,
+                    **timing_values,
+                },
+                train_time_start=train_time_start,
+            )
 
             stop |= stopper(self.epoch + 1, fitness) or final_epoch
 
@@ -486,6 +500,14 @@ class Trainer:
         LOGGER.info(msg)
 
         self._clear_memory()
+
+    @staticmethod
+    def _create_epoch_timing_values() -> dict[str, float]:
+        keys = (
+            "timing/gpu_steps_total_s",
+            "timing/post_gpu_to_next_gpu_steps_s",
+        )
+        return dict.fromkeys(keys, 0.0)
 
     @staticmethod
     def optimizer_step(
