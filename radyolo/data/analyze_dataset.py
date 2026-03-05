@@ -220,7 +220,18 @@ def _labels_for_case(
     if not labels_path.exists():
         return []
     txt = labels_path.read_text(encoding="utf-8").strip().splitlines()
-    return [_parse_label_line(line) for line in txt if line.strip()]
+    entries: list[tuple[int, float, float, float, float, float, float]] = []
+    for line in txt:
+        if not line.strip():
+            continue
+        cls, x, y, z, w, h, d = _parse_label_line(line)
+        if np.isclose(w, 0.0) or np.isclose(h, 0.0) or np.isclose(d, 0.0):
+            LOGGER.warning(
+                f"Zero-extent bounding box found in {labels_path}: "
+                f"class={cls} extents=(w={w:.6f}, h={h:.6f}, d={d:.6f})"
+            )
+        entries.append((cls, x, y, z, w, h, d))
+    return entries
 
 
 def _label_stats_for_case(
