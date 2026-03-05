@@ -7,7 +7,7 @@ import torch
 
 from radyolo.data.augmentations import (
     batch_generators_intensity_augmentations,
-    enlarge_bounding_boxes,
+    ensure_non_zero_box_extents,
     gin_augmentation,
     random_channel_dropout,
     random_mirroring,
@@ -189,18 +189,14 @@ def apply_enlarge(
     image: torch.Tensor,
     labels_abs_xyzxyz: torch.Tensor,
     masks: torch.Tensor,
-    imgsz: torch.Tensor,
-    stride: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     labels_abs_xyzwhd = abs_xyzxyz_to_abs_xyzwhd(labels_abs_xyzxyz)
-    img_out, labels_abs_xyzwhd_out, masks_out = enlarge_bounding_boxes(
-        image, labels_abs_xyzwhd, masks, tuple(imgsz.tolist()), stride=stride
-    )
+    labels_abs_xyzwhd_out = ensure_non_zero_box_extents(labels_abs_xyzwhd)
     labels_abs_xyzxyz_out = abs_xyzwhd_to_abs_xyzxyz(labels_abs_xyzwhd_out)
     masks_out = (
-        masks_out if masks_out is not None else torch.zeros(0, *masks.shape[1:], dtype=masks.dtype)
+        masks if masks is not None else torch.zeros(0, *masks.shape[1:], dtype=masks.dtype)
     )
-    return img_out, labels_abs_xyzxyz_out, masks_out
+    return image, labels_abs_xyzxyz_out, masks_out
 
 
 def build_grid_for_augmentation(
@@ -244,9 +240,8 @@ def build_grid_for_augmentation(
             img_v, mask_v = apply_intensity(base_img.clone(), base_masks.clone())
             lab_v = base_labels_abs_xyzxyz.clone()
         elif aug_name == "enlarge_bounding_boxes":
-            stride = random.choice([4, 8, 12, 16, 24, 32])
             img_v, lab_v, mask_v = apply_enlarge(
-                base_img.clone(), base_labels_abs_xyzxyz.clone(), base_masks.clone(), imgsz, stride
+                base_img.clone(), base_labels_abs_xyzxyz.clone(), base_masks.clone(),
             )
         elif aug_name == "random_rotation":
             wide_angle_probability = 0.5

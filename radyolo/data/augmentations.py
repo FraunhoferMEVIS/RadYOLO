@@ -19,8 +19,6 @@ from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.random import RandomTransform
 from torch import nn
 
-from radyolo.utils.ops import xyzwhd2xyzxyz
-
 if TYPE_CHECKING:
     from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
@@ -106,7 +104,7 @@ def tensor_cutout(
             intersection_over_volume = bbox_iov(box, labels[:, 1:7])
             keep_mask = intersection_over_volume < 0.60  # noqa: PLR2004
             labels = labels[keep_mask]  # remove >60% obscured labels
-            if masks is not None:
+            if masks is not None and keep_mask.logical_not().any():
                 masks = masks[keep_mask]
 
     return im, labels, masks
@@ -266,7 +264,7 @@ def random_zoom(
         label_center_z = (augmented_labels[:, 3] + augmented_labels[:, 6]) / 2
         # base valid range
         allowed_center_min = -8
-        valid = (
+        keep_masks = (
             (label_center_x >= allowed_center_min)
             & (label_center_x <= w + 8)
             & (label_center_y >= allowed_center_min)
@@ -274,9 +272,9 @@ def random_zoom(
             & (label_center_z >= allowed_center_min)
             & (label_center_z <= d + 8)
         )
-        augmented_labels = augmented_labels[valid]
-        if masks is not None:
-            masks = masks[valid]
+        augmented_labels = augmented_labels[keep_masks]
+        if masks is not None and keep_masks.logical_not().any():
+            masks = masks[keep_masks]
 
         # Clamp to image bounds
         augmented_labels[:, 1].clamp_(0, w)  # x1
@@ -487,14 +485,14 @@ def random_rotation(
         rotated_labels[:, 6] = nz2
 
     # Remove degenerate boxes
-    keep = (
+    keep_masks = (
         (rotated_labels[:, 4] - rotated_labels[:, 1] > 1)
         & (rotated_labels[:, 5] - rotated_labels[:, 2] > 1)
         & (rotated_labels[:, 6] - rotated_labels[:, 3] > 1)
     )
-    rotated_labels = rotated_labels[keep]
-    if masks_rot_binary is not None and keep.numel() == masks_rot_binary.shape[0]:
-        masks_rot_binary =  masks_rot_binary[keep]
+    rotated_labels = rotated_labels[keep_masks]
+    if masks_rot_binary is not None and keep_masks.logical_not().any():
+        masks_rot_binary = masks_rot_binary[keep_masks]
 
     return image_rot, rotated_labels, masks_rot_binary
 
@@ -650,50 +648,23 @@ def batch_generators_intensity_augmentations(
     return augmented_image
 
 
-def enlarge_bounding_boxes(
-    image: torch.Tensor,
+def ensure_non_zero_box_extents(
     labels: torch.Tensor,
-    masks: torch.Tensor | None,
-    imgsz: tuple[int, int, int],
-    stride: int,
-) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
-    """Enlarges bounding box edges to stride size which would be smaller than the stride size.
+) -> torch.Tensor:
+    """Ensures bounding box extents are non-zero, which would cause issues in IoU computation.
 
     Args:
-        image (torch.Tensor): 3-D tensor to be augmented.
         labels (torch.Tensor): bounding boxes. class x y z w h d
-        masks (torch.Tensor | None): corresponding masks
-        imgsz (tuple[int, int, int]): target image size.
-        stride (int): stride size.
 
     Returns:
-        tuple[torch.Tensor, torch.Tensor]: augmented image and labels
+        torch.Tensor: augmented labels
     """
     if labels.shape[0] == 0:
-        return image, labels, masks
+        return labels
 
-    # enlarge bounding boxes to stride size by replacing the w,h,d which are smaller than the stride
-    # size with the stride size
-    labels[:, 4:] = torch.where(labels[:, 4:] < stride, stride, labels[:, 4:])  # width
+    labels[:, 4:] = torch.where(labels[:, 4:] < 1, 1, labels[:, 4:])
 
-    # remove labels that are outside of the image
-    # we build a mask that is True for labels that are inside the image
-    # for that we convert the xyzwhd bounding boxes to xyzxyz using the function xyzwhd2xyzxyz
-    # and then check if the coordinates are within the image size
-    bboxes = xyzwhd2xyzxyz(labels[:, 1:7])
-    box_filter = (
-        (bboxes[:, 0] >= 0)
-        & (bboxes[:, 1] >= 0)
-        & (bboxes[:, 2] >= 0)
-        & (bboxes[:, 3] < imgsz[2])
-        & (bboxes[:, 4] < imgsz[1])
-        & (bboxes[:, 5] < imgsz[0])
-    )
-    labels = labels[box_filter]
-    if masks is not None:
-        masks = masks[box_filter]
-
-    return image, labels, masks
+    return labels
 
 
 def random_channel_dropout(

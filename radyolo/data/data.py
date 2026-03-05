@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from radyolo.data.augmentations import (
     batch_generators_intensity_augmentations,
-    enlarge_bounding_boxes,
+    ensure_non_zero_box_extents,
     gin_augmentation,
     random_channel_dropout,
     random_mirroring,
@@ -162,9 +162,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         if nl:
             labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
 
-        image, labels, masks = enlarge_bounding_boxes(
-            image, labels, masks, self.imgsz, self.min_stride
-        )
+        labels = ensure_non_zero_box_extents(labels)
 
         if nl:
             labels[:, 1:] = labels[:, 1:] / scale_tensor
