@@ -55,7 +55,7 @@ class Batch(TypedDict):
     bboxes: torch.Tensor
     batch_idx: torch.Tensor
     masks: tuple[torch.Tensor | None, ...]
-    case_names: tuple[str]
+    case_names: tuple[str, ...]
 
 
 class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
@@ -90,6 +90,21 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             msg = f"There are only {len(splits)} folds defined, but fold index {fold} was selected."
             raise ValueError(msg)
         self.cases: list[str] = splits[fold][group]
+        self.image_format = self._detect_image_format()
+
+    def _detect_image_format(self) -> Literal["nifti", "numpy"]:
+        for case_name in self.cases:
+            nifti_path = Path(self.src_path) / "images" / f"{case_name}.nii.gz"
+            if nifti_path.exists():
+                return "nifti"
+            numpy_path = Path(self.src_path) / "images" / f"{case_name}.npy"
+            if numpy_path.exists():
+                return "numpy"
+        msg = (
+            "Could not detect dataset image format. Expected files in images/ as "
+            "<case>.nii.gz or <case>.npy for the configured split."
+        )
+        raise FileNotFoundError(msg)
 
     def __len__(self) -> int:
         return len(self.cases)
@@ -233,14 +248,22 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         )
 
     def load_image(self, case_name: str) -> torch.Tensor:
-        image_path = Path(self.src_path) / "images" / f"{case_name}.nii.gz"
-        if not image_path.exists():
-            msg = f"Image path does not exists: {image_path}. Is your dataset format correct?"
-            raise OSError(msg)
-        nifti_image = nib.loadsave.load(image_path)
-        if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
-            raise TypeError
-        image = np.asanyarray(nifti_image.dataobj, dtype=np.float32)
+        if self.image_format == "nifti":
+            image_path = Path(self.src_path) / "images" / f"{case_name}.nii.gz"
+            if not image_path.exists():
+                msg = f"Image path does not exists: {image_path}. Is your dataset format correct?"
+                raise OSError(msg)
+            nifti_image = nib.loadsave.load(image_path)
+            if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
+                raise TypeError
+            image = np.asanyarray(nifti_image.dataobj, dtype=np.float32)
+        else:
+            image_path = Path(self.src_path) / "images" / f"{case_name}.npy"
+            if not image_path.exists():
+                msg = f"Image path does not exists: {image_path}. Is your dataset format correct?"
+                raise OSError(msg)
+            image = np.load(image_path, allow_pickle=False).astype(np.float32, copy=False)
+
         image_tensor = torch.from_numpy(image)
         return image_tensor.permute(*reversed(range(image_tensor.ndim)))
 
@@ -259,7 +282,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
 
     def load_labels_and_masks(
         self, case_name: str
-    ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         label_path = Path(self.src_path) / "labels" / f"{case_name}.txt"
         with label_path.open("r") as file:
             lines = file.read().strip().splitlines()
@@ -274,14 +297,23 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         classes = torch.from_numpy(labels[:, 0:1])
         bboxes = torch.from_numpy(labels[:, 1:])
 
-        mask_path = Path(self.src_path) / "masks" / f"{case_name}.nii.gz"
-        if self.load_masks and mask_path.exists():
-            nifti_image = nib.loadsave.load(mask_path)
-            if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
-                raise TypeError
-            mask_numpy = np.asanyarray(nifti_image.dataobj, dtype=np.uint8)
-            mask_tensor = torch.from_numpy(mask_numpy)
-            mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
+        mask_nifti_path = Path(self.src_path) / "masks" / f"{case_name}.nii.gz"
+        mask_npz_path = Path(self.src_path) / "masks" / f"{case_name}.npz"
+        if self.load_masks and (mask_nifti_path.exists() or mask_npz_path.exists()):
+            if mask_nifti_path.exists():
+                nifti_image = nib.loadsave.load(mask_nifti_path)
+                if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
+                    raise TypeError
+                mask_numpy = np.asanyarray(nifti_image.dataobj, dtype=np.uint8)
+                mask_tensor = torch.from_numpy(mask_numpy)
+                mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
+            else:
+                with np.load(mask_npz_path) as mask_archive:
+                    if "mask" not in mask_archive.files:
+                        msg = f"Compressed mask archive missing 'mask' array: {mask_npz_path}"
+                        raise KeyError(msg)
+                    mask_numpy = np.array(mask_archive["mask"], dtype=np.uint8)
+                mask_tensor = torch.from_numpy(mask_numpy)
             mask_tensor = mask_tensor.unsqueeze(0)
             if len(mask_tensor.shape) == 4:
                 mask_tensor = mask_tensor.unsqueeze(0)

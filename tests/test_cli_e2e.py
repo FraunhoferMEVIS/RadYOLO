@@ -6,6 +6,7 @@ import nibabel as nib
 import numpy as np
 
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
+from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
 from tests.conftest import (
     analyze_dataset,
     create_data_splits,
@@ -69,6 +70,32 @@ def test_preprocess_data_preserves_image_dtype(tmp_path: Path) -> None:
 
     converted_image = np.load(output_dataset / "images" / "case_dtype.npy")
     assert converted_image.dtype == np.int16
+
+
+def test_preprocessed_dataset_loading_works(
+    synthetic_dataset: Path, tmp_path: Path
+) -> None:
+    output_dataset = tmp_path / "preprocessed_for_loading"
+    preprocess_data(synthetic_dataset, output_dataset, workers=0)
+
+    dataset = NIfTIDatasetWithMasks(
+        src_path=output_dataset,
+        imgsz=(64, 32, 32),
+        augment=False,
+        min_stride=8,
+        fold=0,
+        group="train",
+        normalization={"type": "none"},
+        load_masks=True,
+    )
+
+    sample = dataset[0]
+    assert sample["image"].shape == (1, 64, 32, 32)
+
+    loader = build_dataloader(dataset=dataset, batch_size=1, workers=0, shuffle=False)
+    batch = next(iter(loader))
+
+    assert batch["img"].shape == (1, 1, 64, 32, 32)
 
 
 def test_train_minimal(trained_run: Path) -> None:
