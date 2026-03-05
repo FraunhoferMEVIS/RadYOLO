@@ -17,6 +17,7 @@ from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
+from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
 from radyolo.models.model import HardcodedModel
@@ -369,6 +370,58 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
         LOGGER.info("Dataset fingerprint written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to analyze dataset", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("preprocess-data")
+@click.argument(
+    "dataset_path",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.argument(
+    "output_path",
+    type=click.Path(
+        exists=False,
+        file_okay=False,
+        dir_okay=True,
+        writable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--workers",
+    default=0,
+    show_default=True,
+    help="Number of parallel workers to use (0 = CPU count).",
+)
+@click.option(
+    "--overwrite/--no-overwrite",
+    default=False,
+    show_default=True,
+    help="Allow writing into an output folder that already contains .npy images.",
+)
+def preprocess_data(dataset_path: Path, output_path: Path, workers: int, overwrite: bool) -> int:
+    """Preprocess a NIfTI dataset and store images as .npy arrays in OUTPUT_PATH."""
+    try:
+        out_path = preprocess_dataset_fn(
+            dataset_path=dataset_path,
+            output_path=output_path,
+            workers=workers,
+            overwrite=overwrite,
+        )
+        LOGGER.info("Preprocessed dataset written to %s", out_path)
+    except Exception as e:
+        LOGGER.exception("Failed to preprocess dataset", exc_info=e)
         return 1
     else:
         return 0

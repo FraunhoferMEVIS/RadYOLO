@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import nibabel as nib
+import numpy as np
+
+from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from tests.conftest import (
     analyze_dataset,
     create_data_splits,
     export_onnx,
+    preprocess_data,
     run_validation,
 )
-from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 
 if TYPE_CHECKING:  # pragma: no cover
     from pathlib import Path
@@ -28,6 +32,43 @@ def test_analyze_dataset(synthetic_dataset: Path) -> None:
     assert out.exists()
     fingerprint = synthetic_dataset / "dataset_fingerprint.json"
     assert fingerprint.exists(), "dataset_fingerprint.json not created"
+
+
+def test_preprocess_data(synthetic_dataset: Path, tmp_path: Path) -> None:
+    output_dataset = tmp_path / "preprocessed_dataset"
+    out = preprocess_data(synthetic_dataset, output_dataset, workers=0)
+
+    assert out == output_dataset
+    input_images = sorted((synthetic_dataset / "images").glob("*.nii.gz"))
+    output_images = sorted((output_dataset / "images").glob("*.npy"))
+
+    assert len(output_images) == len(input_images), "number of preprocessed images is incorrect"
+    input_masks = sorted((synthetic_dataset / "masks").glob("*.nii.gz"))
+    output_masks = sorted((output_dataset / "masks").glob("*.npz"))
+
+    assert len(output_masks) == len(input_masks), "number of preprocessed masks is incorrect"
+    with np.load(output_masks[0]) as mask_archive:
+        assert "mask" in mask_archive.files, "compressed mask archive missing 'mask' array"
+    assert (output_dataset / "dataset.yaml").exists(), "dataset.yaml not copied"
+    assert (output_dataset / "data_splits.json").exists(), "data_splits.json not copied"
+    assert (output_dataset / "labels" / "case1.txt").exists(), "labels not copied"
+
+
+def test_preprocess_data_preserves_image_dtype(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset_dtype"
+    (dataset_path / "images").mkdir(parents=True)
+    (dataset_path / "labels").mkdir(parents=True)
+
+    image_array = np.arange(5 * 6 * 7, dtype=np.int16).reshape((5, 6, 7))
+    image = nib.Nifti1Image(image_array, affine=np.eye(4))
+    nib.save(image, dataset_path / "images" / "case_dtype.nii.gz")
+    (dataset_path / "labels" / "case_dtype.txt").write_text("", encoding="utf-8")
+
+    output_dataset = tmp_path / "preprocessed_dtype"
+    preprocess_data(dataset_path, output_dataset, workers=0)
+
+    converted_image = np.load(output_dataset / "images" / "case_dtype.npy")
+    assert converted_image.dtype == np.int16
 
 
 def test_train_minimal(trained_run: Path) -> None:

@@ -12,6 +12,7 @@ from radyolo.config.config import DatasetConfig, load_model_checkpoint
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
+from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.models.model import HardcodedModel
 from radyolo.training.train import Trainer
@@ -145,6 +146,15 @@ def create_data_splits(dataset_path: Path, k: int = 5, seed: int = 0) -> Path:
 
 def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     return analyze_dataset_fn(dataset_path=dataset_path, workers=workers)
+
+
+def preprocess_data(dataset_path: Path, output_path: Path, workers: int = 0) -> Path:
+    return preprocess_dataset_fn(
+        dataset_path=dataset_path,
+        output_path=output_path,
+        workers=workers,
+        overwrite=False,
+    )
 
 
 def export_onnx(last_model_path: Path) -> Path:

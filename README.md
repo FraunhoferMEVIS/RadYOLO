@@ -14,7 +14,7 @@ This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-
 
 After installation this project provides a cli `radyolo` with built-in help.
 
-Available commands are `train`, `test`, `predict`, `analyze-dataset`, `create-data-splits`, `onnx-export` and `convert-to-nndetection`.
+Available commands are `train`, `test`, `predict`, `analyze-dataset`, `create-data-splits`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
@@ -110,6 +110,16 @@ uv run -m radyolo create-data-splits <path_to_dataset_folder>
 ```
 
 By default it splits the data using a 5-fold cross validation scheme, where each group uses three of the folds as `train` set, one as `val` set and one as `test` set. The `val` set is used to compute the validation metrics during training and select the best model, while the `test` set is left out of the training to serve as independent test data in the end.
+
+### Preprocess dataset images to NumPy
+
+To preprocess a dataset in the predefined NIfTI format and store the images as `.npy` files in a new folder, call:
+
+```bash
+uv run -m radyolo preprocess-data <path_to_dataset_folder> <path_to_output_folder>
+```
+
+The command copies labels and dataset metadata and converts all files from `images/*.nii.gz` to `images/*.npy` in the output dataset. If `masks/*.nii.gz` are present, they are converted to compressed `masks/*.npz` files.
 
 ### Convert RadYOLO dataset to nnDetection
 
