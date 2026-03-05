@@ -45,7 +45,8 @@ class BenchmarkResult:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Measure and compare loading times for .nii.gz, .nii, .npy, and blosc2 array files "
+            "Measure and compare loading times for .nii.gz, .nii, .npy, .npz, and blosc2 "
+            "array files "
             "using synthetic 3D volumes."
         )
     )
@@ -170,6 +171,10 @@ def write_npy(path: Path, array: np.ndarray) -> None:
     np.save(path, array)
 
 
+def write_npz(path: Path, array: np.ndarray) -> None:
+    np.savez_compressed(path, data=array)
+
+
 def comp_blosc2_params(
     image_size: tuple[int, int, int, int],
     patch_size: tuple[int, int, int] | tuple[int, int],
@@ -268,6 +273,11 @@ def load_nii(path: Path) -> np.ndarray:
 
 def load_npy(path: Path) -> np.ndarray:
     return np.load(path)
+
+
+def load_npz(path: Path) -> np.ndarray:
+    with np.load(path) as array_data:
+        return array_data["data"]
 
 
 def load_blosc2(path: Path) -> np.ndarray:
@@ -386,15 +396,18 @@ def main() -> int:
         nii_gz_path = image_dir / f"{image_type}.nii.gz"
         nii_path = image_dir / f"{image_type}.nii"
         npy_path = image_dir / f"{image_type}.npy"
+        npz_path = image_dir / f"{image_type}.npz"
 
         write_nii(nii_gz_path, array)
         write_nii(nii_path, array)
         write_npy(npy_path, array)
+        write_npz(npz_path, array)
 
         load_targets: list[tuple[str, Path, Callable[[Path], np.ndarray]]] = [
             ("nii.gz", nii_gz_path, load_nii),
             ("nii", nii_path, load_nii),
             ("npy", npy_path, load_npy),
+            ("npz", npz_path, load_npz),
         ]
 
         if blosc2 is not None:
