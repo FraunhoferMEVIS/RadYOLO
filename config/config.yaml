@@ -21,7 +21,7 @@ exist_ok: True # (bool) whether to overwrite existing experiment
 optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
 seed: 0 # (int) random seed for reproducibility
-deterministic: True # (bool) whether to enable deterministic mode
+deterministic: False # (bool) whether to enable deterministic mode
 resume: True # (bool) resume training from last checkpoint
 amp: True # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
 use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
