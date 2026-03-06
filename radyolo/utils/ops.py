@@ -108,7 +108,7 @@ def non_max_suppression(
     labels: list[list[int | float | torch.Tensor]] | list[torch.Tensor] = (),
     max_det: int = 300,
     nc: int = 0,  # number of classes (optional)
-    max_time_img: float = 0.05,
+    nms_time_limit: float | None = 1.0,
     max_nms: int = 30000,
     max_wh: int = 7680,
     in_place: bool = True,
@@ -135,7 +135,7 @@ def non_max_suppression(
         max_det (int): The maximum number of boxes to keep after NMS.
         nc (int, optional): The number of classes output by the model. Any indices after this
             will be considered masks.
-        max_time_img (float): The maximum time (seconds) for processing one image.
+        nms_time_limit (float | None): Hard cap (seconds) for NMS execution per image.
         max_nms (int): The maximum number of boxes into torchvision.ops.nms().
         max_wh (int): The maximum box width and height in pixels.
         in_place (bool): If True, the input prediction tensor will be modified in place.
@@ -163,7 +163,7 @@ def non_max_suppression(
     xc = prediction[:, 6:mi].amax(1) > conf_thres  # candidates
 
     # Settings
-    time_limit = 2.0 + max_time_img * bs  # seconds to quit after
+    time_limit = nms_time_limit  * bs
     multi_label &= nc > 1  # multiple labels per box
 
     prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)

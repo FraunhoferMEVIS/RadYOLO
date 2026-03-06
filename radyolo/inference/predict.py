@@ -124,6 +124,7 @@ def _postprocess_single(
             multi_label=False,
             agnostic=train_config.agnostic_nms,
             max_det=train_config.max_det,
+            nms_time_limit=train_config.nms_time_limit,
             nc=num_classes,
         )[0].cpu()
         return detections, pred_prototype_masks
@@ -147,6 +148,7 @@ def _postprocess_single(
         multi_label=False,
         agnostic=train_config.agnostic_nms,
         max_det=train_config.max_det,
+        nms_time_limit=train_config.nms_time_limit,
         nc=num_classes,
     )[0].cpu()
     return detections, pred_prototype_masks

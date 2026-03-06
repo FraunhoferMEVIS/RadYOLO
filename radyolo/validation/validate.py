@@ -227,6 +227,7 @@ class Validator:
             multi_label=True,
             agnostic=self.config.agnostic_nms,
             max_det=self.config.max_det,
+            nms_time_limit=self.config.nms_time_limit,
             nc=self.nc,
         )
 

@@ -85,6 +85,7 @@ class DefaultConfig(BaseModel):
     val: bool = True  # validate/test during training
     conf: float | None = 0.001  # object confidence threshold for detection during validation
     iou: float = 0.2  # intersection over union (IoU) threshold for NMS
+    nms_time_limit: float = 0.5  # time limit per image in seconds before NMS stops processing
     max_det: int = 300  # maximum number of detections per image
     half: bool = False  # use half precision (FP16)
     plots: bool = True  # save plots and images during train/val
