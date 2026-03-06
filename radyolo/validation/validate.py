@@ -163,7 +163,7 @@ class Validator:
 
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 6) % (
+        return ("%22s" + "%11s" * 7) % (
             "Class",
             "Images",
             "Instances",
@@ -171,6 +171,7 @@ class Validator:
             "R",
             "mAP10",
             "mAP10-95)",
+            "Dice(M)",
         )
 
     def preprocess(self, batch: Batch) -> Batch:
@@ -534,9 +535,17 @@ class Validator:
 
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
-        LOGGER.warning(self.get_desc())
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
-        LOGGER.warning(pf, "all", self.seen, self.nt_per_class.sum(), *self.metrics.mean_results())
+        LOGGER.info(self.get_desc())
+        dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.keys) + 1)  # print format
+        LOGGER.info(
+            pf,
+            "all",
+            self.seen,
+            self.nt_per_class.sum(),
+            *self.metrics.mean_results(),
+            dice_avg,
+        )
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(
                 "WARNING ⚠️ no labels found in dataset, can not compute metrics without labels"
@@ -545,12 +554,13 @@ class Validator:
         # Print results per class
         if self.config.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
-                LOGGER.warning(
+                LOGGER.info(
                     pf,
                     self.names[c],
                     self.nt_per_image[c],
                     self.nt_per_class[c],
                     *self.metrics.class_result(i),
+                    float("nan"),
                 )
 
         if self.config.plots:
@@ -560,9 +570,6 @@ class Validator:
                     names=self.names.values(),
                     normalize=normalize,
                 )
-        # Print Dice metric summary
-        dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
-        LOGGER.warning("%22s%11.3g", "Mask Dice(M)", dice_avg)
 
     def plot_val_samples(self, batch: Batch, ni: int) -> None:
         """Plot validation image samples."""

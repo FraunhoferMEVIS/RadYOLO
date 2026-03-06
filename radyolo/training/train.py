@@ -437,14 +437,14 @@ class Trainer:
                 raise RuntimeError(message)
 
             if tloss is not None:
-                LOGGER.warning(
+                LOGGER.info(
                     "%15s" * 1 + "%11s" * (2 + len(self.loss_names)),  # noqa: G003
                     "Completed Epoch",
                     "GPU_mem",
                     *self.loss_names,
                     "Loss",
                 )
-                LOGGER.warning(
+                LOGGER.info(
                     "%15s%11s" + "%11.4g" * (loss_length + 1),  # noqa: G003
                     f"{self.epoch + 1}/{self.epochs}",
                     f"{self._get_memory():.3g}G",
