@@ -1,0 +1,320 @@
+template_config: config/config.yaml
+output_root: hyperparameter_tuning/runs
+experiment_name: learning_hparam_tuning
+
+# Optional: working directory used when launching each training subprocess.
+# Defaults to repository root (parent of hyperparameter_tuning/).
+# training_working_directory: .
+
+tune:
+  metric: dataset_metric_aggregate
+  mode: max
+  num_samples: 100
+  max_concurrent_trials: 2
+  # On Windows, short trial directory names help avoid MAX_PATH issues.
+  use_short_trial_dirnames: true
+  resources:
+    cpu: 4
+    gpu: 1
+
+metrics:
+  # Primary metric used for optimization.
+  # Per training run: take rolling average over `rolling_window_epochs`, then use
+  # the maximum rolling-average value over all valid epoch timestamps.
+  primary_column: metrics/mAP10-95(B)
+  # Secondary metric tracked in parallel with the same rolling-window logic.
+  secondary_column: metrics/dice(M)
+  # Rolling window size used for both primary and secondary metric extraction.
+  rolling_window_epochs: 20
+  # How to aggregate per-dataset training metrics into the objective reported to Ray Tune.
+  dataset_aggregation: mean
+  # Fallback when training fails or metric extraction fails
+  failure_metric: 0.0
+
+# Applied to every generated train config before per-dataset overrides.
+common_train_overrides:
+  # Avoid accidental resume collisions between tuning trials.
+  resume: false
+  exist_ok: true
+  # Keep plot generation optional during tuning.
+  plots: false
+
+# Each sampled hyperparameter set is trained on all listed datasets.
+# Per dataset you can configure:
+# - resampling: target shape used for training resampling (maps to train config 'imgsz')
+# - normalization: intensity normalization config (same schema as train config)
+# - overrides: optional extra train config overrides
+datasets:
+  - name: Task01_BrainTumour
+    data: D:/datasets/radyolo/Task01_BrainTumour
+    fold: 0
+    resampling:
+      imgsz: [240, 240, 160]
+    normalization:
+      - type: zscore
+      - type: zscore
+      - type: zscore
+      - type: zscore
+    overrides:
+      input_channels: 4
+      num_classes: 3
+      channel_dropout_probabilities: [0.0, 0.0, 0.0, 0.0]
+  - name: Task02_Heart
+    data: D:/datasets/radyolo/Task02_Heart
+    fold: 0
+    resampling:
+      imgsz: [320, 320, 128]
+    normalization:
+      type: zscore
+    overrides:
+      input_channels: 1
+      num_classes: 1
+      channel_dropout_probabilities: [0.0]
+  - name: Task03_Liver
+    data: D:/datasets/radyolo/Task03_Liver
+    fold: 0
+    resampling:
+      imgsz: [512, 512, 432]
+    normalization:
+      type: ct
+      mean: -53
+      std: 312
+      clip_min: -1015
+      clip_max: 593
+    overrides:
+      input_channels: 1
+      num_classes: 2
+      channel_dropout_probabilities: [0.0]
+  - name: Task04_Hippocampus
+    data: D:/datasets/radyolo/Task04_Hippocampus
+    fold: 0
+    resampling:
+      imgsz: [64, 64, 64]
+    normalization:
+      - type: zscore
+    overrides:
+      input_channels: 1
+      num_classes: 2
+      channel_dropout_probabilities: [0.0]
+  - name: Task05_Prostate
+    data: D:/datasets/radyolo/Task05_Prostate
+    fold: 0
+    resampling:
+      imgsz: [320, 320, 32]
+    normalization:
+      - type: zscore
+      - type: zscore
+    overrides:
+      input_channels: 2
+      num_classes: 2
+      channel_dropout_probabilities: [0.0, 0.0]
+  - name: Task06_Lung
+    data: D:/datasets/radyolo/Task06_Lung
+    fold: 0
+    resampling:
+      imgsz: [512, 512, 256]
+    normalization:
+      type: ct
+      mean: -409
+      std: 443
+      clip_min: -1024
+      clip_max: 680
+    overrides:
+      input_channels: 1
+      num_classes: 1
+      channel_dropout_probabilities: [0.0]
+  - name: Task07_Pancreas
+    data: D:/datasets/radyolo/Task07_Pancreas
+    fold: 0
+    resampling:
+      imgsz: [512, 512, 96]
+    normalization:
+      type: ct
+      mean: 33
+      std: 137
+      clip_min: -881
+      clip_max: 370
+    overrides:
+      input_channels: 1
+      num_classes: 2
+      channel_dropout_probabilities: [0.0]
+  - name: Task08_HepaticVessel
+    data: D:/datasets/radyolo/Task08_HepaticVessel
+    fold: 0
+    resampling:
+      imgsz: [512, 512, 64]
+    normalization:
+      type: ct
+      mean: 25
+      std: 228
+      clip_min: -928
+      clip_max: 403
+    overrides:
+      input_channels: 1
+      num_classes: 2
+      channel_dropout_probabilities: [0.0]
+  - name: Task09_Spleen
+    data: D:/datasets/radyolo/Task09_Spleen
+    fold: 0
+    resampling:
+      imgsz: [512, 512, 96]
+    normalization:
+      type: ct
+      mean: -23
+      std: 232
+      clip_min: -900
+      clip_max: 447
+    overrides:
+      input_channels: 1
+      num_classes: 1
+      channel_dropout_probabilities: [0.0]
+  - name: Task10_Colon
+    data: D:/datasets/radyolo/Task10_Colon
+    fold: 0
+    resampling:
+      imgsz: [512, 512, 96]
+    normalization:
+      type: ct
+      mean: 23
+      std: 175
+      clip_min: -970
+      clip_max: 475
+    overrides:
+      input_channels: 1
+      num_classes: 1
+      channel_dropout_probabilities: [0.0]
+
+# Search space for learning-related hyperparameters.
+# Augmentation settings are intentionally excluded.
+search_space:
+  model_scale:
+    type: choice
+    values: [n, s, m, l]
+  
+  optimizer:
+    type: choice
+    values: [AdamW, SGD]
+
+  lr0:
+    type: loguniform
+    lower: 1.0e-4
+    upper: 1.0e-1
+
+  lrf:
+    type: loguniform
+    lower: 1.0e-3
+    upper: 5.0e-1
+
+  momentum:
+    type: uniform
+    lower: 0.8
+    upper: 0.99
+
+  weight_decay:
+    type: loguniform
+    lower: 1.0e-6
+    upper: 1.0e-2
+
+  warmup_epochs:
+    type: uniform
+    lower: 0.0
+    upper: 8.0
+
+  warmup_momentum:
+    type: uniform
+    lower: 0.5
+    upper: 0.99
+
+  warmup_bias_lr:
+    type: loguniform
+    lower: 1.0e-4
+    upper: 5.0e-1
+
+  objectness_loss:
+    type: choice
+    values: [bce, focal]
+
+  tal_topk:
+    type: qrandint
+    lower: 4
+    upper: 20
+    q: 1
+    cast: int
+
+  tal_alpha:
+    type: uniform
+    lower: 0.3
+    upper: 1.2
+
+  tal_beta:
+    type: uniform
+    lower: 1.2
+    upper: 8.0
+
+  gamma:
+    type: uniform
+    lower: 0.0
+    upper: 3.0
+
+  grad_clip_max_norm:
+    type: loguniform
+    lower: 1.0
+    upper: 20.0
+
+  ema_decay:
+    type: loguniform
+    lower: 0.1
+    upper: 0.99999
+
+  ema_tau:
+    type: uniform
+    lower: 200.0
+    upper: 6000.0
+
+  box:
+    type: uniform
+    lower: 3.0
+    upper: 12.0
+
+  l1:
+    type: uniform
+    lower: 0.2
+    upper: 3.0
+
+  cls:
+    type: uniform
+    lower: 0.1
+    upper: 1.5
+
+  mask_gain:
+    type: uniform
+    lower: 0.2
+    upper: 8.0
+
+  class_separate_gain:
+    type: uniform
+    lower: 0.1
+    upper: 2.0
+
+  nbs:
+    type: qrandint
+    lower: 4
+    upper: 72
+    q: 1
+    cast: int
+
+  prototype_masks:
+    type: qrandint
+    lower: 4
+    upper: 24
+    q: 1
+    cast: int
+
+  include_stride4_output:
+    type: choice
+    values: [True, False]
+
+  extent_bias_init:
+    type: uniform
+    lower: 0
+    upper: 7
