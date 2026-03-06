@@ -11,7 +11,7 @@ authors = [
 ]
 description = "A library to train RadYOLO, a 3D YOLO11-based deep learning model for object detection, classification and segmentation in medical images."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
   "batchgeneratorsv2>=0.3.0",
   "click>=8.1.8",
@@ -41,6 +41,7 @@ dev = [
   "ruff>=0.13.0",
   "pytest>=8.3.0",
   "pytest-cov>=5.0.0",
+  "ray[tune]==2.51.2",
 ]
 
 [tool.uv]
