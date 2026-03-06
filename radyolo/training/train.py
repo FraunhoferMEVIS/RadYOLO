@@ -159,6 +159,10 @@ class Trainer:
             separate_objectness_head=self.config.separate_objectness_head,
             include_stride4_output=self.config.include_stride4_output,
             objectness_loss=self.config.objectness_loss,
+            tal_topk=self.config.tal_topk,
+            tal_alpha=self.config.tal_alpha,
+            tal_beta=self.config.tal_beta,
+            gamma=self.config.gamma,
         )
         if model_state_dict:
             model.load(model_state_dict)

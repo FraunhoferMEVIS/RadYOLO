@@ -177,6 +177,10 @@ def export_onnx(last_model_path: Path) -> Path:
         separate_objectness_head=train_config.separate_objectness_head,
         include_stride4_output=train_config.include_stride4_output,
         objectness_loss=train_config.objectness_loss,
+        tal_topk=train_config.tal_topk,
+        tal_alpha=train_config.tal_alpha,
+        tal_beta=train_config.tal_beta,
+        gamma=train_config.gamma,
     )
     model.load(state_dict)
     model.eval()
@@ -206,6 +210,10 @@ def run_validation(best_model_path: Path, group: str) -> Path:
         separate_objectness_head=train_config.separate_objectness_head,
         include_stride4_output=train_config.include_stride4_output,
         objectness_loss=train_config.objectness_loss,
+        tal_topk=train_config.tal_topk,
+        tal_alpha=train_config.tal_alpha,
+        tal_beta=train_config.tal_beta,
+        gamma=train_config.gamma,
     )
     model.load(state_dict)
     model.to(device)

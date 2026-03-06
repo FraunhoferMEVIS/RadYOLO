@@ -138,6 +138,7 @@ class v8DetectionLoss:  # noqa: N801
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
         tal_beta: float = 6.0,
+        gamma: float = 2.0,
         tal_fallback: bool = True,
         enable_mask_loss: bool = False,
         separate_objectness_head: bool = False,
@@ -147,7 +148,7 @@ class v8DetectionLoss:  # noqa: N801
         self.objectness_loss = (
             nn.BCEWithLogitsLoss(reduction="sum")
             if objectness_loss == "bce"
-            else QualityFocalLoss()
+            else QualityFocalLoss(gamma=gamma)
         )
         self.ce = nn.CrossEntropyLoss(reduction="none")
         self.box_gain = box

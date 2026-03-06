@@ -103,6 +103,10 @@ class DefaultConfig(BaseModel):
     warmup_momentum: float = 0.8  # warmup initial momentum
     warmup_bias_lr: float = 0.1  # warmup initial bias lr
     objectness_loss: Literal["bce", "focal"] = "bce"  # loss function for objectness loss
+    tal_topk: int = 10  # top-k anchors to keep per gt in task-aligned assigner
+    tal_alpha: float = 0.5  # classification term exponent in task-aligned assigner
+    tal_beta: float = 6.0  # IoU term exponent in task-aligned assigner
+    gamma: float = 2.0  # quality focal loss gamma (used when objectness_loss="focal")
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain

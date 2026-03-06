@@ -41,6 +41,10 @@ class HardcodedModel(nn.Module):
         separate_objectness_head: bool = False,
         include_stride4_output: bool = False,
         objectness_loss: Literal["bce", "focal"] = "bce",
+        tal_topk: int = 10,
+        tal_alpha: float = 0.5,
+        tal_beta: float = 6.0,
+        gamma: float = 2.0,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -259,7 +263,10 @@ class HardcodedModel(nn.Module):
             class_separate_gain,
             self.l23,
             device,
-            tal_beta=1.0,
+            tal_topk=tal_topk,
+            tal_alpha=tal_alpha,
+            tal_beta=tal_beta,
+            gamma=gamma,
             tal_fallback=True,
             enable_mask_loss=enable_output_masks,
             separate_objectness_head=self.separate_objectness_head,
