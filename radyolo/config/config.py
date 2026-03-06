@@ -107,6 +107,9 @@ class DefaultConfig(BaseModel):
     tal_alpha: float = 0.5  # classification term exponent in task-aligned assigner
     tal_beta: float = 6.0  # IoU term exponent in task-aligned assigner
     gamma: float = 2.0  # quality focal loss gamma (used when objectness_loss="focal")
+    grad_clip_max_norm: float = 10.0  # max norm for gradient clipping
+    ema_decay: float = 0.9999  # exponential moving average decay
+    ema_tau: float = 2000.0  # EMA ramp-up factor
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain

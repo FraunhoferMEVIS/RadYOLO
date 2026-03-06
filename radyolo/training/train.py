@@ -229,7 +229,7 @@ class Trainer:
         else:
             val_loader = None
             validator = None
-        ema = ModelEMA(model)
+        ema = ModelEMA(model, decay=self.config.ema_decay, tau=self.config.ema_tau)
 
         # Optimizer
         accumulate = max(round(self.config.nbs / self.config.batch_size), 1)
@@ -415,7 +415,13 @@ class Trainer:
 
                     # Optimize
                     if num_iterations - last_opt_step >= accumulate:
-                        self.optimizer_step(scaler, optimizer, model, ema)
+                        self.optimizer_step(
+                            scaler,
+                            optimizer,
+                            model,
+                            ema,
+                            self.config.grad_clip_max_norm,
+                        )
                         last_opt_step = num_iterations
 
                     gpu_steps_end = time.perf_counter()
@@ -519,9 +525,10 @@ class Trainer:
         optimizer: torch.optim.Optimizer,
         model: torch.nn.Module,
         ema: ModelEMA,
+        grad_clip_max_norm: float,
     ) -> None:
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()

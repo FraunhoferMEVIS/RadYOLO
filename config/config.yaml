@@ -52,6 +52,9 @@ tal_topk: 10 # (int) top-k anchors to keep per ground truth for task-aligned ass
 tal_alpha: 0.5 # (float) cls score exponent in task-aligned assignment metric
 tal_beta: 6.0 # (float) IoU exponent in task-aligned assignment metric
 gamma: 2.0 # (float) quality focal loss gamma (used when objectness_loss="focal")
+grad_clip_max_norm: 10.0 # (float) max norm used for gradient clipping
+ema_decay: 0.9999 # (float) exponential moving average decay
+ema_tau: 2000.0 # (float) EMA ramp-up factor
 box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) cls loss gain (scale with pixels)
 dfl: 1.5 # (float) dfl loss gain
