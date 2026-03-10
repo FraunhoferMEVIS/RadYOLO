@@ -210,11 +210,11 @@ def random_zoom(
     if any(new < orig for orig, new in zip(orig_sizes, new_sizes, strict=True)):
         # prepare canvas
         if out_zoom_padding == "random":
-            canvas = torch.rand(channels, d, h, w) * (
+            canvas = torch.rand(channels, d, h, w, device=image_cropped.device) * (
                 torch.max(image_cropped) - torch.min(image_cropped)
             ) + torch.min(image_cropped)
         elif out_zoom_padding == "constant":
-            canvas = torch.zeros(channels, d, h, w) + padding_fill_value
+            canvas = torch.zeros(channels, d, h, w, device=image_cropped.device) + padding_fill_value
         else:
             msg = f"Unknown out zoom padding mode {out_zoom_padding}"
             raise ValueError(msg)
