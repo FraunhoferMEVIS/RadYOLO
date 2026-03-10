@@ -135,6 +135,7 @@ class DefaultConfig(BaseModel):
     out_zoom_padding: Literal["constant", "random"] = "constant"
     prob_zoom: float = Field(0.5, ge=0, le=1.0)
     zoom_uniform: bool = False
+    zoom_augmentation_device: Literal["cpu", "gpu"] = "cpu"
     # Cutout Augmentation
     prob_cutout: float = Field(0.5, ge=0, le=1.0)
     cutout_params: list[tuple[float, int]] = Field(
@@ -144,14 +145,17 @@ class DefaultConfig(BaseModel):
             (0.125, 4),
         ]
     )
+    cutout_augmentation_device: Literal["cpu", "gpu"] = "cpu"
     prob_mirroring: float = Field(0.5, ge=0, le=1.0)
     mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
+    mirroring_augmentation_device: Literal["cpu", "gpu"] = "cpu"
     # Rotation
     prob_rotation: float = Field(0.0, ge=0, le=1.0)
     rotation_angle_x: tuple[float, float] = (-20.0, 20.0)
     rotation_angle_y: tuple[float, float] = (-20.0, 20.0)
     rotation_angle_z: tuple[float, float] = (-20.0, 20.0)
     rotation_keep_box_volume: bool = True
+    rotation_augmentation_device: Literal["cpu", "gpu"] = "cpu"
     # Channel Dropout
     channel_dropout_probabilities: tuple[float, ...] = Field(default_factory=tuple)
     channel_dropout_fill_value: float = 0.0
@@ -199,6 +203,17 @@ class DefaultConfig(BaseModel):
             msg = "normalization must be a dict or a list of dicts"
             raise TypeError(msg)
         return self
+
+    def uses_gpu_spatial_augmentations(self) -> bool:
+        return any(
+            placement == "gpu"
+            for placement in (
+                self.zoom_augmentation_device,
+                self.rotation_augmentation_device,
+                self.cutout_augmentation_device,
+                self.mirroring_augmentation_device,
+            )
+        )
 
 
 class DatasetConfig(BaseModel):

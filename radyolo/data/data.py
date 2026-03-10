@@ -32,6 +32,145 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def _apply_configured_spatial_augmentations_to_sample(
+    image: torch.Tensor,
+    classes: torch.Tensor,
+    bboxes: torch.Tensor,
+    masks: torch.Tensor | None,
+    config: DefaultConfig,
+    imgsz: tuple[int, int, int],
+    placement: Literal["cpu", "gpu"],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    labels = torch.cat((classes, bboxes), dim=1)
+    scale_tensor = torch.tensor(
+        imgsz,
+        device=labels.device,
+        dtype=labels.dtype,
+    )[[2, 1, 0, 2, 1, 0]]
+    labels[:, 1:] = xyzwhd2xyzxyz(labels[:, 1:])
+    scale_tensor = scale_tensor.to(device=labels.device, dtype=labels.dtype)
+    labels[:, 1:] = labels[:, 1:] * scale_tensor
+
+    fill_value = float(torch.min(image).item())
+
+    if config.zoom_augmentation_device == placement:
+        image, labels, masks = random_zoom(
+            image,
+            labels,
+            masks,
+            config.max_zoom,
+            config.min_zoom,
+            config.prob_zoom,
+            config.out_zoom_padding,
+            fill_value,
+            config.zoom_uniform,
+        )
+
+    if config.rotation_augmentation_device == placement:
+        image, labels, masks = random_rotation(
+            image,
+            labels,
+            masks,
+            angle_ranges=(
+                config.rotation_angle_x,
+                config.rotation_angle_y,
+                config.rotation_angle_z,
+            ),
+            p=config.prob_rotation,
+            keep_box_volume=config.rotation_keep_box_volume,
+            fill_value=fill_value,
+        )
+
+    if config.cutout_augmentation_device == placement:
+        image, labels, masks = tensor_cutout(
+            image,
+            labels,
+            masks,
+            config.cutout_params,
+            config.prob_cutout,
+        )
+
+    if labels.shape[0] > 0:
+        labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
+        labels = ensure_non_zero_box_extents(labels)
+        scale_tensor = scale_tensor.to(device=labels.device, dtype=labels.dtype)
+        labels[:, 1:] = labels[:, 1:] / scale_tensor
+
+    if config.mirroring_augmentation_device == placement:
+        image, labels, masks = random_mirroring(
+            image,
+            labels,
+            masks,
+            config.mirror_axes,
+            config.prob_mirroring,
+        )
+
+    return image, labels[:, 0:1], labels[:, 1:], masks
+
+
+def apply_configured_spatial_augmentations_to_batch(
+    batch: Batch,
+    config: DefaultConfig,
+    imgsz: tuple[int, int, int],
+    placement: Literal["cpu", "gpu"],
+) -> Batch:
+    images = batch["img"]
+    batch_device = images.device
+    classes_out: list[torch.Tensor] = []
+    bboxes_out: list[torch.Tensor] = []
+    batch_idx_out: list[torch.Tensor] = []
+    masks_out: list[torch.Tensor | None] = []
+
+    for sample_idx in range(images.shape[0]):
+        sample_mask = batch["batch_idx"] == sample_idx
+        sample_classes = batch["cls"][sample_mask]
+        sample_bboxes = batch["bboxes"][sample_mask]
+        sample_masks = batch["masks"][sample_idx]
+
+        image_aug, classes_aug, bboxes_aug, masks_aug = (
+            _apply_configured_spatial_augmentations_to_sample(
+                images[sample_idx],
+                sample_classes,
+                sample_bboxes,
+                sample_masks,
+                config,
+                imgsz,
+                placement,
+            )
+        )
+        image_aug = image_aug.to(device=batch_device)
+        classes_aug = classes_aug.to(device=batch_device)
+        bboxes_aug = bboxes_aug.to(device=batch_device)
+        if masks_aug is not None:
+            masks_aug = masks_aug.to(device=batch_device)
+        images[sample_idx] = image_aug
+        masks_out.append(masks_aug)
+
+        if classes_aug.shape[0]:
+            classes_out.append(classes_aug)
+            bboxes_out.append(bboxes_aug)
+            batch_idx_out.append(
+                torch.full(
+                    (classes_aug.shape[0],),
+                    sample_idx,
+                    dtype=batch["batch_idx"].dtype,
+                    device=batch["batch_idx"].device,
+                )
+            )
+
+    batch["img"] = images
+    batch["masks"] = tuple(masks_out)
+    if classes_out:
+        batch["cls"] = torch.cat(classes_out, 0)
+        batch["bboxes"] = torch.cat(bboxes_out, 0)
+        batch["batch_idx"] = torch.cat(batch_idx_out, 0)
+    else:
+        batch["cls"] = batch["cls"].new_empty((0, 1))
+        batch["bboxes"] = batch["bboxes"].new_empty((0, 6))
+        batch["batch_idx"] = batch["batch_idx"].new_empty((0,), dtype=batch["batch_idx"].dtype)
+    return batch
+
+
 class Sample(TypedDict):
     image: torch.Tensor
     shape: tuple[int, int, int]
@@ -117,58 +256,11 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         if not self.augment:
             return sample
 
-        scale_tensor = torch.as_tensor(self.imgsz)[[2, 1, 0, 2, 1, 0]]
-
-        image = sample["image"]
-        classes = sample["classes"]
-        bboxes = xyzwhd2xyzxyz(sample["bboxes"])
-        masks = sample["masks"]
-        bboxes = bboxes * scale_tensor
-
-        labels = torch.cat((classes, bboxes), dim=1)
-
-        fill_value = torch.min(image)
-
-        image, labels, masks = random_zoom(
-            image,
-            labels,
-            masks,
-            self.config.max_zoom,
-            self.config.min_zoom,
-            self.config.prob_zoom,
-            self.config.out_zoom_padding,
-            fill_value,
-            self.config.zoom_uniform,
-        )
-
-        image, labels, masks = random_rotation(
-            image,
-            labels,
-            masks,
-            angle_ranges=(
-                self.config.rotation_angle_x,
-                self.config.rotation_angle_y,
-                self.config.rotation_angle_z,
-            ),
-            p=self.config.prob_rotation,
-            keep_box_volume=self.config.rotation_keep_box_volume,
-            fill_value=fill_value,
-        )
-
-        image, labels, masks = tensor_cutout(
-            image, labels, masks, self.config.cutout_params, self.config.prob_cutout
-        )
-        nl = len(labels)
-        if nl:
-            labels[:, 1:] = xyzxyz2xyzwhd(labels[:, 1:])
-
-        labels = ensure_non_zero_box_extents(labels)
-
-        if nl:
-            labels[:, 1:] = labels[:, 1:] / scale_tensor
-
-        image, labels, masks = random_mirroring(
-            image, labels, masks, self.config.mirror_axes, self.config.prob_mirroring
+        image, classes, bboxes, masks = (
+            sample["image"],
+            sample["classes"],
+            sample["bboxes"],
+            sample["masks"],
         )
 
         if self.config.do_batchgenerators_intensity_augmentation:
@@ -194,29 +286,35 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                 gamma_p_retain_stats=self.config.intensity_gamma_p_retain_stats,
             )
 
-        image, labels, masks = gin_augmentation(
+        image = gin_augmentation(
             image,
-            labels,
-            masks,
             self.config.gin_layers,
             self.config.gin_channels,
             self.config.gin_prob_kernel_size_one,
             self.config.gin_prob,
         )
 
-        image, labels, masks = random_channel_dropout(
+        image = random_channel_dropout(
             image,
-            labels,
-            masks,
             drop_probabilities=self.config.channel_dropout_probabilities,
             fill_value=None
             if self.config.channel_dropout_use_mean
             else self.config.channel_dropout_fill_value,
         )
 
+        image, classes, bboxes, masks = _apply_configured_spatial_augmentations_to_sample(
+            image,
+            classes,
+            bboxes,
+            masks,
+            self.config,
+            self.imgsz,
+            placement="cpu",
+        )
+
         sample["image"] = image
-        sample["classes"] = labels[:, 0:1]
-        sample["bboxes"] = labels[:, 1:]
+        sample["classes"] = classes
+        sample["bboxes"] = bboxes
         sample["masks"] = masks
 
         return sample

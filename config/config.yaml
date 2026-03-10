@@ -16,7 +16,7 @@ save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 # device: "cpu" # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
 workers: 4 # (int) number of worker threads for data loading
 project: "runs" # (str, optional) project name
-name: "default" # (str, optional) experiment name, results saved to 'project/name' directory
+name: "gpu_augmentations" # (str, optional) experiment name, results saved to 'project/name' directory
 exist_ok: True # (bool) whether to overwrite existing experiment
 optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
@@ -78,10 +78,12 @@ min_zoom: 0.7
 out_zoom_padding: "constant"
 prob_zoom: 0.4
 zoom_uniform: false  # if false, enable anisotropic per-axis zoom factors
+zoom_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
 # Mirroring Augmentation
 prob_mirroring: 0.5
 mirror_axes: ["x", "y", "z"]
+mirroring_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
 # Rotation augmentation
 prob_rotation: 0.2
@@ -89,14 +91,11 @@ rotation_angle_x: [-15.0, 15.0]
 rotation_angle_y: [-15.0, 15.0]
 rotation_angle_z: [-15.0, 15.0]
 rotation_keep_box_volume: true
-
-# Channel dropout augmentation (drop at most one channel)
-channel_dropout_probabilities: [0.0,]  # e.g. [0.6,0.3,0.1] must match channel count
-channel_dropout_fill_value: 0.0        # ignored if channel_dropout_use_mean=true
-channel_dropout_use_mean: true         # if true, replace dropped channel with its mean
+rotation_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
 # Cutout Augmentation
-prob_cutout: 0.2
+prob_cutout: 0.1
+cutout_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 cutout_params:   # Cutout params (size_fraction, repeats)
 - [0.5, 1]
 - [0.25, 2]
@@ -128,3 +127,8 @@ gin_layers: 4
 gin_channels: 2
 gin_prob_kernel_size_one: 0.8
 gin_prob: 0.3
+
+# Channel dropout augmentation (drop at most one channel)
+channel_dropout_probabilities: [0.0,]  # e.g. [0.6,0.3,0.1] must match channel count
+channel_dropout_fill_value: 0.0        # ignored if channel_dropout_use_mean=true
+channel_dropout_use_mean: true         # if true, replace dropped channel with its mean

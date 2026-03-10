@@ -319,6 +319,10 @@ def random_rotation(
 
     device = image.device
     dtype = image.dtype
+    if labels.device != device:
+        labels = labels.to(device=device)
+    if masks is not None and masks.device != device:
+        masks = masks.to(device=device)
     channels, depth, height, width = image.shape
 
     # Sample angles in radians
@@ -365,6 +369,8 @@ def random_rotation(
     affine = torch.zeros(1, 3, 4, device=device, dtype=dtype)
     affine[0, :, :3] = rotation_inverse
     grid = F.affine_grid(affine, size=(1, channels, depth, height, width), align_corners=True)
+    if grid.device != device:
+        grid = grid.to(device=device)
     # padding only possible with constant 0, so subtract fill value before rotation and add after
     image = image - fill_value
     image_rot = F.grid_sample(
@@ -374,11 +380,12 @@ def random_rotation(
         padding_mode="zeros",
         align_corners=True,
     ).squeeze(0)
-    image_rot = image + fill_value
+    image_rot = image_rot + fill_value
 
     if masks is not None:
+        masks_input = masks.unsqueeze(0).to(device=device, dtype=grid.dtype)
         masks_rot = F.grid_sample(
-            masks.unsqueeze(0).float(),
+            masks_input,
             grid,
             mode="nearest",
             padding_mode="zeros",
@@ -669,8 +676,6 @@ def ensure_non_zero_box_extents(
 
 def random_channel_dropout(
     image: torch.Tensor,
-    labels: torch.Tensor,
-    masks: torch.Tensor | None,
     drop_probabilities: list[float] | tuple[float, ...],
     fill_value: float | None = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -678,15 +683,13 @@ def random_channel_dropout(
 
     Args:
         image: (C, D, H, W) tensor.
-        labels: (N, 7) unchanged.
-        masks: Optional (M, D, H, W) masks (unchanged).
         drop_probabilities: per-channel independent probabilities. Only one channel can be dropped;
             if multiple trigger, one is chosen proportionally to their probabilities.
         p: Global probability to attempt a dropout event at all.
         fill_value: Value to fill the dropped channel with. If None, use channel mean.
 
     Returns:
-        (image, labels, masks) with possibly one channel dropped.
+        image with possibly one channel dropped.
     """
     channels = image.shape[0]
     if len(drop_probabilities) != channels:
@@ -698,7 +701,7 @@ def random_channel_dropout(
     # Sample Bernoulli for each channel
     bern = torch.bernoulli(probs).bool()
     if not bern.any():
-        return image, labels, masks
+        return image
     # If multiple, choose one weighted by their probabilities
     candidate_indices = torch.nonzero(bern).flatten()
     if candidate_indices.numel() > 1:
@@ -714,7 +717,7 @@ def random_channel_dropout(
     else:
         replacement = torch.as_tensor(fill_value, dtype=image.dtype, device=image.device)
     image[chosen_idx] = replacement
-    return image, labels, masks
+    return image
 
 
 class GINNet(nn.Module):
@@ -784,8 +787,6 @@ class GINNet(nn.Module):
 
 def gin_augmentation(
     image: torch.Tensor,
-    labels: torch.Tensor,
-    masks: torch.Tensor | None,
     hidden_layers: int,
     hidden_channels: int,
     p_kernel_size_1: float = 0.5,
@@ -793,10 +794,9 @@ def gin_augmentation(
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
     """Applies GIN (Global Intensity Non-linear) augumentation to input image."""
     if random.random() >= p:
-        return image, labels, masks
+        return image
 
     gin_model = GINNet(hidden_layers, hidden_channels, p_kernel_size_1)
     with torch.no_grad():
-        augmented_image = gin_model.forward(image)
+        return gin_model.forward(image)
 
-    return augmented_image, labels, masks
