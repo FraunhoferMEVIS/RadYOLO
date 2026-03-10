@@ -91,7 +91,7 @@ datasets:
     resampling:
       imgsz: [64, 64, 64]
     normalization:
-      - type: zscore
+      type: zscore
     overrides:
       input_channels: 1
       num_classes: 2
