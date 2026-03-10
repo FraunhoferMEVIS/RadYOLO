@@ -361,12 +361,12 @@ class Trainer:
                     if num_iterations <= num_warmup_iterations:
                         warmup_iteration_range = [0, num_warmup_iterations]
                         accumulate = max(
-                            1,
+                            2,
                             int(
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [1, self.config.nbs / self.config.batch_size],
+                                    [2, self.config.nbs / self.config.batch_size],
                                 ).round()
                             ),
                         )
