@@ -80,6 +80,15 @@ class Validator:
         self.dice_sum = 0.0
         self.dice_count = 0
 
+    def _get_dice_average(self) -> float:
+        if self.dice_count <= 0:
+            return 0.0
+        dice_avg = float(self.dice_sum / self.dice_count)
+        if np.isfinite(dice_avg):
+            return dice_avg
+        LOGGER.warning("Encountered non-finite Dice aggregate during validation. Resetting Dice metric to 0.")
+        return 0.0
+
     def __call__(self, trainer: Trainer | None, ema: ModelEMA) -> dict[str, float]:
         """Execute validation process, run inference on dataloader and compute metrics."""
         model = cast("HardcodedModel", ema.ema)
@@ -419,6 +428,8 @@ class Validator:
                 proto_dhw,
                 mode="nearest-exact",
             )[0, 0]
+            if not gt_mask_downsampled.any():
+                continue
             # Reconstruct predicted mask logits from coefficients and prototypes
             coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(
                 device=prototypes.device, dtype=prototypes.dtype
@@ -426,9 +437,10 @@ class Validator:
             # prototypes shape: (n_proto, H, W, D) -> logits (H, W, D), match training loss
             pred_logits = torch.einsum("n,nhwd->hwd", coeff, prototypes)
             pred_prob = pred_logits.sigmoid()
-            pred_mask = pred_prob >= 0.5
-            if not gt_mask_downsampled.any():
+            if not torch.isfinite(pred_prob).all():
+                LOGGER.warning("Skipping Dice computation for one instance because reconstructed mask probabilites contain non-finite values.")
                 continue
+            pred_mask = pred_prob >= 0.5
             intersection = (pred_mask * gt_mask_downsampled).sum().item()
             denom = (pred_mask.sum() + gt_mask_downsampled.sum()).item()
             dice = (2.0 * intersection) / (denom + 1e-7)
@@ -531,13 +543,13 @@ class Validator:
         if stats and stats["tp"].any():
             self.metrics.process(**stats)
         # Add Dice metric
-        dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
+        dice_avg = self._get_dice_average()
         return {**self.metrics.results_dict, "metrics/dice(M)": dice_avg}
 
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
         LOGGER.info(self.get_desc())
-        dice_avg = float(self.dice_sum / self.dice_count) if self.dice_count > 0 else 0.0
+        dice_avg = self._get_dice_average()
         pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.keys) + 1)  # print format
         LOGGER.info(
             pf,
