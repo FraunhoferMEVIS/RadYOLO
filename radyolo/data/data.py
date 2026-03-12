@@ -303,15 +303,14 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                 if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
                     raise TypeError
                 mask_numpy = np.asanyarray(nifti_image.dataobj, dtype=np.uint8)
-                mask_tensor = torch.from_numpy(mask_numpy)
-                mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
             else:
                 with np.load(mask_npz_path) as mask_archive:
                     if "mask" not in mask_archive.files:
                         msg = f"Compressed mask archive missing 'mask' array: {mask_npz_path}"
                         raise KeyError(msg)
                     mask_numpy = np.array(mask_archive["mask"], dtype=np.uint8)
-                mask_tensor = torch.from_numpy(mask_numpy)
+            mask_tensor = torch.from_numpy(mask_numpy)
+            mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
             mask_tensor = mask_tensor.unsqueeze(0)
             if len(mask_tensor.shape) == 4:
                 mask_tensor = mask_tensor.unsqueeze(0)

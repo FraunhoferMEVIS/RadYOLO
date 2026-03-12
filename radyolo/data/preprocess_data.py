@@ -37,8 +37,7 @@ def _convert_nifti_to_numpy(
         raise TypeError(msg)
 
     image = np.asanyarray(nifti_image.dataobj, dtype=dtype)
-    transposed = np.transpose(image, axes=tuple(reversed(range(image.ndim))))
-    contiguous = np.ascontiguousarray(transposed)
+    contiguous = np.ascontiguousarray(image)
     np.save(out_path, contiguous, allow_pickle=False)
     return out_path
 
@@ -63,8 +62,7 @@ def _convert_case_to_numpy(
             msg = f"Unsupported NIfTI image type for case at {mask_path}"
             raise TypeError(msg)
         mask_data = np.asanyarray(nifti_mask.dataobj, dtype=np.uint8)
-        mask_transposed = np.transpose(mask_data, axes=tuple(reversed(range(mask_data.ndim))))
-        mask_array = np.ascontiguousarray(mask_transposed)
+        mask_array = np.ascontiguousarray(mask_data)
         mask_out_path = out_masks_dir / f"{case_id}.npz"
         np.savez_compressed(mask_out_path, mask=mask_array)
 
