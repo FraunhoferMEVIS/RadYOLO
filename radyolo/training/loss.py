@@ -52,10 +52,12 @@ class QualityFocalLoss(nn.Module):
 class DFLoss(nn.Module):
     """Criterion class for computing DFL losses during training."""
 
-    def __init__(self, reg_max: int = 16) -> None:
+    def __init__(self, reg_bins: int = 16, reg_min: float = 0.0) -> None:
         """Initialize the DFL module."""
         super().__init__()
-        self.reg_max = reg_max
+        self.reg_bins = reg_bins
+        self.reg_min = reg_min
+        self.reg_max = reg_min + reg_bins - 1
 
     def __call__(self, pred_dist: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Return sum of left and right DFL losses.
@@ -63,7 +65,7 @@ class DFLoss(nn.Module):
         Distribution Focal Loss (DFL) proposed in Generalized Focal Loss
         https://ieeexplore.ieee.org/document/9792391
         """
-        target = target.clamp_(0, self.reg_max - 1 - 0.01)
+        target = target.clamp_(self.reg_min, self.reg_max - 0.01) - self.reg_min
         tl = target.long()  # target left
         tr = tl + 1  # target right
         wl = tr - target  # weight left
@@ -86,10 +88,10 @@ class DiceLoss:
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses during training."""
 
-    def __init__(self, reg_max: int = 16) -> None:
+    def __init__(self, reg_bins: int = 16, reg_min: float = 0.0) -> None:
         """Initialize the BboxLoss module with regularization maximum and DFL settings."""
         super().__init__()
-        self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+        self.dfl_loss = DFLoss(reg_bins, reg_min=reg_min) if reg_bins > 1 else None
 
     def forward(
         self,
@@ -100,6 +102,8 @@ class BboxLoss(nn.Module):
         target_scores: torch.Tensor,
         target_scores_sum: torch.Tensor,
         fg_mask: torch.Tensor,
+        imgsz: torch.Tensor,
+        stride_tensor: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """IoU loss."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
@@ -108,16 +112,32 @@ class BboxLoss(nn.Module):
 
         # DFL loss
         if self.dfl_loss:
-            target_ltrb = bbox2dist(anchor_points, target_bboxes, self.dfl_loss.reg_max - 1)
+            target_ltrb = bbox2dist(
+                anchor_points,
+                target_bboxes,
+                self.dfl_loss.reg_max,
+                reg_min=self.dfl_loss.reg_min,
+            )
             loss_dfl = (
                 self.dfl_loss(
-                    pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]
+                    pred_dist[fg_mask].view(-1, self.dfl_loss.reg_bins), target_ltrb[fg_mask]
                 )
                 * weight
             )
             loss_dfl = loss_dfl.sum() / target_scores_sum
         else:
-            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+            target_ltrb = bbox2dist(anchor_points, target_bboxes)
+            scale = imgsz[[2, 1, 0, 2, 1, 0]].to(pred_dist.device, pred_dist.dtype)
+            target_ltrb = target_ltrb * stride_tensor.unsqueeze(0)
+            target_ltrb = target_ltrb / scale
+            pred_dist = pred_dist * stride_tensor.unsqueeze(0)
+            pred_dist = pred_dist / scale
+            loss_dfl = (
+                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none")
+                .mean(-1, keepdim=True)
+                * weight
+            )
+            loss_dfl = loss_dfl.sum() / target_scores_sum
 
         return loss_iou, loss_dfl
 
@@ -131,6 +151,7 @@ class v8DetectionLoss:  # noqa: N801
         box: float,
         cls: float,
         dfl: float,
+        dfl_reg_max: int,
         mask_gain: float,
         class_separate_gain: float,
         detect_layer: Detect,
@@ -159,11 +180,14 @@ class v8DetectionLoss:  # noqa: N801
         self.stride: torch.Tensor = m.stride  # model strides
         self.num_classes: int = m.nc  # number of classes
         self.separate_objectness_head: bool = separate_objectness_head
-        self.no: int = (m.nc + 1 if self.separate_objectness_head else m.nc) + m.reg_max * 6
-        self.reg_max: int = m.reg_max
+        self.reg_bins: int = m.dfl_bins
+        self.reg_min: float = m.dfl_min
+        self.reg_channels: int = m.reg_channels
+        self.no: int = (m.nc + 1 if self.separate_objectness_head else m.nc) + self.reg_channels
+        self.reg_max: int = dfl_reg_max
         self.device: torch.device = device
 
-        self.use_dfl: bool = m.reg_max > 1
+        self.use_dfl: bool = m.use_dfl
 
         self.assigner = TaskAlignedAssigner(
             topk=tal_topk,
@@ -173,8 +197,10 @@ class v8DetectionLoss:  # noqa: N801
             use_fallback_if_alignment_zero=tal_fallback,
             anchor_inclusion_distance=-2 if model.include_stride4_output else -4,
         )
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
-        self.proj: torch.Tensor = torch.arange(m.reg_max, dtype=torch.float, device=device)
+        self.bbox_loss = BboxLoss(self.reg_bins, reg_min=self.reg_min).to(device)
+        self.proj: torch.Tensor | None = None
+        if self.use_dfl:
+            self.proj = torch.arange(self.reg_bins, dtype=torch.float, device=device) + self.reg_min
         self.enable_mask_loss = enable_mask_loss
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
@@ -203,6 +229,8 @@ class v8DetectionLoss:  # noqa: N801
         """Decode predicted object bounding box coordinates from anchor points and distribution."""
         if self.use_dfl:
             b, a, c = pred_dist.shape  # batch, anchors, channels
+            if self.proj is None:
+                raise RuntimeError
             pred_dist = (
                 pred_dist.view(b, a, 6, c // 6).softmax(3).matmul(self.proj.type(pred_dist.dtype))
             )
@@ -224,12 +252,12 @@ class v8DetectionLoss:  # noqa: N801
         flat = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
         if self.separate_objectness_head:
             pred_distri, pred_cls_logits, pred_obj_logit = flat.split(
-                (self.reg_max * 6, self.num_classes, 1), 1
+                (self.reg_channels, self.num_classes, 1), 1
             )
             pred_class_logits = pred_cls_logits.permute(0, 2, 1).contiguous()  # (B, A, C) logits
             pred_objectness_logit = pred_obj_logit.permute(0, 2, 1).contiguous()  # (B, A, 1) logit
         else:
-            pred_distri, pred_class_logits = flat.split((self.reg_max * 6, self.num_classes), 1)
+            pred_distri, pred_class_logits = flat.split((self.reg_channels, self.num_classes), 1)
             pred_class_logits = pred_class_logits.permute(
                 0, 2, 1
             ).contiguous()  # (B, A, C) logits for BCE-with-logits
@@ -327,6 +355,8 @@ class v8DetectionLoss:  # noqa: N801
                 target_scores,
                 target_scores_sum,
                 fg_mask,
+                imgsz,
+                stride_tensor,
             )
 
             # Mask loss

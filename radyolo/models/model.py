@@ -32,6 +32,7 @@ class HardcodedModel(nn.Module):
         box: float,
         cls: float,
         dfl: float,
+        dfl_reg_max: int,
         mask_gain: float,
         class_separate_gain: float,
         device: torch.device,
@@ -245,7 +246,10 @@ class HardcodedModel(nn.Module):
         if self.include_stride4_output:
             detect_chs = [c_p2, *detect_chs]
         self.l23 = Detect(
-            num_classes, detect_chs, separate_objectness_head=self.separate_objectness_head
+            num_classes,
+            detect_chs,
+            dfl_reg_max=dfl_reg_max,
+            separate_objectness_head=self.separate_objectness_head,
         )
         s = 256
         self.l23.stride = torch.tensor(
@@ -259,6 +263,7 @@ class HardcodedModel(nn.Module):
             box,
             cls,
             dfl,
+            dfl_reg_max,
             mask_gain,
             class_separate_gain,
             self.l23,

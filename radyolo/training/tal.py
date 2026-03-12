@@ -256,11 +256,11 @@ class TaskAlignedAssigner(nn.Module):
             for b in range(batch_size):
                 for m in range(max_num_objects):
                     if zero_mask[b, m]:
-                        # Get indices of 10 closest anchors
-                        topk_vals, topk_idx = torch.topk(distances[b, m], k=10, largest=False)
+                        # Get indices of k closest anchors
+                        topk_vals, topk_idx = torch.topk(distances[b, m], k=8, largest=False)
 
                         # Assign alignment metric based on inverse distance scaling
-                        # Closest gets 0.1, farthest of the 10 gets proportionally less
+                        # Closest gets 0.1, futher anchors get proportionally less
                         norm_dist = (topk_vals - topk_vals.min()) / (
                             topk_vals.max() - topk_vals.min()
                         )
@@ -622,16 +622,24 @@ def dist2bbox(
     lt, rb = distance.chunk(2, dim)
     x1y1z1 = anchor_points - lt
     x2y2z2 = anchor_points + rb
+    x_min_y_min_z_min = torch.minimum(x1y1z1, x2y2z2)
+    x_max_y_max_z_max = torch.maximum(x1y1z1, x2y2z2)
     if xyzwhd:
-        c_xyz = (x1y1z1 + x2y2z2) / 2
-        whd = x2y2z2 - x1y1z1
+        c_xyz = (x_min_y_min_z_min + x_max_y_max_z_max) / 2
+        whd = x_max_y_max_z_max - x_min_y_min_z_min
         return torch.cat((c_xyz, whd), dim)  # xyzwhd bbox
-    return torch.cat((x1y1z1, x2y2z2), dim)  # xyzxyz bbox
+    return torch.cat((x_min_y_min_z_min, x_max_y_max_z_max), dim)  # xyzxyz bbox
 
 
-def bbox2dist(anchor_points: torch.Tensor, bbox: torch.Tensor, reg_max: float) -> torch.Tensor:
+def bbox2dist(
+    anchor_points: torch.Tensor,
+    bbox: torch.Tensor,
+    reg_max: float | None = None,
+    reg_min: float = 0.0,
+) -> torch.Tensor:
     """Transform bbox(xyzxyz) to dist(ltrb)."""
     x1y1z1, x2y2z2 = bbox.chunk(2, -1)
-    return torch.cat((anchor_points - x1y1z1, x2y2z2 - anchor_points), -1).clamp_(
-        0, reg_max - 0.01
-    )  # dist (lt, rb)
+    dist = torch.cat((anchor_points - x1y1z1, x2y2z2 - anchor_points), -1)
+    if reg_max is None:
+        return dist
+    return dist.clamp_(reg_min, reg_max - 0.01)  # dist (lt, rb)

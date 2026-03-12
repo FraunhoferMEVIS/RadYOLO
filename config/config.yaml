@@ -16,7 +16,7 @@ save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 # device: "cpu" # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
 workers: 4 # (int) number of worker threads for data loading
 project: "runs" # (str, optional) project name
-name: "gpu_augmentations" # (str, optional) experiment name, results saved to 'project/name' directory
+name: "default" # (str, optional) experiment name, results saved to 'project/name' directory
 exist_ok: True # (bool) whether to overwrite existing experiment
 optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
@@ -59,6 +59,7 @@ ema_tau: 2000.0 # (float) EMA ramp-up factor
 box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) cls loss gain (scale with pixels)
 dfl: 1.5 # (float) dfl loss gain
+dfl_reg_max: 16 # (int) DFL histogram size; use 1 for direct box edge regression without DFL
 mask_gain: 5 # (float) mask loss gain
 class_separate_gain: 0.5 # (float) class loss gain for separate softmax classification
 nbs: 64 # (int) nominal batch size

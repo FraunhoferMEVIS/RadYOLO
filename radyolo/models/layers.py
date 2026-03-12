@@ -123,10 +123,10 @@ class DFL(nn.Module):
     Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
     """
 
-    def __init__(self, in_channels: int = 16) -> None:
+    def __init__(self, in_channels: int = 16, min_value: float = 0.0) -> None:
         super().__init__()
         self.conv = nn.Conv2d(in_channels, 1, 1, bias=False).requires_grad_(False)
-        x = torch.arange(in_channels, dtype=torch.float)
+        x = torch.arange(in_channels, dtype=torch.float) + min_value
         self.conv.weight.data[:] = nn.Parameter(x.view(1, in_channels, 1, 1))
         self.in_channels = in_channels
 
@@ -444,26 +444,31 @@ class Detect(nn.Module):
         num_classes: int = 80,
         ch: Sequence[int] = (),
         *,
+        dfl_reg_max: int = 16,
         separate_objectness_head: bool = False,
     ) -> None:
         super().__init__()
         self.nc = num_classes  # number of classes
         self.nl = len(ch)  # number of detection layers
-        self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
+        self.reg_max = dfl_reg_max  # Number of non-negative DFL bins.
+        self.use_dfl = self.reg_max > 1
+        self.dfl_min = -1.0 if self.use_dfl else 0.0
+        self.dfl_bins = self.reg_max + int(abs(self.dfl_min)) if self.use_dfl else 1
+        self.reg_channels = self.dfl_bins * 6 if self.use_dfl else 6
         self.separate_objectness_head = separate_objectness_head
         self.no = (
             num_classes + 1 if self.separate_objectness_head else num_classes
-        ) + self.reg_max * 6  # number of outputs per anchor
+        ) + self.reg_channels  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = (
-            max((16, ch[0] // 4, self.reg_max * 6)),
+            max((16, ch[0] // 4, self.reg_channels)),
             max(ch[0], min(self.nc, 100)),
         )  # channels
         self.cv_boxes = nn.ModuleList(
             nn.Sequential(
                 Conv(x, c2, 3),
                 Conv(c2, c2, 3),
-                nn.Conv3d(c2, 6 * self.reg_max, 1),
+                nn.Conv3d(c2, self.reg_channels, 1),
             )
             for x in ch
         )
@@ -484,7 +489,7 @@ class Detect(nn.Module):
                 )
                 for x in ch
             )
-        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+        self.dfl = DFL(self.dfl_bins, min_value=self.dfl_min) if self.use_dfl else nn.Identity()
 
     def forward(
         self, pred_raw: list[torch.Tensor]
@@ -513,12 +518,12 @@ class Detect(nn.Module):
             self.shape = shape
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
         if self.separate_objectness_head:
-            box, cls, obj = x_cat.split((self.reg_max * 6, self.nc, 1), 1)
+            box, cls, obj = x_cat.split((self.reg_channels, self.nc, 1), 1)
             dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
             cls_prob = cls.softmax(1)
             obj_prob = obj.sigmoid()
             return (dbox, cls_prob, obj_prob)
-        box, cls = x_cat.split((self.reg_max * 6, self.nc), 1)
+        box, cls = x_cat.split((self.reg_channels, self.nc), 1)
         dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
         cls_prob = cls.sigmoid()
         return (dbox, cls_prob)
@@ -535,7 +540,7 @@ class Detect(nn.Module):
             box_bias = box_last.bias
             if box_bias is None:
                 raise ValueError
-            box_bias.data[:] = 1.0
+            box_bias.data[:] = 2.0
             if not self.separate_objectness_head:
                 if not isinstance(class_convolutions, nn.Sequential):
                     raise TypeError

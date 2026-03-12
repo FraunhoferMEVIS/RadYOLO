@@ -114,6 +114,7 @@ class DefaultConfig(BaseModel):
     box: float = 7.5  # box loss gain
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain
+    dfl_reg_max: int = Field(16, ge=1)  # use direct edge regression when set to 1
     mask_gain: float = 1.0  # mask loss gain
     class_separate_gain: float = 0.5  # class loss gain for separate softmax classification loss
     nbs: int = 64  # nominal batch size
