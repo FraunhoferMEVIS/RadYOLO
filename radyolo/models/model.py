@@ -43,7 +43,7 @@ class HardcodedModel(nn.Module):
         objectness_loss: Literal["bce", "focal"] = "bce",
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
-        tal_beta: float = 6.0,
+        tal_beta: float = 1.0,
         gamma: float = 2.0,
     ) -> None:
         super().__init__()

@@ -106,7 +106,7 @@ class DefaultConfig(BaseModel):
     objectness_loss: Literal["bce", "focal"] = "bce"  # loss function for objectness loss
     tal_topk: int = 10  # top-k anchors to keep per gt in task-aligned assigner
     tal_alpha: float = 0.5  # classification term exponent in task-aligned assigner
-    tal_beta: float = 6.0  # IoU term exponent in task-aligned assigner
+    tal_beta: float = 1.0  # IoU term exponent in task-aligned assigner
     gamma: float = 2.0  # quality focal loss gamma (used when objectness_loss="focal")
     grad_clip_max_norm: float = 10.0  # max norm for gradient clipping
     ema_decay: float = 0.9999  # exponential moving average decay

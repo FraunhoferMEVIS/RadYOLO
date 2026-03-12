@@ -51,7 +51,7 @@ warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 objectness_loss: "bce" # (literal) can be either "bce" (binary cross entropy) or "focal" (focal loss)
 tal_topk: 10 # (int) top-k anchors to keep per ground truth for task-aligned assignment
 tal_alpha: 0.5 # (float) cls score exponent in task-aligned assignment metric
-tal_beta: 6.0 # (float) IoU exponent in task-aligned assignment metric
+tal_beta: 1.0 # (float) IoU exponent in task-aligned assignment metric
 gamma: 2.0 # (float) quality focal loss gamma (used when objectness_loss="focal")
 grad_clip_max_norm: 10.0 # (float) max norm used for gradient clipping
 ema_decay: 0.9999 # (float) exponential moving average decay
