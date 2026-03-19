@@ -89,6 +89,16 @@ class DefaultConfig(BaseModel):
     max_det: int = 300  # maximum number of detections per image
     half: bool = False  # use half precision (FP16)
     plots: bool = True  # save plots and images during train/val
+    validation_plot_projection: Literal["max", "mean"] = (
+        "max"  # projection reduction used for validation case plots
+    )
+    validation_plot_image_mode: Literal["default", "channel_difference"] = (
+        "default"  # source image used for validation case plots
+    )
+    validation_plot_difference_channels: tuple[NonNegativeInt, NonNegativeInt] = (
+        2,
+        0,
+    )  # channels used for validation difference plots as (minuend, subtrahend)
 
     # Predict Settings
     source: DirectoryPath | None = None  # source directory for images or videos

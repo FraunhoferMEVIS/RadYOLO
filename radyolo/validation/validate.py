@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -16,7 +17,7 @@ from radyolo.validation.metrics import (
     DetMetrics,
     box_iou,
 )
-from radyolo.validation.plotting import output_to_target, plot_images
+from radyolo.validation.plotting import plot_validation_case
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -127,8 +128,7 @@ class Validator:
                 val_sample_folder = self.save_dir / "validation_samples"
                 if not val_sample_folder.exists():
                     val_sample_folder.mkdir()
-                self.plot_val_samples(batch, batch_i)
-                self.plot_predictions(batch, preds, batch_i)
+                self.plot_validation_cases(batch, preds)
 
         stats = self.get_stats()
         self.metrics.confusion_matrix = self.confusion_matrix
@@ -589,52 +589,43 @@ class Validator:
                     normalize=normalize,
                 )
 
-    def plot_val_samples(self, batch: Batch, ni: int) -> None:
-        """Plot validation image samples."""
-        plot_images(
-            project_nifti_images(batch["img"], -3),
-            batch["batch_idx"],
-            batch["cls"].squeeze(-1),
-            batch["bboxes"][:, [0, 1, 3, 4]],
-            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xy_labels.jpg"),
-            names=self.names,
-        )
-        plot_images(
-            project_nifti_images(batch["img"], dim=-2),
-            batch["batch_idx"],
-            batch["cls"].squeeze(-1),
-            batch["bboxes"][:, [0, 2, 3, 5]],
-            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xz_labels.jpg"),
-            names=self.names,
-        )
+    def plot_validation_cases(self, batch: Batch, preds: list[torch.Tensor]) -> None:
+        """Plot one 2x3 comparison figure per validation case."""
+        for sample_index, prediction in enumerate(preds):
+            sample_mask = batch["batch_idx"] == sample_index
+            sample_classes = batch["cls"][sample_mask].squeeze(-1)
+            sample_bboxes = batch["bboxes"][sample_mask]
+            if len(sample_bboxes):
+                image_shape = torch.tensor(
+                    batch["img"][sample_index].shape[1:],
+                    device=sample_bboxes.device,
+                    dtype=sample_bboxes.dtype,
+                )
+                scale = image_shape[[2, 1, 0, 2, 1, 0]]
+                reference_boxes = ops.xyzwhd2xyzxyz(sample_bboxes.clone()) * scale
+            else:
+                reference_boxes = sample_bboxes.new_empty((0, 6))
 
-    def plot_predictions(self, batch: Batch, preds: list[torch.Tensor], ni: int) -> None:
-        """Plot predictions samples."""
-        plot_images(
-            project_nifti_images(batch["img"], -3),
-            *output_to_target(preds, max_det=self.config.max_det, axis=2),
-            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xy_pred.jpg"),
-            names=self.names,
-        )
-        plot_images(
-            project_nifti_images(batch["img"], -2),
-            *output_to_target(preds, max_det=self.config.max_det, axis=1),
-            fname=str(self.save_dir / "validation_samples" / f"val_batch{ni}_xz_pred.jpg"),
-            names=self.names,
-        )
+            case_name = batch["case_names"][sample_index]
+            plot_validation_case(
+                image=batch["img"][sample_index],
+                reference_boxes=reference_boxes,
+                reference_classes=sample_classes,
+                predicted_boxes=prediction[:, :6],
+                predicted_classes=prediction[:, 7],
+                prediction_confs=prediction[:, 6],
+                fname=(
+                    self.save_dir
+                    / "validation_samples"
+                    / f"{self._sanitize_case_name(case_name)}.jpg"
+                ),
+                names=self.names,
+                case_name=case_name,
+                projection_mode=self.config.validation_plot_projection,
+                image_mode=self.config.validation_plot_image_mode,
+                difference_channels=self.config.validation_plot_difference_channels,
+            )
 
-
-def project_nifti_images(
-    image: torch.Tensor, dim: int, upper_quantile: float = 0.995
-) -> torch.Tensor:
-    if image.shape[1] > 1:
-        time_diff_img = (image[:, [1]] - image[:, [0]]).amax(dim)
-    else:
-        time_diff_img = image.amax(dim)
-    percentiles = (
-        time_diff_img.reshape((time_diff_img.shape[0], -1))
-        .to(torch.float)
-        .quantile(upper_quantile, 1, keepdim=True)
-        .to(time_diff_img.dtype)
-    )
-    return time_diff_img.div(percentiles[..., None, None]).clamp(0, 1)
+    @staticmethod
+    def _sanitize_case_name(case_name: str) -> str:
+        return re.sub(r"[^A-Za-z0-9._-]", "_", case_name)

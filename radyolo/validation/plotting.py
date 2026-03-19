@@ -14,6 +14,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import torch
+from matplotlib.patches import Rectangle
 from PIL import Image, ImageDraw, ImageFont
 
 from radyolo.utils import ops
@@ -522,6 +523,194 @@ def plot_images(
         return np.asarray(annotator.image)
     annotator.image.save(fname)
     return None
+
+
+def _get_case_base_volume(image: torch.Tensor | npt.NDArray[np.float32]) -> torch.Tensor:
+    return _get_case_plot_volume(image, image_mode="default")
+
+
+def _get_case_plot_volume(
+    image: torch.Tensor | npt.NDArray[np.float32],
+    image_mode: Literal["default", "channel_difference"] = "default",
+    difference_channels: tuple[int, int] = (2, 0),
+) -> torch.Tensor:
+    image_tensor = torch.as_tensor(image, dtype=torch.float32)
+    if image_tensor.ndim != 4:
+        msg = f"Expected case image with shape (C, D, H, W), got {tuple(image_tensor.shape)}"
+        raise ValueError(msg)
+    if image_mode == "channel_difference":
+        minuend_channel, subtrahend_channel = difference_channels
+        if max(minuend_channel, subtrahend_channel) >= image_tensor.shape[0]:
+            LOGGER.warning(
+                "Validation plot difference channels %s requested, but only %d channel(s) are "
+                "available. Falling back to the default plot image.",
+                difference_channels,
+                image_tensor.shape[0],
+            )
+        else:
+            return image_tensor[minuend_channel] - image_tensor[subtrahend_channel]
+    if image_tensor.shape[0] > 1:
+        return image_tensor[1] - image_tensor[0]
+    return image_tensor[0]
+
+
+def _project_case_volume(
+    image: torch.Tensor | npt.NDArray[np.float32],
+    plane: Literal["xy", "xz", "yz"],
+    projection_mode: Literal["max", "mean"],
+    image_mode: Literal["default", "channel_difference"] = "default",
+    difference_channels: tuple[int, int] = (2, 0),
+    upper_quantile: float = 0.995,
+) -> npt.NDArray[np.float32]:
+    volume = _get_case_plot_volume(
+        image,
+        image_mode=image_mode,
+        difference_channels=difference_channels,
+    )
+    axis = {"xy": 0, "xz": 1, "yz": 2}[plane]
+    projection = volume.amax(dim=axis) if projection_mode == "max" else volume.mean(dim=axis)
+    projection = projection.to(torch.float32)
+    finite_values = projection[torch.isfinite(projection)]
+    if finite_values.numel() == 0:
+        return torch.zeros_like(projection).cpu().numpy()
+
+    scale = torch.quantile(finite_values, upper_quantile)
+    if not torch.isfinite(scale) or scale <= 0:
+        scale = finite_values.max()
+    if not torch.isfinite(scale) or scale <= 0:
+        scale = torch.tensor(1.0, device=projection.device)
+
+    return projection.div(scale).clamp(0, 1).cpu().numpy()
+
+
+def _project_boxes_for_plane(
+    boxes_xyzxyz: torch.Tensor | npt.NDArray[np.float32],
+    plane: Literal["xy", "xz", "yz"],
+) -> npt.NDArray[np.float32]:
+    if isinstance(boxes_xyzxyz, torch.Tensor):
+        if boxes_xyzxyz.numel() == 0:
+            return np.zeros((0, 4), dtype=np.float32)
+        boxes = boxes_xyzxyz.detach().to(torch.float32).cpu().numpy()
+    else:
+        boxes = np.asarray(boxes_xyzxyz, dtype=np.float32)
+        if boxes.size == 0:
+            return np.zeros((0, 4), dtype=np.float32)
+    indices = {"xy": (0, 1, 3, 4), "xz": (0, 2, 3, 5), "yz": (1, 2, 4, 5)}[plane]
+    return boxes[:, indices]
+
+
+def _annotate_projected_boxes(
+    axis: plt.Axes,
+    boxes_xyzxyz: torch.Tensor | npt.NDArray[np.float32],
+    classes: torch.Tensor | npt.NDArray[np.float32],
+    plane: Literal["xy", "xz", "yz"],
+    names: dict[int, str] | None,
+    confs: torch.Tensor | npt.NDArray[np.float32] | None = None,
+    conf_thres: float = 0.1,
+) -> None:
+    boxes_2d = _project_boxes_for_plane(boxes_xyzxyz, plane)
+    if isinstance(classes, torch.Tensor):
+        classes_np = classes.detach().to(torch.int64).cpu().numpy()
+    else:
+        classes_np = np.asarray(classes, dtype=np.int64)
+    if confs is None:
+        confs_np = None
+    elif isinstance(confs, torch.Tensor):
+        confs_np = confs.detach().to(torch.float32).cpu().numpy()
+    else:
+        confs_np = np.asarray(confs, dtype=np.float32)
+
+    for index, box in enumerate(boxes_2d):
+        if confs_np is not None and confs_np[index] <= conf_thres:
+            continue
+        class_index = int(classes_np[index])
+        color = np.array(colors(class_index), dtype=np.float32) / 255.0
+        label = names.get(class_index, str(class_index)) if names else str(class_index)
+        if confs_np is not None:
+            label = f"{label} {confs_np[index]:.2f}"
+        x1, y1, x2, y2 = box.tolist()
+        axis.add_patch(
+            Rectangle(
+                (x1, y1),
+                max(x2 - x1, 1.0),
+                max(y2 - y1, 1.0),
+                fill=False,
+                edgecolor=color,
+                linewidth=1.5,
+            )
+        )
+        axis.text(
+            x1,
+            max(y1 - 2.0, 0.0),
+            label,
+            color="white",
+            fontsize=8,
+            va="bottom",
+            bbox={"facecolor": color, "edgecolor": "none", "pad": 1.5},
+        )
+
+
+def plot_validation_case(
+    image: torch.Tensor | npt.NDArray[np.float32],
+    reference_boxes: torch.Tensor | npt.NDArray[np.float32],
+    reference_classes: torch.Tensor | npt.NDArray[np.float32],
+    predicted_boxes: torch.Tensor | npt.NDArray[np.float32],
+    predicted_classes: torch.Tensor | npt.NDArray[np.float32],
+    fname: str | Path,
+    names: dict[int, str] | None = None,
+    case_name: str | None = None,
+    prediction_confs: torch.Tensor | npt.NDArray[np.float32] | None = None,
+    projection_mode: Literal["max", "mean"] = "max",
+    image_mode: Literal["default", "channel_difference"] = "default",
+    difference_channels: tuple[int, int] = (2, 0),
+    conf_thres: float = 0.1,
+) -> None:
+    figure, axes = plt.subplots(2, 3, figsize=(15, 9), tight_layout=True)
+    plane_titles = ("xy", "xz", "yz")
+
+    for row_index, (row_title, boxes, classes, confs) in enumerate(
+        (
+            ("Reference", reference_boxes, reference_classes, None),
+            ("Prediction", predicted_boxes, predicted_classes, prediction_confs),
+        )
+    ):
+        for col_index, plane in enumerate(plane_titles):
+            axis = axes[row_index, col_index]
+            axis.imshow(
+                _project_case_volume(
+                    image,
+                    plane,
+                    projection_mode,
+                    image_mode=image_mode,
+                    difference_channels=difference_channels,
+                ),
+                cmap="gray",
+                interpolation="lanczos",
+                resample=True,
+            )
+            _annotate_projected_boxes(
+                axis,
+                boxes,
+                classes,
+                plane,
+                names,
+                confs=confs,
+                conf_thres=conf_thres,
+            )
+            axis.set_title(f"{row_title} {plane.upper()}")
+            axis.set_xticks([])
+            axis.set_yticks([])
+
+    if case_name:
+        image_mode_suffix = ""
+        if image_mode == "channel_difference":
+            image_mode_suffix = f", ch{difference_channels[0]}-ch{difference_channels[1]}"
+        elif image_mode != "default":
+            image_mode_suffix = f", {image_mode}"
+        figure.suptitle(f"{case_name} ({projection_mode} projection{image_mode_suffix})")
+        figure.tight_layout(rect=(0, 0, 1, 0.96))
+    figure.savefig(fname, dpi=120, bbox_inches="tight")
+    plt.close(figure)
 
 
 def plot_results(
