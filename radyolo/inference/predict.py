@@ -181,9 +181,8 @@ def _reconstruct_and_save_mask(
     nm = det.shape[0] - 8
     if nm <= 0:
         return None
-    coeff = det[8 : 8 + nm].to(dtype=proto.dtype, device=proto.device)
-    mask_logits = torch.einsum("n,nhwd->hwd", coeff, proto)
-    mask_prob = mask_logits.sigmoid()
+    coeff = det[8 : 8 + nm].to(device=proto.device)
+    mask_prob = ops.reconstruct_mask_probabilities(coeff, proto)
     mask_prob_r = mask_prob.permute(2, 0, 1).unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
     mask_up = F.interpolate(
         mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
@@ -281,7 +280,12 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
                     img_resized_normalized.unsqueeze(0).to(device)
                 )
             detections, proto_masks = _postprocess_single(
-                pred_class_box, pred_mask_coeff, pred_prototype_masks, train_config, prediction_cfg, len(names)
+                pred_class_box,
+                pred_mask_coeff,
+                pred_prototype_masks,
+                train_config,
+                prediction_cfg,
+                len(names),
             )
             image_results: list[dict[str, object]] = []
             if detections.numel():

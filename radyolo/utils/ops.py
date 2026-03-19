@@ -14,6 +14,21 @@ from radyolo.validation.metrics import bbox_iou
 LOGGER = logging.getLogger(__name__)
 
 
+def reconstruct_mask_probabilities(
+    coefficients: torch.Tensor, prototypes: torch.Tensor
+) -> torch.Tensor:
+    """Reconstruct segmentation mask probabilities in float32.
+
+    Mixed precision is useful for the detector forward pass, but mask reconstruction is sensitive
+    to reduced precision because the einsum can accumulate large positive or negative values before
+    the sigmoid. Force this path to float32 to keep validation Dice and exported masks stable.
+    """
+    coefficients_float = coefficients.to(device=prototypes.device, dtype=torch.float32)
+    prototypes_float = prototypes.to(dtype=torch.float32)
+    mask_logits = torch.einsum("...n,nhwd->...hwd", coefficients_float, prototypes_float)
+    return mask_logits.sigmoid()
+
+
 def scale_boxes(
     img1_shape: tuple[int, ...],
     boxes: torch.Tensor,

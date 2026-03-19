@@ -196,7 +196,11 @@ class Validator:
 
         return batch
 
-    def postprocess(self, prediction, mask_coefficients) -> list[torch.Tensor]:
+    def postprocess(
+        self,
+        prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
+        mask_coefficients: torch.Tensor | None,
+    ) -> list[torch.Tensor]:
         """Apply Non-maximum suppression to prediction outputs and handle mask coefficients."""
         # Unpack detection outputs (inference_out, loss_out)
         if isinstance(prediction, (list, tuple)):
@@ -424,7 +428,7 @@ class Validator:
             if gt_mask is None:
                 continue
             gt_mask_downsampled = F.interpolate(
-                gt_mask[None, None, :].to(device=prototypes.device, dtype=prototypes.dtype),
+                gt_mask[None, None, :].to(device=prototypes.device, dtype=torch.float32),
                 proto_dhw,
                 mode="nearest-exact",
             )[0, 0]
@@ -432,13 +436,14 @@ class Validator:
                 continue
             # Reconstruct predicted mask logits from coefficients and prototypes
             coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(
-                device=prototypes.device, dtype=prototypes.dtype
+                device=prototypes.device
             )
-            # prototypes shape: (n_proto, H, W, D) -> logits (H, W, D), match training loss
-            pred_logits = torch.einsum("n,nhwd->hwd", coeff, prototypes)
-            pred_prob = pred_logits.sigmoid()
+            pred_prob = ops.reconstruct_mask_probabilities(coeff, prototypes)
             if not torch.isfinite(pred_prob).all():
-                LOGGER.warning("Skipping Dice computation for one instance because reconstructed mask probabilites contain non-finite values.")
+                LOGGER.warning(
+                    "Skipping Dice computation for one instance because reconstructed "
+                    "mask probabilites contain non-finite values."
+                )
                 continue
             pred_mask = pred_prob >= 0.5
             intersection = (pred_mask * gt_mask_downsampled).sum().item()
