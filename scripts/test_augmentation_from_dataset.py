@@ -131,6 +131,7 @@ def _build_dataset(
         fold=args.fold if args.fold is not None else cfg.fold,
         group="train",
         normalization=cfg.normalization,
+        load_masks=cfg.segmentation_output,
         config=cfg,
     )
 

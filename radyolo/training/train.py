@@ -607,6 +607,7 @@ class Trainer:
             ),
             pad=0.0 if mode == "train" else 0.5,
             normalization=self.config.normalization,
+            load_masks=self.config.segmentation_output,
             config=self.config,
         )
         shuffle = mode == "train"
