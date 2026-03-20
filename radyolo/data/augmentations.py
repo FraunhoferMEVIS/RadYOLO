@@ -423,7 +423,7 @@ def random_rotation(
     corners = base + corner_bits.unsqueeze(0) * extents  # broadcast
 
     # Center, rotate, uncenter
-    corners_centered = corners.clone()
+    corners_centered = corners.clone().to(dtype=dtype, device=device)
     corners_centered[..., 0] -= cx
     corners_centered[..., 1] -= cy
     corners_centered[..., 2] -= cz
