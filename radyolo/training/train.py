@@ -25,7 +25,7 @@ from radyolo.config.config import (
 )
 from radyolo.data.data import (
     NIfTIDatasetWithMasks,
-    apply_configured_spatial_augmentations_to_batch,
+    apply_configured_augmentations_to_batch,
     build_dataloader,
 )
 from radyolo.models.model import HardcodedModel
@@ -355,8 +355,8 @@ class Trainer:
                 else nullcontext()
             ):
                 for i, batch in pbar:
-                    run_gpu_spatial_augs = (
-                        self.config.augment and self.config.uses_gpu_spatial_augmentations()
+                    run_gpu_augmentations = (
+                        self.config.augment and self.config.uses_gpu_augmentations()
                     )
                     # Warmup
                     num_iterations = i + num_batches * self.epoch
@@ -404,14 +404,14 @@ class Trainer:
                                 for masks in batch["masks"]
                             )
 
-                        if run_gpu_spatial_augs:
+                        if run_gpu_augmentations:
                             batch["cls"] = batch["cls"].to(self.device, non_blocking=True)
                             batch["bboxes"] = batch["bboxes"].to(self.device, non_blocking=True)
                             batch["batch_idx"] = batch["batch_idx"].to(
                                 self.device,
                                 non_blocking=True,
                             )
-                            apply_configured_spatial_augmentations_to_batch(
+                            apply_configured_augmentations_to_batch(
                                 batch,
                                 self.config,
                                 tuple(self.config.imgsz),

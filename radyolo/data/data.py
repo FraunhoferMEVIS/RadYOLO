@@ -32,6 +32,122 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def _has_intensity_augmentations_on_device(
+    config: DefaultConfig,
+    placement: Literal["cpu", "gpu"],
+) -> bool:
+    return any(
+        augmentation_device == placement
+        for augmentation_device in (
+            config.intensity_noise_augmentation_device,
+            config.intensity_blur_augmentation_device,
+            config.intensity_mult_brightness_augmentation_device,
+            config.intensity_add_brightness_augmentation_device,
+            config.intensity_contrast_augmentation_device,
+            config.intensity_lowres_augmentation_device,
+            config.intensity_gamma_augmentation_device,
+        )
+    )
+
+
+def _apply_configured_image_augmentations(
+    image: torch.Tensor,
+    config: DefaultConfig,
+    placement: Literal["cpu", "gpu"],
+) -> torch.Tensor:
+    if config.do_batchgenerators_intensity_augmentation and _has_intensity_augmentations_on_device(
+        config,
+        placement,
+    ):
+        image = batch_generators_intensity_augmentations(
+            image,
+            config.do_intensity_augmentations_per_channel,
+            noise_prob=config.intensity_noise_prob,
+            noise_variance=config.intensity_noise_variance,
+            noise_augmentation_device=config.intensity_noise_augmentation_device,
+            blur_prob=config.intensity_blur_prob,
+            blur_sigma=config.intensity_blur_sigma,
+            blur_augmentation_device=config.intensity_blur_augmentation_device,
+            mult_brightness_prob=config.intensity_mult_brightness_prob,
+            mult_brightness_range=config.intensity_mult_brightness_range,
+            mult_brightness_augmentation_device=config.intensity_mult_brightness_augmentation_device,
+            add_brightness_prob=config.intensity_add_brightness_prob,
+            add_brightness_mu=config.intensity_add_brightness_mu,
+            add_brightness_sigma=config.intensity_add_brightness_sigma,
+            add_brightness_augmentation_device=config.intensity_add_brightness_augmentation_device,
+            contrast_prob=config.intensity_contrast_prob,
+            contrast_range=config.intensity_contrast_range,
+            contrast_augmentation_device=config.intensity_contrast_augmentation_device,
+            lowres_prob=config.intensity_lowres_prob,
+            lowres_scale=config.intensity_lowres_scale,
+            lowres_augmentation_device=config.intensity_lowres_augmentation_device,
+            gamma_prob=config.intensity_gamma_prob,
+            gamma_range=config.intensity_gamma_range,
+            gamma_p_invert=config.intensity_gamma_p_invert,
+            gamma_p_retain_stats=config.intensity_gamma_p_retain_stats,
+            gamma_augmentation_device=config.intensity_gamma_augmentation_device,
+            placement=placement,
+        )
+
+    if config.gin_augmentation_device == placement:
+        image = gin_augmentation(
+            image,
+            config.gin_layers,
+            config.gin_channels,
+            config.gin_prob_kernel_size_one,
+            config.gin_prob,
+        )
+
+    if config.channel_dropout_augmentation_device == placement:
+        image = random_channel_dropout(
+            image,
+            drop_probabilities=config.channel_dropout_probabilities,
+            fill_value=None
+            if config.channel_dropout_use_mean
+            else config.channel_dropout_fill_value,
+        )
+
+    return image
+
+
+def _has_spatial_augmentations_on_device(
+    config: DefaultConfig,
+    placement: Literal["cpu", "gpu"],
+) -> bool:
+    return any(
+        augmentation_device == placement
+        for augmentation_device in (
+            config.zoom_augmentation_device,
+            config.rotation_augmentation_device,
+            config.cutout_augmentation_device,
+            config.mirroring_augmentation_device,
+        )
+    )
+
+
+def _apply_configured_augmentations_to_sample(
+    image: torch.Tensor,
+    classes: torch.Tensor,
+    bboxes: torch.Tensor,
+    masks: torch.Tensor | None,
+    config: DefaultConfig,
+    imgsz: tuple[int, int, int],
+    placement: Literal["cpu", "gpu"],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    if _has_spatial_augmentations_on_device(config, placement):
+        image, classes, bboxes, masks = _apply_configured_spatial_augmentations_to_sample(
+            image,
+            classes,
+            bboxes,
+            masks,
+            config,
+            imgsz,
+            placement,
+        )
+    image = _apply_configured_image_augmentations(image, config, placement)
+    return image, classes, bboxes, masks
+
+
 def _apply_configured_spatial_augmentations_to_sample(
     image: torch.Tensor,
     classes: torch.Tensor,
@@ -108,7 +224,7 @@ def _apply_configured_spatial_augmentations_to_sample(
     return image, labels[:, 0:1], labels[:, 1:], masks
 
 
-def apply_configured_spatial_augmentations_to_batch(
+def apply_configured_augmentations_to_batch(
     batch: Batch,
     config: DefaultConfig,
     imgsz: tuple[int, int, int],
@@ -127,16 +243,14 @@ def apply_configured_spatial_augmentations_to_batch(
         sample_bboxes = batch["bboxes"][sample_mask]
         sample_masks = batch["masks"][sample_idx]
 
-        image_aug, classes_aug, bboxes_aug, masks_aug = (
-            _apply_configured_spatial_augmentations_to_sample(
-                images[sample_idx],
-                sample_classes,
-                sample_bboxes,
-                sample_masks,
-                config,
-                imgsz,
-                placement,
-            )
+        image_aug, classes_aug, bboxes_aug, masks_aug = _apply_configured_augmentations_to_sample(
+            images[sample_idx],
+            sample_classes,
+            sample_bboxes,
+            sample_masks,
+            config,
+            imgsz,
+            placement,
         )
         image_aug = image_aug.to(device=batch_device)
         classes_aug = classes_aug.to(device=batch_device)
@@ -169,6 +283,15 @@ def apply_configured_spatial_augmentations_to_batch(
         batch["bboxes"] = batch["bboxes"].new_empty((0, 6))
         batch["batch_idx"] = batch["batch_idx"].new_empty((0,), dtype=batch["batch_idx"].dtype)
     return batch
+
+
+def apply_configured_spatial_augmentations_to_batch(
+    batch: Batch,
+    config: DefaultConfig,
+    imgsz: tuple[int, int, int],
+    placement: Literal["cpu", "gpu"],
+) -> Batch:
+    return apply_configured_augmentations_to_batch(batch, config, imgsz, placement)
 
 
 class Sample(TypedDict):
@@ -263,46 +386,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             sample["masks"],
         )
 
-        if self.config.do_batchgenerators_intensity_augmentation:
-            image = batch_generators_intensity_augmentations(
-                image,
-                self.config.do_intensity_augmentations_per_channel,
-                noise_prob=self.config.intensity_noise_prob,
-                noise_variance=self.config.intensity_noise_variance,
-                blur_prob=self.config.intensity_blur_prob,
-                blur_sigma=self.config.intensity_blur_sigma,
-                mult_brightness_prob=self.config.intensity_mult_brightness_prob,
-                mult_brightness_range=self.config.intensity_mult_brightness_range,
-                add_brightness_prob=self.config.intensity_add_brightness_prob,
-                add_brightness_mu=self.config.intensity_add_brightness_mu,
-                add_brightness_sigma=self.config.intensity_add_brightness_sigma,
-                contrast_prob=self.config.intensity_contrast_prob,
-                contrast_range=self.config.intensity_contrast_range,
-                lowres_prob=self.config.intensity_lowres_prob,
-                lowres_scale=self.config.intensity_lowres_scale,
-                gamma_prob=self.config.intensity_gamma_prob,
-                gamma_range=self.config.intensity_gamma_range,
-                gamma_p_invert=self.config.intensity_gamma_p_invert,
-                gamma_p_retain_stats=self.config.intensity_gamma_p_retain_stats,
-            )
-
-        image = gin_augmentation(
-            image,
-            self.config.gin_layers,
-            self.config.gin_channels,
-            self.config.gin_prob_kernel_size_one,
-            self.config.gin_prob,
-        )
-
-        image = random_channel_dropout(
-            image,
-            drop_probabilities=self.config.channel_dropout_probabilities,
-            fill_value=None
-            if self.config.channel_dropout_use_mean
-            else self.config.channel_dropout_fill_value,
-        )
-
-        image, classes, bboxes, masks = _apply_configured_spatial_augmentations_to_sample(
+        image, classes, bboxes, masks = _apply_configured_augmentations_to_sample(
             image,
             classes,
             bboxes,
