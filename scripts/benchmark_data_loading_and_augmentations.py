@@ -15,15 +15,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 
-from radyolo.data.augmentations import (
-    GINNet,
-    batch_generators_intensity_augmentations,
-    random_channel_dropout,
-    random_mirroring,
-    random_rotation,
-    random_zoom,
-    tensor_cutout,
-)
+from radyolo.config.config import DefaultConfig
+from radyolo.data.data import _apply_configured_augmentations_to_sample
 from radyolo.data.normalization import normalize_image
 
 if TYPE_CHECKING:
@@ -53,12 +46,7 @@ DEFAULT_AUGMENTATIONS = (
     "random_mirroring",
 )
 
-UNSUPPORTED_AUGMENTATIONS_BY_DEVICE: dict[str, dict[str, str]] = {
-    "cuda": {
-        "gaussian_noise": "batchgenerators Gaussian noise mixes CPU and CUDA tensors",
-        "gaussian_blur": "batchgenerators Gaussian blur keeps convolution weights on CPU",
-    }
-}
+UNSUPPORTED_AUGMENTATIONS_BY_DEVICE: dict[str, dict[str, str]] = {}
 
 
 @dataclass
@@ -267,7 +255,7 @@ def build_dummy_volume(
     return base
 
 
-def build_dummy_labels(size: int) -> tuple[torch.Tensor, torch.Tensor]:
+def build_dummy_labels() -> tuple[torch.Tensor, torch.Tensor]:
     labels_norm_xyzwhd = torch.tensor(
         [
             [0.0, 0.25, 0.25, 0.25, 0.18, 0.16, 0.14],
@@ -276,12 +264,7 @@ def build_dummy_labels(size: int) -> tuple[torch.Tensor, torch.Tensor]:
         ],
         dtype=torch.float32,
     )
-    centers = labels_norm_xyzwhd[:, 1:4] * size
-    extents = labels_norm_xyzwhd[:, 4:7] * size
-    starts = centers - extents / 2.0
-    ends = centers + extents / 2.0
-    labels_abs_xyzxyz = torch.cat((labels_norm_xyzwhd[:, :1], starts, ends), dim=1)
-    return labels_norm_xyzwhd, labels_abs_xyzxyz
+    return labels_norm_xyzwhd[:, :1].clone(), labels_norm_xyzwhd[:, 1:].clone()
 
 
 def write_dummy_npy(path: Path, volume: np.ndarray) -> None:
@@ -359,62 +342,157 @@ def benchmark_stage(
     )
 
 
-def make_intensity_operation(
+def get_augmentation_placement(device: torch.device) -> str:
+    return "gpu" if device.type == "cuda" else "cpu"
+
+
+def get_inactive_placement(placement: str) -> str:
+    return "gpu" if placement == "cpu" else "cpu"
+
+
+def build_augmentation_config(
+    augmentation: str,
+    size: int,
+    channels: int,
+    placement: str,
+) -> DefaultConfig:
+    inactive_placement = get_inactive_placement(placement)
+    base_config: dict[str, Any] = {
+        "input_channels": channels,
+        "num_classes": 3,
+        "model_scale": "n",
+        "data": Path("."),
+        "fold": 0,
+        "batch_size": 1,
+        "imgsz": [size, size, size],
+        "name": f"benchmark_{augmentation}",
+        "normalization": {"type": "none"},
+        "augment": True,
+        "do_batchgenerators_intensity_augmentation": False,
+        "intensity_noise_prob": 0.0,
+        "intensity_noise_augmentation_device": inactive_placement,
+        "intensity_blur_prob": 0.0,
+        "intensity_blur_augmentation_device": inactive_placement,
+        "intensity_mult_brightness_prob": 0.0,
+        "intensity_mult_brightness_augmentation_device": inactive_placement,
+        "intensity_add_brightness_prob": 0.0,
+        "intensity_add_brightness_augmentation_device": inactive_placement,
+        "intensity_contrast_prob": 0.0,
+        "intensity_contrast_augmentation_device": inactive_placement,
+        "intensity_lowres_prob": 0.0,
+        "intensity_lowres_augmentation_device": inactive_placement,
+        "intensity_gamma_prob": 0.0,
+        "intensity_gamma_augmentation_device": inactive_placement,
+        "gin_prob": 0.0,
+        "gin_augmentation_device": inactive_placement,
+        "channel_dropout_probabilities": tuple(0.0 for _ in range(channels)),
+        "channel_dropout_augmentation_device": inactive_placement,
+        "prob_zoom": 0.0,
+        "zoom_augmentation_device": inactive_placement,
+        "prob_rotation": 0.0,
+        "rotation_augmentation_device": inactive_placement,
+        "prob_cutout": 0.0,
+        "cutout_augmentation_device": inactive_placement,
+        "prob_mirroring": 0.0,
+        "mirroring_augmentation_device": inactive_placement,
+    }
+
+    augmentation_overrides: dict[str, dict[str, Any]] = {
+        "gaussian_noise": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_noise_prob": 1.0,
+            "intensity_noise_augmentation_device": placement,
+        },
+        "gaussian_blur": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_blur_prob": 1.0,
+            "intensity_blur_augmentation_device": placement,
+        },
+        "multiplicative_brightness": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_mult_brightness_prob": 1.0,
+            "intensity_mult_brightness_augmentation_device": placement,
+        },
+        "additive_brightness": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_add_brightness_prob": 1.0,
+            "intensity_add_brightness_augmentation_device": placement,
+        },
+        "contrast": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_contrast_prob": 1.0,
+            "intensity_contrast_augmentation_device": placement,
+        },
+        "low_resolution": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_lowres_prob": 1.0,
+            "intensity_lowres_augmentation_device": placement,
+        },
+        "gamma": {
+            "do_batchgenerators_intensity_augmentation": True,
+            "intensity_gamma_prob": 1.0,
+            "intensity_gamma_augmentation_device": placement,
+        },
+        "gin": {
+            "gin_prob": 1.0,
+            "gin_augmentation_device": placement,
+        },
+        "channel_dropout": {
+            "channel_dropout_probabilities": tuple(1.0 for _ in range(channels)),
+            "channel_dropout_augmentation_device": placement,
+        },
+        "random_zoom_uniform": {
+            "prob_zoom": 1.0,
+            "zoom_uniform": True,
+            "zoom_augmentation_device": placement,
+        },
+        "random_zoom_anisotropic": {
+            "prob_zoom": 1.0,
+            "zoom_uniform": False,
+            "zoom_augmentation_device": placement,
+        },
+        "random_rotation": {
+            "prob_rotation": 1.0,
+            "rotation_augmentation_device": placement,
+        },
+        "tensor_cutout": {
+            "prob_cutout": 1.0,
+            "cutout_augmentation_device": placement,
+        },
+        "random_mirroring": {
+            "prob_mirroring": 1.0,
+            "mirroring_augmentation_device": placement,
+        },
+    }
+
+    if augmentation not in augmentation_overrides:
+        msg = f"Unsupported configured augmentation benchmark: {augmentation}"
+        raise KeyError(msg)
+
+    base_config.update(augmentation_overrides[augmentation])
+    return DefaultConfig(**base_config)
+
+
+def make_configured_augmentation_operation(
     volume: torch.Tensor,
-    **kwargs: float | bool | tuple[float, float],
-) -> Callable[[], torch.Tensor]:
-    def operation() -> torch.Tensor:
+    classes: torch.Tensor,
+    bboxes: torch.Tensor,
+    config: DefaultConfig,
+    placement: str,
+) -> Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]]:
+    imgsz = tuple(volume.shape[1:])
+
+    def operation() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         with torch.inference_mode():
-            return batch_generators_intensity_augmentations(
+            return _apply_configured_augmentations_to_sample(
                 volume.clone(),
-                **kwargs,
+                classes.clone(),
+                bboxes.clone(),
+                masks=None,
+                config=config,
+                imgsz=imgsz,
+                placement=placement,
             )
-
-    return operation
-
-
-def make_gin_operation(
-    volume: torch.Tensor,
-    device: torch.device,
-    rng: np.random.Generator,
-    hidden_layers: int = 4,
-    hidden_channels: int = 2,
-    p_kernel_size_1: float = 0.8,
-) -> Callable[[], torch.Tensor]:
-    def operation() -> torch.Tensor:
-        with torch.inference_mode():
-            gin_model = GINNet(
-                hidden_layers,
-                hidden_channels,
-                p_kernel_size_1,
-            ).to(device=device, dtype=volume.dtype)
-            for layer in gin_model.layers_kernel_size_3:
-                torch.nn.init.normal_(layer.weight)
-                torch.nn.init.normal_(layer.bias)
-            for layer in gin_model.layers_kernel_size_1:
-                torch.nn.init.normal_(layer.weight)
-                torch.nn.init.normal_(layer.bias)
-
-            output = torch.zeros_like(volume)
-            for channel in range(volume.shape[0]):
-                input_i = x = volume[channel].unsqueeze(0)
-                num_layers = len(gin_model.layers_kernel_size_3)
-                for index in range(num_layers):
-                    if rng.random() <= p_kernel_size_1:
-                        x = gin_model.layers_kernel_size_1[index](x)
-                    else:
-                        x = gin_model.layers_kernel_size_3[index](x)
-                    if index < num_layers - 1:
-                        x = F.leaky_relu(x)
-
-                alpha = float(rng.random())
-                output_i = alpha * input_i + (1.0 - alpha) * x
-                output_i = output_i * (
-                    torch.norm(input_i, p="fro") / (torch.norm(output_i, p="fro") + 1e-6)
-                )
-                output[channel] = output_i.squeeze(0)
-
-            return output
 
     return operation
 
@@ -448,151 +526,23 @@ def make_normalization_operation(
 def make_stage_operations(
     volume: torch.Tensor,
     resampling_source_volume: torch.Tensor,
-    labels_norm_xyzwhd: torch.Tensor,
-    labels_abs_xyzxyz: torch.Tensor,
+    classes: torch.Tensor,
+    bboxes: torch.Tensor,
     device: torch.device,
-    rng: np.random.Generator,
     normalization_config: dict[str, float | str],
 ) -> dict[str, Callable[[], Any]]:
-    def channel_dropout() -> torch.Tensor:
-        with torch.inference_mode():
-            return random_channel_dropout(
-                volume.clone(),
-                drop_probabilities=[1.0] * volume.shape[0],
-                fill_value=0.0,
-            )
+    placement = get_augmentation_placement(device)
 
-    def random_zoom_uniform() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        with torch.inference_mode():
-            return random_zoom(
-                volume.clone(),
-                labels_abs_xyzxyz.clone(),
-                masks=None,
-                max_zoom=1.5,
-                min_zoom=0.7,
-                p=1.0,
-                out_zoom_padding="constant",
-                padding_fill_value=0.0,
-                uniform_zoom=True,
-            )
-
-    def random_zoom_anisotropic() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        with torch.inference_mode():
-            return random_zoom(
-                volume.clone(),
-                labels_abs_xyzxyz.clone(),
-                masks=None,
-                max_zoom=1.5,
-                min_zoom=0.7,
-                p=1.0,
-                out_zoom_padding="constant",
-                padding_fill_value=0.0,
-                uniform_zoom=False,
-            )
-
-    def random_rotation_stage() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        with torch.inference_mode():
-            return random_rotation(
-                volume.clone(),
-                labels_abs_xyzxyz.clone(),
-                masks=None,
-                angle_ranges=((-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0)),
-                p=1.0,
-                keep_box_volume=True,
-                fill_value=0.0,
-            )
-
-    def tensor_cutout_stage() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        with torch.inference_mode():
-            return tensor_cutout(
-                volume.clone(),
-                labels_abs_xyzxyz.clone(),
-                masks=None,
-                cutout_params=[(0.5, 1), (0.25, 2), (0.125, 4)],
-                p=1.0,
-            )
-
-    def random_mirroring_stage() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        with torch.inference_mode():
-            return random_mirroring(
-                volume.clone(),
-                labels_norm_xyzwhd.clone(),
-                masks=None,
-                mirror_axes=("z", "y", "x"),
-                p=1.0,
-            )
-
-    intensity_operations = {
-        "gaussian_noise": make_intensity_operation(
+    augmentation_operations = {
+        augmentation: make_configured_augmentation_operation(
             volume,
-            noise_prob=1.0,
-            blur_prob=0.0,
-            mult_brightness_prob=0.0,
-            add_brightness_prob=0.0,
-            contrast_prob=0.0,
-            lowres_prob=0.0,
-            gamma_prob=0.0,
-        ),
-        "gaussian_blur": make_intensity_operation(
-            volume,
-            noise_prob=0.0,
-            blur_prob=1.0,
-            mult_brightness_prob=0.0,
-            add_brightness_prob=0.0,
-            contrast_prob=0.0,
-            lowres_prob=0.0,
-            gamma_prob=0.0,
-        ),
-        "multiplicative_brightness": make_intensity_operation(
-            volume,
-            noise_prob=0.0,
-            blur_prob=0.0,
-            mult_brightness_prob=1.0,
-            add_brightness_prob=0.0,
-            contrast_prob=0.0,
-            lowres_prob=0.0,
-            gamma_prob=0.0,
-        ),
-        "additive_brightness": make_intensity_operation(
-            volume,
-            noise_prob=0.0,
-            blur_prob=0.0,
-            mult_brightness_prob=0.0,
-            add_brightness_prob=1.0,
-            contrast_prob=0.0,
-            lowres_prob=0.0,
-            gamma_prob=0.0,
-        ),
-        "contrast": make_intensity_operation(
-            volume,
-            noise_prob=0.0,
-            blur_prob=0.0,
-            mult_brightness_prob=0.0,
-            add_brightness_prob=0.0,
-            contrast_prob=1.0,
-            lowres_prob=0.0,
-            gamma_prob=0.0,
-        ),
-        "low_resolution": make_intensity_operation(
-            volume,
-            noise_prob=0.0,
-            blur_prob=0.0,
-            mult_brightness_prob=0.0,
-            add_brightness_prob=0.0,
-            contrast_prob=0.0,
-            lowres_prob=1.0,
-            gamma_prob=0.0,
-        ),
-        "gamma": make_intensity_operation(
-            volume,
-            noise_prob=0.0,
-            blur_prob=0.0,
-            mult_brightness_prob=0.0,
-            add_brightness_prob=0.0,
-            contrast_prob=0.0,
-            lowres_prob=0.0,
-            gamma_prob=1.0,
-        ),
+            classes,
+            bboxes,
+            build_augmentation_config(augmentation, volume.shape[1], volume.shape[0], placement),
+            placement,
+        )
+        for augmentation in DEFAULT_AUGMENTATIONS
+        if augmentation not in {"data_loading", "resampling", "normalization"}
     }
 
     return {
@@ -604,14 +554,7 @@ def make_stage_operations(
             volume,
             normalization_config,
         ),
-        **intensity_operations,
-        "gin": make_gin_operation(volume, device, rng),
-        "channel_dropout": channel_dropout,
-        "random_zoom_uniform": random_zoom_uniform,
-        "random_zoom_anisotropic": random_zoom_anisotropic,
-        "random_rotation": random_rotation_stage,
-        "tensor_cutout": tensor_cutout_stage,
-        "random_mirroring": random_mirroring_stage,
+        **augmentation_operations,
     }
 
 
@@ -751,16 +694,15 @@ def benchmark_size(
 
     volume_torch = torch.from_numpy(volume_np).to(device)
     resampling_source_torch = torch.from_numpy(resampling_source_np).to(device)
-    labels_norm_xyzwhd_cpu, labels_abs_xyzxyz_cpu = build_dummy_labels(size)
-    labels_norm_xyzwhd = labels_norm_xyzwhd_cpu.to(device)
-    labels_abs_xyzxyz = labels_abs_xyzxyz_cpu.to(device)
+    classes_cpu, bboxes_cpu = build_dummy_labels()
+    classes = classes_cpu.to(device)
+    bboxes = bboxes_cpu.to(device)
     stage_operations = make_stage_operations(
         volume_torch,
         resampling_source_torch,
-        labels_norm_xyzwhd,
-        labels_abs_xyzxyz,
+        classes,
+        bboxes,
         device,
-        rng,
         normalization_config,
     )
 
@@ -803,8 +745,8 @@ def benchmark_size(
     del resampling_source_np
     del volume_torch
     del resampling_source_torch
-    del labels_norm_xyzwhd
-    del labels_abs_xyzxyz
+    del classes
+    del bboxes
     if device.type == "cuda":
         torch.cuda.empty_cache()
     gc.collect()
