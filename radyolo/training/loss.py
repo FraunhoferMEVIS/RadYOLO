@@ -10,9 +10,11 @@ from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
 from radyolo.training.tal import (
+    BoxParametrization,
     TaskAlignedAssigner,
-    bbox2dist,
-    dist2bbox,
+    activate_box_prediction,
+    decode_bboxes,
+    encode_bbox_targets,
     make_anchors,
 )
 from radyolo.utils.ops import xyzwhd2xyzxyz
@@ -88,10 +90,19 @@ class DiceLoss:
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses during training."""
 
-    def __init__(self, reg_bins: int = 16, reg_min: float = 0.0) -> None:
+    def __init__(
+        self,
+        reg_bins: int = 16,
+        reg_min: float = 0.0,
+        bbox_parametrization: BoxParametrization = "ltrb",
+    ) -> None:
         """Initialize the BboxLoss module with regularization maximum and DFL settings."""
         super().__init__()
+        self.bbox_parametrization = bbox_parametrization
         self.dfl_loss = DFLoss(reg_bins, reg_min=reg_min) if reg_bins > 1 else None
+        if self.dfl_loss is not None and self.bbox_parametrization != "ltrb":
+            msg = "DFL bbox loss requires bbox_parametrization='ltrb'"
+            raise ValueError(msg)
 
     def forward(
         self,
@@ -112,10 +123,11 @@ class BboxLoss(nn.Module):
 
         # DFL loss
         if self.dfl_loss:
-            target_ltrb = bbox2dist(
+            target_ltrb = encode_bbox_targets(
                 anchor_points,
                 target_bboxes,
-                self.dfl_loss.reg_max,
+                bbox_parametrization=self.bbox_parametrization,
+                reg_max=self.dfl_loss.reg_max,
                 reg_min=self.dfl_loss.reg_min,
             )
             loss_dfl = (
@@ -126,10 +138,15 @@ class BboxLoss(nn.Module):
             )
             loss_dfl = loss_dfl.sum() / target_scores_sum
         else:
-            target_ltrb = bbox2dist(anchor_points, target_bboxes)
+            target_ltrb = encode_bbox_targets(
+                anchor_points,
+                target_bboxes,
+                bbox_parametrization=self.bbox_parametrization,
+            )
             scale = imgsz[[2, 1, 0, 2, 1, 0]].to(pred_dist.device, pred_dist.dtype)
             target_ltrb = target_ltrb * stride_tensor.unsqueeze(0)
             target_ltrb = target_ltrb / scale
+            pred_dist = activate_box_prediction(pred_dist, self.bbox_parametrization)
             pred_dist = pred_dist * stride_tensor.unsqueeze(0)
             pred_dist = pred_dist / scale
             loss_dfl = (
@@ -164,6 +181,7 @@ class v8DetectionLoss:  # noqa: N801
         enable_mask_loss: bool = False,
         separate_objectness_head: bool = False,
         objectness_loss: Literal["focal", "bce"] = "bce",
+        bbox_parametrization: BoxParametrization = "ltrb",
     ) -> None:  # model must be de-paralleled
         m = detect_layer
         self.objectness_loss = (
@@ -186,8 +204,12 @@ class v8DetectionLoss:  # noqa: N801
         self.no: int = (m.nc + 1 if self.separate_objectness_head else m.nc) + self.reg_channels
         self.reg_max: int = dfl_reg_max
         self.device: torch.device = device
+        self.bbox_parametrization = bbox_parametrization
 
         self.use_dfl: bool = m.use_dfl
+        if self.use_dfl and self.bbox_parametrization != "ltrb":
+            msg = "DFL is only supported with bbox_parametrization='ltrb'"
+            raise ValueError(msg)
 
         self.assigner = TaskAlignedAssigner(
             topk=tal_topk,
@@ -197,7 +219,11 @@ class v8DetectionLoss:  # noqa: N801
             use_fallback_if_alignment_zero=tal_fallback,
             anchor_inclusion_distance=-2 if model.include_stride4_output else -4,
         )
-        self.bbox_loss = BboxLoss(self.reg_bins, reg_min=self.reg_min).to(device)
+        self.bbox_loss = BboxLoss(
+            self.reg_bins,
+            reg_min=self.reg_min,
+            bbox_parametrization=self.bbox_parametrization,
+        ).to(device)
         self.proj: torch.Tensor | None = None
         if self.use_dfl:
             self.proj = torch.arange(self.reg_bins, dtype=torch.float, device=device) + self.reg_min
@@ -234,7 +260,12 @@ class v8DetectionLoss:  # noqa: N801
             pred_dist = (
                 pred_dist.view(b, a, 6, c // 6).softmax(3).matmul(self.proj.type(pred_dist.dtype))
             )
-        return dist2bbox(pred_dist, anchor_points, xyzwhd=False)
+        return decode_bboxes(
+            pred_dist,
+            anchor_points,
+            bbox_parametrization=self.bbox_parametrization,
+            xyzwhd=False,
+        )
 
     def __call__(
         self,

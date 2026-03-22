@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import torch
 
-from radyolo.models.layers import Detect
-from radyolo.models.layers import DFL
-from radyolo.training.loss import BboxLoss
-from radyolo.training.loss import DFLoss
-from radyolo.training.tal import dist2bbox
-from radyolo.training.tal import bbox2dist
+from radyolo.models.layers import Detect, DFL
+from radyolo.training.loss import BboxLoss, DFLoss
+from radyolo.training.tal import (
+    CENTER_OFFSET_LIMIT,
+    bbox2center_extents,
+    dist2bbox,
+    bbox2dist,
+    center_extents2bbox,
+)
 
 
 def test_bbox2dist_keeps_one_negative_bin() -> None:
@@ -62,6 +65,76 @@ def test_bbox_loss_direct_path_uses_l1_offsets() -> None:
 
     loss_iou, loss_l1 = loss_fn(
         pred_dist,
+        pred_bboxes,
+        anchor_points,
+        target_bboxes,
+        target_scores,
+        target_scores_sum,
+        fg_mask,
+        imgsz,
+        stride_tensor,
+    )
+
+    assert torch.isclose(loss_iou, torch.tensor(0.0), atol=1e-6)
+    assert torch.isclose(loss_l1, torch.tensor(0.0), atol=1e-6)
+
+
+def test_center_extents_decode_applies_constraints() -> None:
+    anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
+    raw_prediction = torch.tensor([[10.0, -10.0, 0.0, -20.0, 2.0, 4.0]])
+
+    decoded = center_extents2bbox(raw_prediction, anchor_points, xyzwhd=True)
+
+    assert decoded[0, 0].item() <= 5.0 + CENTER_OFFSET_LIMIT + 1e-6
+    assert decoded[0, 1].item() >= 5.0 - CENTER_OFFSET_LIMIT - 1e-6
+    assert decoded[0, 3].item() > 0.0
+
+
+def test_bbox2center_extents_preserves_center_offsets() -> None:
+    anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
+    bbox = torch.tensor([[0.0, 0.0, 0.0, 20.0, 20.0, 20.0]])
+
+    encoded = bbox2center_extents(anchor_points, bbox)
+
+    assert torch.equal(encoded[0, :3], torch.tensor([5.0, 5.0, 5.0]))
+
+
+def test_detect_center_extents_requires_direct_regression() -> None:
+    try:
+        Detect(num_classes=2, ch=(16,), dfl_reg_max=16, bbox_parametrization="center_extents")
+    except ValueError as exc:
+        assert "DFL" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("Expected center_extents parametrization to reject DFL")
+
+
+def test_detect_center_extents_bias_init_zeros_center_offsets() -> None:
+    detect = Detect(num_classes=2, ch=(16,), dfl_reg_max=1, bbox_parametrization="center_extents")
+    detect.stride = torch.tensor([8.0])
+
+    detect.bias_init()
+
+    box_last = detect.cv_boxes[0][-1]
+    assert torch.allclose(box_last.bias[:3], torch.zeros(3))
+    assert torch.all(box_last.bias[3:6] > 0.0)
+
+
+def test_bbox_loss_center_extents_direct_path_uses_constrained_parameters() -> None:
+    loss_fn = BboxLoss(reg_bins=1, bbox_parametrization="center_extents")
+    anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
+    target_bboxes = torch.tensor([[[4.0, 4.0, 4.0, 6.0, 6.0, 6.0]]])
+    target_params = bbox2center_extents(anchor_points, target_bboxes)
+    raw_prediction = target_params.clone()
+    raw_prediction[..., 3:] = torch.log(torch.expm1(target_params[..., 3:]))
+    pred_bboxes = center_extents2bbox(raw_prediction, anchor_points, xyzwhd=False)
+    target_scores = torch.ones((1, 1, 1))
+    target_scores_sum = torch.tensor(1.0)
+    fg_mask = torch.tensor([[True]])
+    imgsz = torch.tensor([40.0, 40.0, 40.0])
+    stride_tensor = torch.tensor([[4.0]])
+
+    loss_iou, loss_l1 = loss_fn(
+        raw_prediction,
         pred_bboxes,
         anchor_points,
         target_bboxes,

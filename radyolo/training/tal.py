@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import torch
 from torch import nn
+from torch.nn import functional as F  # noqa: N812
 
 from radyolo.validation.metrics import bbox_iou
 
 LOGGER = logging.getLogger(__name__)
+
+BoxParametrization = Literal["ltrb", "center_extents"]
+CENTER_OFFSET_LIMIT = 1.2
 
 
 class TaskAlignedAssigner(nn.Module):
@@ -631,6 +636,89 @@ def dist2bbox(
     return torch.cat((x_min_y_min_z_min, x_max_y_max_z_max), dim)  # xyzxyz bbox
 
 
+def activate_center_extents(
+    raw_prediction: torch.Tensor,
+    dim: int = -1,
+    center_offset_limit: float = CENTER_OFFSET_LIMIT,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply center/extents output constraints and return activated parts."""
+    center_offsets_raw, extents_raw = raw_prediction.chunk(2, dim)
+    center_offsets = center_offset_limit * torch.tanh(center_offsets_raw / center_offset_limit)
+    extents = F.softplus(extents_raw)
+    return center_offsets, extents
+
+
+def center_extents2bbox(
+    raw_prediction: torch.Tensor,
+    anchor_points: torch.Tensor,
+    xyzwhd: bool = True,
+    dim: int = -1,
+    center_offset_limit: float = CENTER_OFFSET_LIMIT,
+) -> torch.Tensor:
+    """Transform center-offset/extents predictions to box(xyzwhd or xyzxyz)."""
+    center_offsets, extents = activate_center_extents(
+        raw_prediction,
+        dim=dim,
+        center_offset_limit=center_offset_limit,
+    )
+    center_xyz = anchor_points + center_offsets
+    half_extents = extents / 2
+    x_min_y_min_z_min = center_xyz - half_extents
+    x_max_y_max_z_max = center_xyz + half_extents
+    if xyzwhd:
+        return torch.cat((center_xyz, extents), dim)
+    return torch.cat((x_min_y_min_z_min, x_max_y_max_z_max), dim)
+
+
+def bbox2center_extents(
+    anchor_points: torch.Tensor,
+    bbox: torch.Tensor,
+) -> torch.Tensor:
+    """Transform bbox(xyzxyz) to center offsets and extents."""
+    x1y1z1, x2y2z2 = bbox.chunk(2, -1)
+    center_xyz = (x1y1z1 + x2y2z2) / 2
+    extents = x2y2z2 - x1y1z1
+    center_offsets = center_xyz - anchor_points
+    return torch.cat((center_offsets, extents), -1)
+
+
+def activate_box_prediction(
+    raw_prediction: torch.Tensor,
+    bbox_parametrization: BoxParametrization,
+    dim: int = -1,
+    center_offset_limit: float = CENTER_OFFSET_LIMIT,
+) -> torch.Tensor:
+    """Apply output constraints for the selected bbox parametrization."""
+    if bbox_parametrization == "ltrb":
+        return raw_prediction
+    center_offsets, extents = activate_center_extents(
+        raw_prediction,
+        dim=dim,
+        center_offset_limit=center_offset_limit,
+    )
+    return torch.cat((center_offsets, extents), dim)
+
+
+def decode_bboxes(
+    raw_prediction: torch.Tensor,
+    anchor_points: torch.Tensor,
+    bbox_parametrization: BoxParametrization,
+    xyzwhd: bool = True,
+    dim: int = -1,
+    center_offset_limit: float = CENTER_OFFSET_LIMIT,
+) -> torch.Tensor:
+    """Decode raw bbox predictions according to the selected parametrization."""
+    if bbox_parametrization == "ltrb":
+        return dist2bbox(raw_prediction, anchor_points, xyzwhd=xyzwhd, dim=dim)
+    return center_extents2bbox(
+        raw_prediction,
+        anchor_points,
+        xyzwhd=xyzwhd,
+        dim=dim,
+        center_offset_limit=center_offset_limit,
+    )
+
+
 def bbox2dist(
     anchor_points: torch.Tensor,
     bbox: torch.Tensor,
@@ -643,3 +731,19 @@ def bbox2dist(
     if reg_max is None:
         return dist
     return dist.clamp_(reg_min, reg_max - 0.01)  # dist (lt, rb)
+
+
+def encode_bbox_targets(
+    anchor_points: torch.Tensor,
+    bbox: torch.Tensor,
+    bbox_parametrization: BoxParametrization,
+    reg_max: float | None = None,
+    reg_min: float = 0.0,
+) -> torch.Tensor:
+    """Encode target boxes according to the selected parametrization."""
+    if bbox_parametrization == "ltrb":
+        return bbox2dist(anchor_points, bbox, reg_max=reg_max, reg_min=reg_min)
+    if reg_max is not None:
+        msg = "center_extents bbox parametrization does not support DFL targets"
+        raise ValueError(msg)
+    return bbox2center_extents(anchor_points, bbox)

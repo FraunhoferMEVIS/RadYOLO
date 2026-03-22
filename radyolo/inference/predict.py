@@ -48,6 +48,7 @@ def _build_model_from_config(
         cls=train_config.cls,
         dfl=train_config.dfl,
         dfl_reg_max=train_config.dfl_reg_max,
+        bbox_parametrization=train_config.bbox_parametrization,
         mask_gain=train_config.mask_gain,
         class_separate_gain=train_config.class_separate_gain,
         device=device,

@@ -125,6 +125,9 @@ class DefaultConfig(BaseModel):
     cls: float = 0.5  # cls loss gain (scale with pixels)
     dfl: float = 1.5  # dfl loss gain
     dfl_reg_max: int = Field(16, ge=1)  # use direct edge regression when set to 1
+    bbox_parametrization: Literal["ltrb", "center_extents"] = (
+        "ltrb"  # bbox prediction format for the detection head
+    )
     mask_gain: float = 1.0  # mask loss gain
     class_separate_gain: float = 0.5  # class loss gain for separate softmax classification loss
     nbs: int = 64  # nominal batch size
@@ -213,6 +216,9 @@ class DefaultConfig(BaseModel):
         else:
             msg = "normalization must be a dict or a list of dicts"
             raise TypeError(msg)
+        if self.bbox_parametrization == "center_extents" and self.dfl_reg_max > 1:
+            msg = "bbox_parametrization='center_extents' requires dfl_reg_max=1"
+            raise ValueError(msg)
         return self
 
     def uses_gpu_spatial_augmentations(self) -> bool:

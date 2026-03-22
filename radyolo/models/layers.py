@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, assert_never, cast, overload
 import torch
 from torch import nn
 
-from radyolo.training.tal import dist2bbox, make_anchors
+from radyolo.training.tal import BoxParametrization, decode_bboxes, make_anchors
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -446,12 +446,17 @@ class Detect(nn.Module):
         *,
         dfl_reg_max: int = 16,
         separate_objectness_head: bool = False,
+        bbox_parametrization: BoxParametrization = "ltrb",
     ) -> None:
         super().__init__()
         self.nc = num_classes  # number of classes
         self.nl = len(ch)  # number of detection layers
         self.reg_max = dfl_reg_max  # Number of non-negative DFL bins.
         self.use_dfl = self.reg_max > 1
+        self.bbox_parametrization = bbox_parametrization
+        if self.use_dfl and self.bbox_parametrization != "ltrb":
+            msg = "DFL is only supported with bbox_parametrization='ltrb'"
+            raise ValueError(msg)
         self.dfl_min = -1.0 if self.use_dfl else 0.0
         self.dfl_bins = self.reg_max + int(abs(self.dfl_min)) if self.use_dfl else 1
         self.reg_channels = self.dfl_bins * 6 if self.use_dfl else 6
@@ -540,7 +545,11 @@ class Detect(nn.Module):
             box_bias = box_last.bias
             if box_bias is None:
                 raise ValueError
-            box_bias.data[:] = 2.0
+            if self.bbox_parametrization == "center_extents":
+                box_bias.data[:3] = 0.0
+                box_bias.data[3:6] = 4.0
+            else:
+                box_bias.data[:] = 2.0
             if not self.separate_objectness_head:
                 if not isinstance(class_convolutions, nn.Sequential):
                     raise TypeError
@@ -564,9 +573,15 @@ class Detect(nn.Module):
                 obj_bias.data[:] = math.log(5 / (256 / stride) ** 3)
 
     def decode_bboxes(
-        self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True
+        self, bboxes: torch.Tensor, anchors: torch.Tensor, xyzwhd: bool = True
     ) -> torch.Tensor:
-        return dist2bbox(bboxes, anchors, xyzwhd=xywh, dim=1)
+        return decode_bboxes(
+            bboxes,
+            anchors,
+            bbox_parametrization=self.bbox_parametrization,
+            xyzwhd=xyzwhd,
+            dim=1,
+        )
 
 
 class PrototypeMasks(nn.Module):

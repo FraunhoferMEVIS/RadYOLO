@@ -61,8 +61,9 @@ ema_decay: 0.9999 # (float) exponential moving average decay
 ema_tau: 2000.0 # (float) EMA ramp-up factor
 box: 7.5 # (float) box loss gain
 cls: 0.5 # (float) cls loss gain (scale with pixels)
-dfl: 1.5 # (float) dfl loss gain
-dfl_reg_max: 16 # (int) DFL histogram size; use 1 for direct box edge regression without DFL
+dfl: 100 # (float) dfl loss gain
+dfl_reg_max: 1 # (int) DFL histogram size; use 1 for direct box edge regression without DFL
+bbox_parametrization: "center_extents" # (literal) bbox prediction format, choices=[ltrb, center_extents]; center_extents requires dfl_reg_max=1
 mask_gain: 5 # (float) mask loss gain
 class_separate_gain: 0.5 # (float) class loss gain for separate softmax classification
 nbs: 64 # (int) nominal batch size
@@ -74,7 +75,7 @@ higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prot
 
 # Detection Head Options
 separate_objectness_head: True  # (bool) if True, add a separate objectness output and use CCE loss for class logits
-include_stride4_output: True
+include_stride4_output: False
 
 # Zoom Augmentation
 max_zoom: 1.4
