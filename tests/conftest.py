@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import nibabel as nib
 import numpy as np
@@ -14,6 +15,7 @@ from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
+from radyolo.inference.predict import PredictionConfig, run_prediction
 from radyolo.models.model import HardcodedModel
 from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA, select_device
@@ -157,6 +159,28 @@ def preprocess_data(dataset_path: Path, output_path: Path, workers: int = 0) -> 
     )
 
 
+def preprocess_data_with_options(
+    dataset_path: Path,
+    output_path: Path,
+    workers: int = 0,
+    *,
+    image_extent: tuple[int, int, int] | None = None,
+    voxel_size: tuple[float, float, float] | None = None,
+    normalization: dict | list[dict] | None = None,
+    image_dtype: str = "float32",
+) -> Path:
+    return preprocess_dataset_fn(
+        dataset_path=dataset_path,
+        output_path=output_path,
+        workers=workers,
+        overwrite=False,
+        target_shape=image_extent,
+        target_voxel_size=voxel_size,
+        normalization=cast("dict | list[dict]", normalization or {"type": "none"}),
+        image_dtype=cast("str", image_dtype),
+    )
+
+
 def export_onnx(last_model_path: Path) -> Path:
     checkpoint = load_model_checkpoint(last_model_path)
     train_config = checkpoint["train_config"]
@@ -255,3 +279,20 @@ def run_validation(best_model_path: Path, group: str) -> Path:
     ema = ModelEMA(model)
     validator(trainer=None, ema=ema)
     return save_dir
+
+
+def run_prediction_dir(model_path: Path, input_dir: Path, output_dir: Path) -> Path:
+    result = run_prediction(
+        PredictionConfig(
+            model_path=model_path,
+            input_dir=input_dir,
+            output_dir=output_dir,
+            conf=0.1,
+            iou=0.2,
+            device="cpu",
+        )
+    )
+    if result != 0:
+        msg = f"Prediction failed for model {model_path} on {input_dir}"
+        raise RuntimeError(msg)
+    return output_dir

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -12,6 +13,8 @@ from tests.conftest import (
     create_data_splits,
     export_onnx,
     preprocess_data,
+    preprocess_data_with_options,
+    run_prediction_dir,
     run_validation,
 )
 
@@ -66,10 +69,59 @@ def test_preprocess_data_preserves_image_dtype(tmp_path: Path) -> None:
     (dataset_path / "labels" / "case_dtype.txt").write_text("", encoding="utf-8")
 
     output_dataset = tmp_path / "preprocessed_dtype"
-    preprocess_data(dataset_path, output_dataset, workers=0)
+    preprocess_data_with_options(
+        dataset_path,
+        output_dataset,
+        workers=0,
+        image_dtype="int16",
+    )
 
     converted_image = np.load(output_dataset / "images" / "case_dtype.npy")
     assert converted_image.dtype == np.int16
+
+
+def test_preprocess_data_resamples_to_fixed_extent(synthetic_dataset: Path, tmp_path: Path) -> None:
+    output_dataset = tmp_path / "preprocessed_resampled_extent"
+    preprocess_data_with_options(
+        synthetic_dataset,
+        output_dataset,
+        workers=0,
+        image_extent=(20, 18, 16),
+    )
+
+    converted_image = np.load(output_dataset / "images" / "case1.npy")
+    assert converted_image.shape == (16, 18, 20)
+
+    with np.load(output_dataset / "masks" / "case1.npz") as mask_archive:
+        mask = mask_archive["mask"]
+    assert mask.shape == (16, 18, 20)
+
+
+def test_preprocess_data_resamples_to_fixed_voxel_size_and_normalizes(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset_voxel_size"
+    (dataset_path / "images").mkdir(parents=True)
+    (dataset_path / "labels").mkdir(parents=True)
+
+    image_array = np.arange(4 * 5 * 6, dtype=np.float32).reshape((4, 5, 6))
+    affine = np.diag((2.0, 3.0, 4.0, 1.0))
+    image = nib.Nifti1Image(image_array, affine=affine)
+    nib.save(image, dataset_path / "images" / "case_voxel.nii.gz")
+    (dataset_path / "labels" / "case_voxel.txt").write_text("", encoding="utf-8")
+
+    output_dataset = tmp_path / "preprocessed_voxel_size"
+    preprocess_data_with_options(
+        dataset_path,
+        output_dataset,
+        workers=0,
+        voxel_size=(2.0, 1.5, 1.0),
+        normalization={"type": "zscore"},
+        image_dtype="float16",
+    )
+
+    converted_image = np.load(output_dataset / "images" / "case_voxel.npy")
+    assert converted_image.dtype == np.float16
+    assert converted_image.shape == (8, 10, 12)
+    assert abs(float(converted_image.astype(np.float32).mean())) < 0.05
 
 
 def test_preprocessed_dataset_loading_works(
@@ -117,6 +169,21 @@ def test_test_command(trained_run: Path) -> None:
     assert val_dir.exists(), "Validation output directory missing"
     predictions = val_dir / "predictions.json"
     assert predictions.exists(), "predictions.json missing"
+
+
+def test_predict_command_uses_shared_preprocessing(
+    trained_run: Path, synthetic_dataset: Path, tmp_path: Path
+) -> None:
+    model_path = trained_run / "weights" / "best.pt"
+    output_dir = tmp_path / "prediction_output"
+
+    run_prediction_dir(model_path, synthetic_dataset / "images", output_dir)
+
+    prediction_files = sorted(output_dir.glob("*.json"))
+    assert prediction_files, "prediction json files missing"
+    with prediction_files[0].open(encoding="utf-8") as file:
+        parsed = json.load(file)
+    assert isinstance(parsed, list)
 
 
 def test_convert_to_nndetection(synthetic_dataset: Path, tmp_path: Path) -> None:

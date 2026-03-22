@@ -29,6 +29,21 @@ from radyolo.validation.validate import Validator
 LOGGER = logging.getLogger(__name__)
 
 
+def _parse_normalization_option(
+    _ctx: click.Context,
+    _param: click.Parameter,
+    value: str,
+) -> dict | list[dict]:
+    try:
+        parsed_value = yaml.safe_load(value)
+    except yaml.YAMLError as exc:
+        raise click.BadParameter(f"Invalid normalization config: {exc}") from exc
+    if not isinstance(parsed_value, (dict, list)):
+        msg = "Normalization must parse to a dict or list of dicts."
+        raise click.BadParameter(msg)
+    return parsed_value
+
+
 class StdoutFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.levelno < logging.WARNING
@@ -416,14 +431,61 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     show_default=True,
     help="Allow writing into an output folder that already contains .npy images.",
 )
-def preprocess_data(dataset_path: Path, output_path: Path, workers: int, overwrite: bool) -> int:
+@click.option(
+    "--image-extent",
+    nargs=3,
+    type=int,
+    default=None,
+    help="Resample images and masks to a fixed extent as depth height width.",
+)
+@click.option(
+    "--voxel-size",
+    nargs=3,
+    type=float,
+    default=None,
+    help="Resample images and masks to a fixed voxel size as depth height width.",
+)
+@click.option(
+    "--normalization",
+    default="{type: none}",
+    show_default=True,
+    callback=_parse_normalization_option,
+    help=(
+        "YAML or JSON normalization config, for example '{type: zscore}' or "
+        "'{type: ct, mean: 0, std: 1, clip_min: -1024, clip_max: 3071}'."
+    ),
+)
+@click.option(
+    "--image-dtype",
+    type=click.Choice(["float32", "float16", "int16"], case_sensitive=False),
+    default="float32",
+    show_default=True,
+    help="Output dtype for saved .npy images.",
+)
+def preprocess_data(
+    dataset_path: Path,
+    output_path: Path,
+    workers: int,
+    overwrite: bool,
+    image_extent: tuple[int, int, int] | None,
+    voxel_size: tuple[float, float, float] | None,
+    normalization: dict | list[dict],
+    image_dtype: str,
+) -> int:
     """Preprocess a NIfTI dataset and store images as .npy arrays in OUTPUT_PATH."""
     try:
+        if image_extent is not None and voxel_size is not None:
+            msg = "Only one of --image-extent or --voxel-size can be specified."
+            raise click.BadParameter(msg)
         out_path = preprocess_dataset_fn(
             dataset_path=dataset_path,
             output_path=output_path,
             workers=workers,
             overwrite=overwrite,
+            target_shape=image_extent,
+            target_voxel_size=voxel_size,
+            normalization=normalization,
+            image_dtype=image_dtype.lower(),
         )
         LOGGER.info("Preprocessed dataset written to %s", out_path)
     except Exception as e:

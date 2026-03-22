@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import nibabel as nib
+import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 
 from radyolo.config.config import DefaultConfig, load_model_checkpoint
-from radyolo.data.normalization import normalize_image
+from radyolo.data.preprocessing import preprocess_image
 from radyolo.models.model import HardcodedModel
 from radyolo.utils import ops
 from radyolo.utils.util import select_device
@@ -85,12 +86,6 @@ def _load_model(cfg: PredictionConfig) -> tuple[HardcodedModel, DefaultConfig, d
 
 def _iter_nifti(input_dir: Path) -> Iterable[Path]:
     return sorted(p for p in input_dir.glob("*.nii.gz") if p.is_file())
-
-
-def _resize_image(img: torch.Tensor, size: tuple[int, int, int]) -> torch.Tensor:
-    if img.ndim == 3:
-        img = img.unsqueeze(0)
-    return F.interpolate(img.unsqueeze(0), size=size, mode="trilinear").squeeze(0)
 
 
 def _postprocess_single(
@@ -265,20 +260,21 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
         for img_path in files:
             case_name = img_path.stem.replace(".nii", "")
             nifti_img = nib.load(str(img_path))
-            img_np = nifti_img.get_fdata().astype("float32")
+            img_np = np.asanyarray(nifti_img.dataobj, dtype=np.float32)
             img_tensor = torch.from_numpy(img_np).permute(*reversed(range(img_np.ndim)))
-            if img_tensor.ndim == NDIM_3D:
-                img_tensor = img_tensor.unsqueeze(0)
-            original_shape = img_tensor.shape[1:]
-            img_resized = _resize_image(img_tensor, target_size)
-            img_resized_normalized = normalize_image(img_resized, train_config.normalization)
+            img_preprocessed, original_shape, _ = preprocess_image(
+                img_tensor,
+                train_config.normalization,
+                target_shape=target_size,
+                output_dtype=torch.float32,
+            )
             device = model.device
             autocast_ctx = (
                 torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
             )
             with torch.no_grad(), autocast_ctx:
                 pred_class_box, pred_mask_coeff, pred_prototype_masks = model(
-                    img_resized_normalized.unsqueeze(0).to(device)
+                    img_preprocessed.unsqueeze(0).to(device)
                 )
             detections, proto_masks = _postprocess_single(
                 pred_class_box,

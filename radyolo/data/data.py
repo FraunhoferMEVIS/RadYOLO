@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import nibabel as nib
 import numpy as np
 import torch
-import torch.nn.functional as F  # noqa: N812
 from torch.utils.data import DataLoader, Dataset
 
 from radyolo.data.augmentations import (
@@ -23,7 +22,8 @@ from radyolo.data.augmentations import (
     random_zoom,
     tensor_cutout,
 )
-from radyolo.data.normalization import NormalizationConfig, normalize_image
+from radyolo.data.normalization import NormalizationConfig
+from radyolo.data.preprocessing import preprocess_image, resample_mask
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 if TYPE_CHECKING:
@@ -450,15 +450,13 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
     def resample_and_normalize(
         self, image: torch.Tensor
     ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
-        if len(image.shape) == 3:
-            image = image.unsqueeze(0)
-        image_resampled = cast(
-            "torch.Tensor", F.interpolate(image.unsqueeze(0), self.imgsz, mode="trilinear")
-        ).squeeze_(0)
-
-        image_resampled_normalized = normalize_image(image_resampled, self.normalization)
-
-        return image_resampled_normalized, image.shape[1:], image_resampled_normalized.shape[1:]
+        image_resampled_normalized, original_shape, resized_shape = preprocess_image(
+            image,
+            self.normalization,
+            target_shape=self.imgsz,
+            output_dtype=torch.float32,
+        )
+        return image_resampled_normalized, original_shape, resized_shape
 
     def load_labels_and_masks(
         self, case_name: str
@@ -493,12 +491,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                     mask_numpy = np.array(mask_archive["mask"], dtype=np.uint8)
             mask_tensor = torch.from_numpy(mask_numpy)
             mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
-            mask_tensor = mask_tensor.unsqueeze(0)
-            if len(mask_tensor.shape) == 4:
-                mask_tensor = mask_tensor.unsqueeze(0)
-            mask_tensor_resampled = cast(
-                "torch.Tensor", F.interpolate(mask_tensor, self.imgsz, mode="nearest-exact")
-            ).squeeze_(0)
+            mask_tensor_resampled = resample_mask(mask_tensor, self.imgsz)
         else:
             mask_tensor_resampled = None
 
