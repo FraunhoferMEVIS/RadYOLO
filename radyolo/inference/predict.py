@@ -50,6 +50,7 @@ def _build_model_from_config(
         dfl=train_config.dfl,
         dfl_reg_max=train_config.dfl_reg_max,
         bbox_parametrization=train_config.bbox_parametrization,
+        bbox_center_offset_limit=train_config.bbox_center_offset_limit,
         mask_gain=train_config.mask_gain,
         class_separate_gain=train_config.class_separate_gain,
         device=device,

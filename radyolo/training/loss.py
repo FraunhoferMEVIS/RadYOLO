@@ -95,10 +95,12 @@ class BboxLoss(nn.Module):
         reg_bins: int = 16,
         reg_min: float = 0.0,
         bbox_parametrization: BoxParametrization = "ltrb",
+        bbox_center_offset_limit: float = 1.2,
     ) -> None:
         """Initialize the BboxLoss module with regularization maximum and DFL settings."""
         super().__init__()
         self.bbox_parametrization = bbox_parametrization
+        self.bbox_center_offset_limit = bbox_center_offset_limit
         self.dfl_loss = DFLoss(reg_bins, reg_min=reg_min) if reg_bins > 1 else None
         if self.dfl_loss is not None and self.bbox_parametrization != "ltrb":
             msg = "DFL bbox loss requires bbox_parametrization='ltrb'"
@@ -146,7 +148,11 @@ class BboxLoss(nn.Module):
             scale = imgsz[[2, 1, 0, 2, 1, 0]].to(pred_dist.device, pred_dist.dtype)
             target_ltrb = target_ltrb * stride_tensor.unsqueeze(0)
             target_ltrb = target_ltrb / scale
-            pred_dist = activate_box_prediction(pred_dist, self.bbox_parametrization)
+            pred_dist = activate_box_prediction(
+                pred_dist,
+                self.bbox_parametrization,
+                center_offset_limit=self.bbox_center_offset_limit,
+            )
             pred_dist = pred_dist * stride_tensor.unsqueeze(0)
             pred_dist = pred_dist / scale
             loss_dfl = (
@@ -169,6 +175,7 @@ class v8DetectionLoss:  # noqa: N801
         cls: float,
         dfl: float,
         dfl_reg_max: int,
+        bbox_center_offset_limit: float,
         mask_gain: float,
         class_separate_gain: float,
         detect_layer: Detect,
@@ -205,6 +212,7 @@ class v8DetectionLoss:  # noqa: N801
         self.reg_max: int = dfl_reg_max
         self.device: torch.device = device
         self.bbox_parametrization = bbox_parametrization
+        self.bbox_center_offset_limit = bbox_center_offset_limit
 
         self.use_dfl: bool = m.use_dfl
         if self.use_dfl and self.bbox_parametrization != "ltrb":
@@ -223,6 +231,7 @@ class v8DetectionLoss:  # noqa: N801
             self.reg_bins,
             reg_min=self.reg_min,
             bbox_parametrization=self.bbox_parametrization,
+            bbox_center_offset_limit=self.bbox_center_offset_limit,
         ).to(device)
         self.proj: torch.Tensor | None = None
         if self.use_dfl:
@@ -265,6 +274,7 @@ class v8DetectionLoss:  # noqa: N801
             anchor_points,
             bbox_parametrization=self.bbox_parametrization,
             xyzwhd=False,
+            center_offset_limit=self.bbox_center_offset_limit,
         )
 
     def __call__(

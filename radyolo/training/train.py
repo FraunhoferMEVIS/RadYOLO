@@ -156,6 +156,7 @@ class Trainer:
             dfl=self.config.dfl,
             dfl_reg_max=self.config.dfl_reg_max,
             bbox_parametrization=self.config.bbox_parametrization,
+            bbox_center_offset_limit=self.config.bbox_center_offset_limit,
             mask_gain=self.config.mask_gain,
             class_separate_gain=self.config.class_separate_gain,
             device=device,

@@ -34,6 +34,7 @@ class HardcodedModel(nn.Module):
         dfl: float,
         dfl_reg_max: int,
         bbox_parametrization: Literal["ltrb", "center_extents"],
+        bbox_center_offset_limit: float,
         mask_gain: float,
         class_separate_gain: float,
         device: torch.device,
@@ -52,6 +53,7 @@ class HardcodedModel(nn.Module):
         self.input_channels = input_channels
         self.num_classes = num_classes
         self.bbox_parametrization = bbox_parametrization
+        self.bbox_center_offset_limit = bbox_center_offset_limit
 
         scales: dict[str, tuple[float, float, int]] = {
             "n": (0.50, 0.25, 1024),
@@ -253,6 +255,7 @@ class HardcodedModel(nn.Module):
             dfl_reg_max=dfl_reg_max,
             separate_objectness_head=self.separate_objectness_head,
             bbox_parametrization=self.bbox_parametrization,
+            center_offset_limit=self.bbox_center_offset_limit,
         )
         s = 256
         self.l23.stride = torch.tensor(
@@ -267,6 +270,7 @@ class HardcodedModel(nn.Module):
             cls,
             dfl,
             dfl_reg_max,
+            self.bbox_center_offset_limit,
             mask_gain,
             class_separate_gain,
             self.l23,

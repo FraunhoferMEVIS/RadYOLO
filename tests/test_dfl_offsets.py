@@ -90,6 +90,21 @@ def test_center_extents_decode_applies_constraints() -> None:
     assert decoded[0, 3].item() > 0.0
 
 
+def test_center_extents_decode_uses_configurable_offset_limit() -> None:
+    anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
+    raw_prediction = torch.tensor([[10.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+
+    decoded = center_extents2bbox(
+        raw_prediction,
+        anchor_points,
+        xyzwhd=True,
+        center_offset_limit=0.4,
+    )
+
+    assert decoded[0, 0].item() <= 5.4 + 1e-6
+    assert decoded[0, 0].item() >= 5.39
+
+
 def test_bbox2center_extents_preserves_center_offsets() -> None:
     anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
     bbox = torch.tensor([[0.0, 0.0, 0.0, 20.0, 20.0, 20.0]])
@@ -119,6 +134,23 @@ def test_detect_center_extents_bias_init_zeros_center_offsets() -> None:
     assert torch.all(box_last.bias[3:6] > 0.0)
 
 
+def test_detect_center_extents_decode_uses_custom_offset_limit() -> None:
+    detect = Detect(
+        num_classes=2,
+        ch=(16,),
+        dfl_reg_max=1,
+        bbox_parametrization="center_extents",
+        center_offset_limit=0.25,
+    )
+    anchors = torch.tensor([[[5.0], [5.0], [5.0]]])
+    raw_prediction = torch.tensor([[[10.0], [0.0], [0.0], [1.0], [1.0], [1.0]]])
+
+    decoded = detect.decode_bboxes(raw_prediction, anchors, xyzwhd=True)
+
+    assert decoded[0, 0, 0].item() <= 5.25 + 1e-6
+    assert decoded[0, 0, 0].item() >= 5.24
+
+
 def test_bbox_loss_center_extents_direct_path_uses_constrained_parameters() -> None:
     loss_fn = BboxLoss(reg_bins=1, bbox_parametrization="center_extents")
     anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
@@ -132,6 +164,44 @@ def test_bbox_loss_center_extents_direct_path_uses_constrained_parameters() -> N
     fg_mask = torch.tensor([[True]])
     imgsz = torch.tensor([40.0, 40.0, 40.0])
     stride_tensor = torch.tensor([[4.0]])
+
+    loss_iou, loss_l1 = loss_fn(
+        raw_prediction,
+        pred_bboxes,
+        anchor_points,
+        target_bboxes,
+        target_scores,
+        target_scores_sum,
+        fg_mask,
+        imgsz,
+        stride_tensor,
+    )
+
+    assert torch.isclose(loss_iou, torch.tensor(0.0), atol=1e-6)
+    assert torch.isclose(loss_l1, torch.tensor(0.0), atol=1e-6)
+
+
+def test_bbox_loss_center_extents_direct_path_uses_custom_offset_limit() -> None:
+    loss_fn = BboxLoss(
+        reg_bins=1,
+        bbox_parametrization="center_extents",
+        bbox_center_offset_limit=0.25,
+    )
+    anchor_points = torch.tensor([[5.0, 5.0, 5.0]])
+    target_scores = torch.ones((1, 1, 1))
+    target_scores_sum = torch.tensor(1.0)
+    fg_mask = torch.tensor([[True]])
+    imgsz = torch.tensor([40.0, 40.0, 40.0])
+    stride_tensor = torch.tensor([[4.0]])
+
+    raw_prediction = torch.tensor([[[10.0, 0.0, 0.0, 0.0, 1.0, 1.0]]])
+    pred_bboxes = center_extents2bbox(
+        raw_prediction,
+        anchor_points,
+        xyzwhd=False,
+        center_offset_limit=0.25,
+    )
+    target_bboxes = pred_bboxes.clone()
 
     loss_iou, loss_l1 = loss_fn(
         raw_prediction,

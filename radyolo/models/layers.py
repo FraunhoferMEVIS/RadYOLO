@@ -447,6 +447,7 @@ class Detect(nn.Module):
         dfl_reg_max: int = 16,
         separate_objectness_head: bool = False,
         bbox_parametrization: BoxParametrization = "ltrb",
+        center_offset_limit: float = 1.2,
     ) -> None:
         super().__init__()
         self.nc = num_classes  # number of classes
@@ -454,6 +455,7 @@ class Detect(nn.Module):
         self.reg_max = dfl_reg_max  # Number of non-negative DFL bins.
         self.use_dfl = self.reg_max > 1
         self.bbox_parametrization = bbox_parametrization
+        self.center_offset_limit = center_offset_limit
         if self.use_dfl and self.bbox_parametrization != "ltrb":
             msg = "DFL is only supported with bbox_parametrization='ltrb'"
             raise ValueError(msg)
@@ -581,6 +583,7 @@ class Detect(nn.Module):
             bbox_parametrization=self.bbox_parametrization,
             xyzwhd=xyzwhd,
             dim=1,
+            center_offset_limit=self.center_offset_limit,
         )
 
 
