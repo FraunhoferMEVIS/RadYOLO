@@ -753,15 +753,12 @@ def plot_results(
                 if "metrics" in column_names[csv_index]:
                     ax[plot_index].set_xlabel("Epochs")
                 if "loss" in column_names[csv_index]:
-                    ax[plot_index].set_ylim(
-                        max(0, np.min(y) * 0.9),
-                        min(
-                            10,
-                            np.percentile(y, 80) * 1.5,
-                            np.percentile(y, 90) * 1.25,
-                            np.percentile(y, 95) * 1.1,
-                        ),
-                    )
+                    clean = y[np.isfinite(y)]
+                    if clean.size > 0:
+                        ax[plot_index].set_ylim(
+                            np.min(clean) * 0.95,
+                            np.percentile(clean, 95) * 1.1,
+                        )
             except Exception as e:
                 LOGGER.warning(f"WARNING: Plotting error for {f} ({column_names[csv_index]}): {e}")
         ax[0].legend()

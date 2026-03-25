@@ -87,7 +87,9 @@ class Validator:
         dice_avg = float(self.dice_sum / self.dice_count)
         if np.isfinite(dice_avg):
             return dice_avg
-        LOGGER.warning("Encountered non-finite Dice aggregate during validation. Resetting Dice metric to 0.")
+        LOGGER.warning(
+            "Encountered non-finite Dice aggregate during validation. Resetting Dice metric to 0."
+        )
         return 0.0
 
     def __call__(self, trainer: Trainer | None, ema: ModelEMA) -> dict[str, float]:
@@ -96,7 +98,9 @@ class Validator:
         self.training = trainer is not None
         if self.training and trainer is not None:
             self.device = trainer.device
-            validation_loss = torch.zeros_like(trainer.loss_items, device=trainer.device)
+            validation_loss = torch.zeros_like(
+                trainer.loss_items, dtype=torch.float64, device=trainer.device
+            )
         else:
             self.device = model.device
         model.eval()
@@ -115,9 +119,7 @@ class Validator:
                     raise TypeError(raw_preds)
 
                 if self.training:
-                    validation_loss += cast(
-                        "tuple[torch.Tensor, torch.Tensor]", model.loss(batch, raw_preds)
-                    )[1]
+                    validation_loss += model.loss(batch, raw_preds)[1]
 
             # Postprocess and metrics
             pred_class_box, pred_mask_coeff, pred_prototype_masks = raw_preds
@@ -435,9 +437,7 @@ class Validator:
             if not gt_mask_downsampled.any():
                 continue
             # Reconstruct predicted mask logits from coefficients and prototypes
-            coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(
-                device=prototypes.device
-            )
+            coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(device=prototypes.device)
             pred_prob = ops.reconstruct_mask_probabilities(coeff, prototypes)
             if not torch.isfinite(pred_prob).all():
                 LOGGER.warning(

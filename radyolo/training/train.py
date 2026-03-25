@@ -345,7 +345,7 @@ class Trainer:
             pbar = tqdm(
                 enumerate(train_loader), total=num_batches, bar_format="{l_bar}{bar:10}{r_bar}"
             )
-            tloss: torch.Tensor | None = None
+            tloss: torch.Tensor | None = torch.zeros(5, dtype=torch.float64)
             loss_length: int = 1
             loss: torch.Tensor | None = None
             previous_gpu_steps_end: float | None = None
@@ -424,10 +424,8 @@ class Trainer:
                         )
 
                         tloss = (
-                            (tloss * i + self.loss_items) / (i + 1)
-                            if tloss is not None
-                            else self.loss_items
-                        )
+                            tloss * i + self.loss_items.to(dtype=tloss.dtype, device=tloss.device)
+                        ) / (i + 1)
 
                     # Backward
                     deterministic_restore = torch.are_deterministic_algorithms_enabled()
@@ -651,7 +649,6 @@ class Trainer:
                 else 0.0,
             },
         )
-
 
     def get_validator(
         self,
