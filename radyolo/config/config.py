@@ -129,7 +129,7 @@ class DefaultConfig(BaseModel):
         "ltrb"  # bbox prediction format for the detection head
     )
     bbox_center_offset_limit: float = Field(
-        1.2, gt=0.5
+        4.0, gt=0.5
     )  # max absolute anchor-relative center offset for center_extents bbox prediction
     mask_gain: float = 1.0  # mask loss gain
     class_separate_gain: float = 0.5  # class loss gain for separate softmax classification loss
