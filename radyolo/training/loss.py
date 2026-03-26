@@ -21,6 +21,7 @@ from radyolo.utils.ops import xyzwhd2xyzxyz
 from radyolo.validation.metrics import bbox_iou
 
 if TYPE_CHECKING:
+    from radyolo.config.config import DefaultConfig
     from radyolo.data.data import Batch
     from radyolo.models.layers import Detect
     from radyolo.models.model import HardcodedModel
@@ -52,7 +53,7 @@ class QualityFocalLoss(nn.Module):
 
 
 class DFLoss(nn.Module):
-    """Criterion class for computing DFL losses during training."""
+    """Class for computing DFL losses during training."""
 
     def __init__(self, reg_bins: int = 16, reg_min: float = 0.0) -> None:
         """Initialize the DFL module."""
@@ -88,7 +89,7 @@ class DiceLoss:
 
 
 class BboxLoss(nn.Module):
-    """Criterion class for computing training losses during training."""
+    """Class for computing training losses during training."""
 
     def __init__(
         self,
@@ -166,11 +167,10 @@ class BboxLoss(nn.Module):
 
 
 class v8DetectionLoss:  # noqa: N801
-    """Criterion class for computing training losses."""
+    """Class for computing training losses."""
 
     def __init__(
         self,
-        model: HardcodedModel,
         box: float,
         cls: float,
         dfl: float,
@@ -180,6 +180,7 @@ class v8DetectionLoss:  # noqa: N801
         class_separate_gain: float,
         detect_layer: Detect,
         device: torch.device,
+        include_stride4_output: bool,
         tal_topk: int = 10,
         tal_alpha: float = 0.5,
         tal_beta: float = 1.0,
@@ -225,7 +226,7 @@ class v8DetectionLoss:  # noqa: N801
             alpha=tal_alpha,
             beta=tal_beta,
             use_fallback_if_alignment_zero=tal_fallback,
-            anchor_inclusion_distance=-2 if model.include_stride4_output else -4,
+            anchor_inclusion_distance=-2 if include_stride4_output else -4,
         )
         self.bbox_loss = BboxLoss(
             self.reg_bins,
@@ -286,7 +287,7 @@ class v8DetectionLoss:  # noqa: N801
         ],
         batch: Batch,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate the sum of the loss for box, cls / objectness, dfl, mask, class separate multiplied by batch size."""
+        """Calculate the detection loss multiplied by batch size."""
         loss = torch.zeros(5, device=self.device)  # box, cls_obj, dfl, mask, cls_sep
         feats = preds[0]
         feats = feats[1] if isinstance(feats, tuple) else feats  # Handling of inference pass
@@ -448,3 +449,31 @@ class v8DetectionLoss:  # noqa: N801
         loss[4] *= self.class_separate_gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask)
+
+
+def build_detection_loss_from_config(
+    train_config: DefaultConfig,
+    model: HardcodedModel,
+    device: torch.device,
+) -> v8DetectionLoss:
+    return v8DetectionLoss(
+        box=train_config.box,
+        cls=train_config.cls,
+        dfl=train_config.dfl,
+        dfl_reg_max=train_config.dfl_reg_max,
+        bbox_center_offset_limit=train_config.bbox_center_offset_limit,
+        mask_gain=train_config.mask_gain,
+        class_separate_gain=train_config.class_separate_gain,
+        detect_layer=model.l23,
+        device=device,
+        include_stride4_output=model.include_stride4_output,
+        tal_topk=train_config.tal_topk,
+        tal_alpha=train_config.tal_alpha,
+        tal_beta=train_config.tal_beta,
+        gamma=train_config.gamma,
+        tal_fallback=True,
+        enable_mask_loss=train_config.segmentation_output,
+        separate_objectness_head=train_config.separate_objectness_head,
+        objectness_loss=train_config.objectness_loss,
+        bbox_parametrization=train_config.bbox_parametrization,
+    )

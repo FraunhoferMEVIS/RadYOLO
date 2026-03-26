@@ -186,7 +186,6 @@ def export_onnx(last_model_path: Path) -> Path:
     train_config = checkpoint["train_config"]
     model = build_model_from_config(
         train_config,
-        device=select_device(train_config.device),
         state_dict=checkpoint["model_state_dict"],
     )
     model.eval()

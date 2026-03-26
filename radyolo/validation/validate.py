@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from radyolo.config.config import DatasetConfig, DefaultConfig
     from radyolo.data.data import Batch
     from radyolo.models.model import HardcodedModel
+    from radyolo.training.loss import v8DetectionLoss
     from radyolo.training.train import Trainer
     from radyolo.utils.util import ModelEMA
 
@@ -93,7 +94,12 @@ class Validator:
         )
         return 0.0
 
-    def __call__(self, trainer: Trainer | None, ema: ModelEMA) -> dict[str, float]:
+    def __call__(
+        self,
+        trainer: Trainer | None,
+        ema: ModelEMA,
+        loss: v8DetectionLoss | None = None,
+    ) -> dict[str, float]:
         """Execute validation process, run inference on dataloader and compute metrics."""
         model = cast("HardcodedModel", ema.ema)
         self.training = trainer is not None
@@ -102,6 +108,11 @@ class Validator:
             validation_loss = torch.zeros_like(
                 trainer.loss_items, dtype=torch.float64, device=trainer.device
             )
+            if loss is None and trainer.loss is not None:
+                loss = trainer.loss
+            else:
+                msg = "Validation requires an initialized detection loss"
+                raise RuntimeError(msg)
         else:
             self.device = model.device
         model.eval()
@@ -120,7 +131,7 @@ class Validator:
                     raise TypeError(raw_preds)
 
                 if self.training:
-                    validation_loss += model.loss(batch, raw_preds)[1]
+                    validation_loss += loss(raw_preds, batch)[1]
 
             # Postprocess and metrics
             pred_class_box, pred_mask_coeff, pred_prototype_masks = raw_preds

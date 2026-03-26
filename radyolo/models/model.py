@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
@@ -19,13 +18,10 @@ from radyolo.models.layers import (
     PrototypeMasksHighResolution,
     PrototypeMasksHighResolutionOneSkip,
 )
-from radyolo.training.loss import v8DetectionLoss
 from radyolo.utils.util import intersect_dicts, make_divisible, select_device
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from radyolo.data.data import Batch
 
 
 @dataclass(frozen=True)
@@ -42,25 +38,14 @@ class HardcodedModel(nn.Module):
         input_channels: int,
         num_classes: int,
         scale: Literal["n", "s", "m", "l", "x"],
-        box: float,
-        cls: float,
-        dfl: float,
         dfl_reg_max: int,
         bbox_parametrization: Literal["ltrb", "center_extents"],
         bbox_center_offset_limit: float,
-        mask_gain: float,
-        class_separate_gain: float,
-        device: torch.device,
         enable_output_masks: bool = True,
         num_prototype_masks: int = 8,
         higher_resolution_prototypes: bool = True,
         separate_objectness_head: bool = False,
         include_stride4_output: bool = False,
-        objectness_loss: Literal["bce", "focal"] = "bce",
-        tal_topk: int = 10,
-        tal_alpha: float = 0.5,
-        tal_beta: float = 1.0,
-        gamma: float = 2.0,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -277,67 +262,7 @@ class HardcodedModel(nn.Module):
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-        self.criterion = v8DetectionLoss(
-            self,
-            box,
-            cls,
-            dfl,
-            dfl_reg_max,
-            self.bbox_center_offset_limit,
-            mask_gain,
-            class_separate_gain,
-            self.l23,
-            device,
-            tal_topk=tal_topk,
-            tal_alpha=tal_alpha,
-            tal_beta=tal_beta,
-            gamma=gamma,
-            tal_fallback=True,
-            enable_mask_loss=enable_output_masks,
-            separate_objectness_head=self.separate_objectness_head,
-            objectness_loss=objectness_loss,
-            bbox_parametrization=self.bbox_parametrization,
-        )
-
-    @overload
-    def forward(
-        self, x: torch.Tensor, *args, **kwargs
-    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]: ...
-
-    @overload
-    def forward(self, x: Batch, *args, **kwargs) -> tuple[torch.Tensor, torch.Tensor]: ...
-
-    def forward(
-        self, x: torch.Tensor | Batch, *args, **kwargs
-    ) -> (
-        list[torch.Tensor]
-        | torch.Tensor
-        | tuple[torch.Tensor, list[torch.Tensor]]
-        | tuple[torch.Tensor, torch.Tensor]
-    ):
-        if isinstance(x, dict):
-            return self.loss(x, *args, **kwargs)
-        return self.predict(x, *args, **kwargs)
-
-    def loss(
-        self,
-        batch: Batch,
-        preds: (list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]] | None) = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if preds is None:
-            prediction = self.forward(batch["img"])
-            if isinstance(prediction, torch.Tensor):
-                raise TypeError(prediction)
-            preds = prediction
-        return self.criterion(preds, batch)
-
-    def load(self, state_dict: dict) -> None:
-        state_dict_intersected = intersect_dicts(state_dict, self.state_dict())
-        self.load_state_dict(state_dict_intersected, strict=False)
-
-    def predict(
-        self, x: torch.Tensor
-    ) -> tuple[
+    def forward(self, x: torch.Tensor) -> tuple[
         list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
         torch.Tensor | None,
         torch.Tensor | None,
@@ -425,11 +350,14 @@ class HardcodedModel(nn.Module):
             return detections, mask_coefficients, prototype_masks
         return detections, None, None
 
+    def load(self, state_dict: dict) -> None:
+        state_dict_intersected = intersect_dicts(state_dict, self.state_dict())
+        self.load_state_dict(state_dict_intersected, strict=False)
+
 
 def build_model_from_config(
     train_config: DefaultConfig,
     *,
-    device: torch.device,
     num_classes: int | None = None,
     state_dict: dict | None = None,
 ) -> HardcodedModel:
@@ -437,25 +365,14 @@ def build_model_from_config(
         input_channels=train_config.input_channels,
         num_classes=num_classes or train_config.num_classes,
         scale=train_config.model_scale,
-        box=train_config.box,
-        cls=train_config.cls,
-        dfl=train_config.dfl,
         dfl_reg_max=train_config.dfl_reg_max,
         bbox_parametrization=train_config.bbox_parametrization,
         bbox_center_offset_limit=train_config.bbox_center_offset_limit,
-        mask_gain=train_config.mask_gain,
-        class_separate_gain=train_config.class_separate_gain,
-        device=device,
         enable_output_masks=train_config.segmentation_output,
         num_prototype_masks=train_config.prototype_masks,
         higher_resolution_prototypes=train_config.higher_resolution_prototypes,
         separate_objectness_head=train_config.separate_objectness_head,
         include_stride4_output=train_config.include_stride4_output,
-        objectness_loss=train_config.objectness_loss,
-        tal_topk=train_config.tal_topk,
-        tal_alpha=train_config.tal_alpha,
-        tal_beta=train_config.tal_beta,
-        gamma=train_config.gamma,
     )
     if state_dict is not None:
         model.load(state_dict)
@@ -472,10 +389,10 @@ def load_checkpoint_model(
     device = select_device(device_override or getattr(train_config, "device", ""))
     model = build_model_from_config(
         train_config,
-        device=device,
         state_dict=checkpoint["model_state_dict"],
     )
     model.eval().to(device)
+    model.device = device  # type: ignore[attr-defined]
     return LoadedCheckpointModel(
         checkpoint=checkpoint,
         train_config=train_config,

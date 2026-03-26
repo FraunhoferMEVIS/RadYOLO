@@ -253,7 +253,6 @@ def onnx_export(model_path: Path) -> int:
         train_config = checkpoint["train_config"]
         model = build_model_from_config(
             train_config,
-            device=torch.device("cpu"),
             state_dict=checkpoint["model_state_dict"],
         )
 

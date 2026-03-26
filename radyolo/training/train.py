@@ -29,6 +29,7 @@ from radyolo.data.data import (
     build_dataloader,
 )
 from radyolo.models.model import HardcodedModel, build_model_from_config
+from radyolo.training.loss import build_detection_loss_from_config
 from radyolo.utils.torch_utils import EarlyStopping
 from radyolo.utils.util import ModelEMA, init_seeds, select_device
 from radyolo.validation.plotting import plot_results
@@ -38,6 +39,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from torch.utils.data import DataLoader
+
+    from radyolo.training.loss import v8DetectionLoss
 
 
 LOGGER = logging.getLogger(__name__)
@@ -79,6 +82,7 @@ class Trainer:
             self.config.workers = 0
 
         self.model: torch.nn.Module | None = None
+        self.loss: v8DetectionLoss | None = None
         self.data = self.get_dataset_config(self.config.data)
 
         self.lf: Callable[[int], float] | None = None
@@ -134,7 +138,6 @@ class Trainer:
     def setup_model(
         self,
         num_classes: int,
-        device: torch.device,
     ) -> tuple[ModelCheckpoint | None, HardcodedModel]:
         if isinstance(self.model, HardcodedModel):
             return None, self.model
@@ -149,7 +152,6 @@ class Trainer:
 
         model = build_model_from_config(
             self.config,
-            device=device,
             num_classes=num_classes,
             state_dict=model_state_dict,
         )
@@ -183,9 +185,9 @@ class Trainer:
     ]:
         ckpt, model = self.setup_model(
             self.data.nc,
-            device=self.device,
         )
         model = model.to(self.device)
+        self.loss = build_detection_loss_from_config(self.config, model, self.device)
 
         # Freeze layers
         freeze_layer_names = [".dfl"]
@@ -380,10 +382,16 @@ class Trainer:
                             batch,
                             run_gpu_augmentations,
                         )
+                        raw_predictions = model(prepared_batch["img"])
+                        if isinstance(raw_predictions, torch.Tensor):
+                            raise TypeError(raw_predictions)
+                        if self.loss is None:
+                            msg = "Detection loss is not initialized"
+                            raise RuntimeError(msg)
 
                         loss, self.loss_items = cast(
                             "tuple[torch.Tensor, torch.Tensor]",
-                            model(prepared_batch),
+                            self.loss(raw_predictions, prepared_batch),
                         )
 
                         tloss = (
