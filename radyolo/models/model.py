@@ -33,6 +33,13 @@ class LoadedCheckpointModel:
     device: torch.device
 
 
+def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
+    stride = getattr(model, "stride", None)
+    if isinstance(stride, torch.Tensor):
+        return int(stride.min().item())
+    return default
+
+
 class HardcodedModel(nn.Module):
     def __init__(
         self,

@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 import click
-import torch
 import tqdm_loggable
 import tqdm_loggable.utils
 import yaml
@@ -20,7 +19,11 @@ from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
-from radyolo.models.model import build_model_from_config, load_checkpoint_model
+from radyolo.models.model import (
+    build_model_from_config,
+    get_model_min_stride,
+    load_checkpoint_model,
+)
 from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA
 from radyolo.validation.plotting import plot_results as plot_results_
@@ -196,9 +199,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             group=group,
             imgsz=tuple(train_config.imgsz),
             augment=False,
-            min_stride=int(model.stride.min().item())
-            if model and hasattr(model, "stride") and isinstance(model.stride, torch.Tensor)
-            else 8,
+            min_stride=get_model_min_stride(model),
             normalization=train_config.normalization,
             load_masks=train_config.segmentation_output,
         )

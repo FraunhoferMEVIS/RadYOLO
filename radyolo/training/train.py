@@ -28,7 +28,7 @@ from radyolo.data.data import (
     apply_configured_augmentations_to_batch,
     build_dataloader,
 )
-from radyolo.models.model import HardcodedModel, build_model_from_config
+from radyolo.models.model import HardcodedModel, build_model_from_config, get_model_min_stride
 from radyolo.training.loss import build_detection_loss_from_config
 from radyolo.utils.torch_utils import EarlyStopping
 from radyolo.utils.util import ModelEMA, init_seeds, select_device
@@ -592,9 +592,7 @@ class Trainer:
             group=mode,
             imgsz=tuple(self.config.imgsz),
             augment=self.config.augment and mode == "train",
-            min_stride=int(
-                model.stride.min() if model and isinstance(model.stride, torch.Tensor) else 8
-            ),
+            min_stride=get_model_min_stride(model),
             pad=0.0 if mode == "train" else 0.5,
             normalization=self.config.normalization,
             load_masks=self.config.segmentation_output,
