@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from contextlib import suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, overload
 
 import torch
 from torch import nn
 
+from radyolo.config.config import DefaultConfig, ModelCheckpoint, load_model_checkpoint
 from radyolo.models.layers import (
     C2PSA,
     SPPF,
@@ -17,10 +20,20 @@ from radyolo.models.layers import (
     PrototypeMasksHighResolutionOneSkip,
 )
 from radyolo.training.loss import v8DetectionLoss
-from radyolo.utils.util import intersect_dicts, make_divisible
+from radyolo.utils.util import intersect_dicts, make_divisible, select_device
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from radyolo.data.data import Batch
+
+
+@dataclass(frozen=True)
+class LoadedCheckpointModel:
+    checkpoint: ModelCheckpoint
+    train_config: DefaultConfig
+    model: HardcodedModel
+    device: torch.device
 
 
 class HardcodedModel(nn.Module):
@@ -411,3 +424,61 @@ class HardcodedModel(nn.Module):
                 )
             return detections, mask_coefficients, prototype_masks
         return detections, None, None
+
+
+def build_model_from_config(
+    train_config: DefaultConfig,
+    *,
+    device: torch.device,
+    num_classes: int | None = None,
+    state_dict: dict | None = None,
+) -> HardcodedModel:
+    model = HardcodedModel(
+        input_channels=train_config.input_channels,
+        num_classes=num_classes or train_config.num_classes,
+        scale=train_config.model_scale,
+        box=train_config.box,
+        cls=train_config.cls,
+        dfl=train_config.dfl,
+        dfl_reg_max=train_config.dfl_reg_max,
+        bbox_parametrization=train_config.bbox_parametrization,
+        bbox_center_offset_limit=train_config.bbox_center_offset_limit,
+        mask_gain=train_config.mask_gain,
+        class_separate_gain=train_config.class_separate_gain,
+        device=device,
+        enable_output_masks=train_config.segmentation_output,
+        num_prototype_masks=train_config.prototype_masks,
+        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
+        separate_objectness_head=train_config.separate_objectness_head,
+        include_stride4_output=train_config.include_stride4_output,
+        objectness_loss=train_config.objectness_loss,
+        tal_topk=train_config.tal_topk,
+        tal_alpha=train_config.tal_alpha,
+        tal_beta=train_config.tal_beta,
+        gamma=train_config.gamma,
+    )
+    if state_dict is not None:
+        model.load(state_dict)
+    return model
+
+
+def load_checkpoint_model(
+    checkpoint_path: Path,
+    *,
+    device_override: str | None = None,
+) -> LoadedCheckpointModel:
+    checkpoint = load_model_checkpoint(checkpoint_path)
+    train_config = checkpoint["train_config"]
+    device = select_device(device_override or getattr(train_config, "device", ""))
+    model = build_model_from_config(
+        train_config,
+        device=device,
+        state_dict=checkpoint["model_state_dict"],
+    )
+    model.eval().to(device)
+    return LoadedCheckpointModel(
+        checkpoint=checkpoint,
+        train_config=train_config,
+        model=model,
+        device=device,
+    )

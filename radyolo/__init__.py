@@ -20,9 +20,9 @@ from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
-from radyolo.models.model import HardcodedModel
+from radyolo.models.model import build_model_from_config, load_checkpoint_model
 from radyolo.training.train import Trainer
-from radyolo.utils.util import ModelEMA, select_device
+from radyolo.utils.util import ModelEMA
 from radyolo.validation.plotting import plot_results as plot_results_
 from radyolo.validation.validate import Validator
 
@@ -184,12 +184,10 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             yaml_config = yaml.safe_load(f)
         dataset_config = DatasetConfig.model_validate(yaml_config)
 
-        checkpoint = load_model_checkpoint(model_path)
-        model = checkpoint["ema"]
-        train_config = checkpoint["train_config"]
-        device = select_device(train_config.device)
-        model.device = device
-        model.to(device)
+        loaded_model = load_checkpoint_model(model_path)
+        model = loaded_model.model
+        train_config = loaded_model.train_config
+        device = loaded_model.device
         ema = ModelEMA(model)
 
         dataset = NIfTIDatasetWithMasks(
@@ -253,33 +251,11 @@ def onnx_export(model_path: Path) -> int:
         LOGGER.info(f"Exporting model {model_path} to onnx...")
         checkpoint = load_model_checkpoint(model_path)
         train_config = checkpoint["train_config"]
-        state_dict = checkpoint["model_state_dict"]
-
-        model = HardcodedModel(
-            input_channels=train_config.input_channels,
-            num_classes=train_config.num_classes,
-            scale=train_config.model_scale,
-            box=train_config.box,
-            cls=train_config.cls,
-            dfl=train_config.dfl,
-            dfl_reg_max=train_config.dfl_reg_max,
-            bbox_parametrization=train_config.bbox_parametrization,
-            bbox_center_offset_limit=train_config.bbox_center_offset_limit,
-            mask_gain=train_config.mask_gain,
-            class_separate_gain=train_config.class_separate_gain,
+        model = build_model_from_config(
+            train_config,
             device=torch.device("cpu"),
-            enable_output_masks=train_config.segmentation_output,
-            num_prototype_masks=train_config.prototype_masks,
-            higher_resolution_prototypes=train_config.higher_resolution_prototypes,
-            separate_objectness_head=train_config.separate_objectness_head,
-            include_stride4_output=train_config.include_stride4_output,
-            objectness_loss=train_config.objectness_loss,
-            tal_topk=train_config.tal_topk,
-            tal_alpha=train_config.tal_alpha,
-            tal_beta=train_config.tal_beta,
-            gamma=train_config.gamma,
+            state_dict=checkpoint["model_state_dict"],
         )
-        model.load(state_dict)
 
         input_shape = (train_config.input_channels, *train_config.imgsz)
         export_model(model, input_shape, model_path)

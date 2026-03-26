@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from tqdm_loggable.auto import tqdm
 
+from radyolo.config.config import DetectionPostprocessConfig
 from radyolo.utils import ops
 from radyolo.validation.metrics import (
     ConfusionMatrix,
@@ -203,47 +204,20 @@ class Validator:
         prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
         mask_coefficients: torch.Tensor | None,
     ) -> list[torch.Tensor]:
-        """Apply Non-maximum suppression to prediction outputs and handle mask coefficients."""
-        # Unpack detection outputs (inference_out, loss_out)
-        if isinstance(prediction, (list, tuple)):
-            prediction = prediction[0]
-
-        # If model returns separate boxes, class probs, and objectness, fold for NMS
-        if isinstance(prediction, tuple) and len(prediction) == 3:
-            dbox, cls_prob, obj_prob = prediction
-            # Multiply class probabilities with objectness for NMS
-            combined = torch.cat((dbox, cls_prob * obj_prob), 1)
-            prediction = combined
-
-        # Combine boundig box and class prediction into one tensor
-        if isinstance(prediction, tuple) and len(prediction) == 2:
-            dbox, cls_prob = prediction
-            combined = torch.cat((dbox, cls_prob), 1)
-            prediction = combined
-
-        # Attach mask coefficients to predictions if available
-        if isinstance(mask_coefficients, torch.Tensor):
-            if (
-                prediction.shape[0] != mask_coefficients.shape[0]
-                or prediction.shape[-1] != mask_coefficients.shape[-1]
-            ):
-                LOGGER.warning(
-                    f"Mask coefficients shape {prediction.shape} mismatch with predictions"
-                    f" shape {mask_coefficients.shape}. Ignoring mask coefficients for NMS."
-                )
-            else:
-                prediction = torch.cat((prediction, mask_coefficients), dim=1)
-
-        return ops.non_max_suppression(
-            prediction,
-            self.config.conf,
-            self.config.iou,
-            labels=self.lb,
-            multi_label=True,
-            agnostic=self.config.agnostic_nms,
+        postprocess_config = DetectionPostprocessConfig(
+            conf=self.config.conf,
+            iou=self.config.iou,
+            agnostic_nms=self.config.agnostic_nms,
             max_det=self.config.max_det,
             nms_time_limit=self.config.nms_time_limit,
             nc=self.nc,
+            multi_label=True,
+        )
+        return ops.postprocess_model_predictions(
+            prediction,
+            mask_coefficients,
+            postprocess_config,
+            labels=self.lb,
         )
 
     def _prepare_batch(self, si: int, batch: Batch) -> dict[str, Any]:

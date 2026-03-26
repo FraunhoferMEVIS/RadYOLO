@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, TypedDict
 
@@ -20,6 +21,17 @@ if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DetectionPostprocessConfig:
+    conf: float
+    iou: float
+    agnostic_nms: bool
+    max_det: int
+    nms_time_limit: float | None
+    nc: int
+    multi_label: bool = False
 
 
 def _validate_normalization_entry(entry: dict) -> dict:

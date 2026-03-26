@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -11,7 +12,74 @@ import torch
 
 from radyolo.validation.metrics import bbox_iou
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from radyolo.config.config import DetectionPostprocessConfig
+
 LOGGER = logging.getLogger(__name__)
+
+
+def prepare_prediction_for_nms(
+    prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
+    mask_coefficients: torch.Tensor | None,
+) -> torch.Tensor:
+    if _is_detect_eval_output(prediction):
+        prediction = prediction[0]
+
+    if isinstance(prediction, tuple) and len(prediction) == 3:
+        dbox, cls_prob, obj_prob = prediction
+        prediction = torch.cat((dbox, cls_prob * obj_prob), 1)
+    elif isinstance(prediction, tuple) and len(prediction) == 2:
+        dbox, cls_prob = prediction
+        prediction = torch.cat((dbox, cls_prob), 1)
+    elif not isinstance(prediction, torch.Tensor):
+        msg = f"Unsupported prediction type: {type(prediction)!r}"
+        raise TypeError(msg)
+
+    if isinstance(mask_coefficients, torch.Tensor):
+        if (
+            prediction.shape[0] != mask_coefficients.shape[0]
+            or prediction.shape[-1] != mask_coefficients.shape[-1]
+        ):
+            msg = (
+                "Mask coefficients shape mismatch with predictions. "
+                f"Prediction shape={tuple(prediction.shape)}, "
+                f"mask_coefficients shape={tuple(mask_coefficients.shape)}"
+            )
+            raise ValueError(msg)
+        prediction = torch.cat((prediction, mask_coefficients), dim=1)
+
+    return prediction
+
+
+def postprocess_model_predictions(
+    prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
+    mask_coefficients: torch.Tensor | None,
+    postprocess_config: DetectionPostprocessConfig,
+    *,
+    labels: Sequence[torch.Tensor] | None = None,
+) -> list[torch.Tensor]:
+    return non_max_suppression(
+        prepare_prediction_for_nms(prediction, mask_coefficients),
+        postprocess_config.conf,
+        postprocess_config.iou,
+        labels=list(labels or []),
+        multi_label=postprocess_config.multi_label,
+        agnostic=postprocess_config.agnostic_nms,
+        max_det=postprocess_config.max_det,
+        nms_time_limit=postprocess_config.nms_time_limit,
+        nc=postprocess_config.nc,
+    )
+
+
+def _is_detect_eval_output(prediction: object) -> bool:
+    return (
+        isinstance(prediction, tuple)
+        and len(prediction) == 2
+        and isinstance(prediction[0], tuple)
+        and isinstance(prediction[1], list)
+    )
 
 
 def reconstruct_mask_probabilities(

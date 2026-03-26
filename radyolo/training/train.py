@@ -28,7 +28,7 @@ from radyolo.data.data import (
     apply_configured_augmentations_to_batch,
     build_dataloader,
 )
-from radyolo.models.model import HardcodedModel
+from radyolo.models.model import HardcodedModel, build_model_from_config
 from radyolo.utils.torch_utils import EarlyStopping
 from radyolo.utils.util import ModelEMA, init_seeds, select_device
 from radyolo.validation.plotting import plot_results
@@ -147,32 +147,12 @@ class Trainer:
             self.config = self.config.model_copy(update=checkpoint["train_config"].model_dump())
             model_state_dict = checkpoint["model_state_dict"]
 
-        model = HardcodedModel(
-            input_channels=self.config.input_channels,
-            num_classes=num_classes,
-            scale=self.config.model_scale,
-            box=self.config.box,
-            cls=self.config.cls,
-            dfl=self.config.dfl,
-            dfl_reg_max=self.config.dfl_reg_max,
-            bbox_parametrization=self.config.bbox_parametrization,
-            bbox_center_offset_limit=self.config.bbox_center_offset_limit,
-            mask_gain=self.config.mask_gain,
-            class_separate_gain=self.config.class_separate_gain,
+        model = build_model_from_config(
+            self.config,
             device=device,
-            enable_output_masks=self.config.segmentation_output,
-            num_prototype_masks=self.config.prototype_masks,
-            higher_resolution_prototypes=self.config.higher_resolution_prototypes,
-            separate_objectness_head=self.config.separate_objectness_head,
-            include_stride4_output=self.config.include_stride4_output,
-            objectness_loss=self.config.objectness_loss,
-            tal_topk=self.config.tal_topk,
-            tal_alpha=self.config.tal_alpha,
-            tal_beta=self.config.tal_beta,
-            gamma=self.config.gamma,
+            num_classes=num_classes,
+            state_dict=model_state_dict,
         )
-        if model_state_dict:
-            model.load(model_state_dict)
         return checkpoint, model
 
     def _setup_scheduler(
@@ -396,31 +376,14 @@ class Trainer:
                         )
                     # Forward
                     with torch.autocast(self.device.type):
-                        batch["img"] = batch["img"].to(self.device, non_blocking=True)
-                        if self.config.segmentation_output:
-                            batch["masks"] = tuple(
-                                masks.to(self.device, non_blocking=True)
-                                if masks is not None
-                                else None
-                                for masks in batch["masks"]
-                            )
-
-                        if run_gpu_augmentations:
-                            batch["cls"] = batch["cls"].to(self.device, non_blocking=True)
-                            batch["bboxes"] = batch["bboxes"].to(self.device, non_blocking=True)
-                            batch["batch_idx"] = batch["batch_idx"].to(
-                                self.device,
-                                non_blocking=True,
-                            )
-                            apply_configured_augmentations_to_batch(
-                                batch,
-                                self.config,
-                                tuple(self.config.imgsz),
-                                placement="gpu",
-                            )
+                        prepared_batch = self._prepare_training_batch(
+                            batch,
+                            run_gpu_augmentations,
+                        )
 
                         loss, self.loss_items = cast(
-                            "tuple[torch.Tensor, torch.Tensor]", model(batch)
+                            "tuple[torch.Tensor, torch.Tensor]",
+                            model(prepared_batch),
                         )
 
                         tloss = (
@@ -540,6 +503,25 @@ class Trainer:
             "timing/post_gpu_to_next_gpu_steps_s",
         )
         return dict.fromkeys(keys, 0.0)
+
+    def _prepare_training_batch(self, batch: dict, run_gpu_augmentations: bool) -> dict:
+        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+        if self.config.segmentation_output:
+            batch["masks"] = tuple(
+                masks.to(self.device, non_blocking=True) if masks is not None else None
+                for masks in batch["masks"]
+            )
+
+        if run_gpu_augmentations:
+            for key in ("cls", "bboxes", "batch_idx"):
+                batch[key] = batch[key].to(self.device, non_blocking=True)
+            apply_configured_augmentations_to_batch(
+                batch,
+                self.config,
+                tuple(self.config.imgsz),
+                placement="gpu",
+            )
+        return batch
 
     @staticmethod
     def optimizer_step(

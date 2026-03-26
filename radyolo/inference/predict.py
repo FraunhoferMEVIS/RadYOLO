@@ -5,18 +5,17 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 
-from radyolo.config.config import DefaultConfig, load_model_checkpoint
+from radyolo.config.config import DefaultConfig, DetectionPostprocessConfig
 from radyolo.data.preprocessing import preprocess_image
-from radyolo.models.model import HardcodedModel
+from radyolo.models.model import load_checkpoint_model
 from radyolo.utils import ops
-from radyolo.utils.util import select_device
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -37,52 +36,13 @@ class PredictionConfig:
     device: str | None = None  # optional device override (e.g. "cpu", "cuda:0")
 
 
-def _build_model_from_config(
-    train_config: DefaultConfig, state_dict: dict[str, Any], device: torch.device
-) -> HardcodedModel:
-    """Instantiate HardcodedModel using stored hyperparameters and load weights."""
-    model = HardcodedModel(
-        input_channels=train_config.input_channels,
-        num_classes=train_config.num_classes,
-        scale=train_config.model_scale,
-        box=train_config.box,
-        cls=train_config.cls,
-        dfl=train_config.dfl,
-        dfl_reg_max=train_config.dfl_reg_max,
-        bbox_parametrization=train_config.bbox_parametrization,
-        bbox_center_offset_limit=train_config.bbox_center_offset_limit,
-        mask_gain=train_config.mask_gain,
-        class_separate_gain=train_config.class_separate_gain,
-        device=device,
-        enable_output_masks=train_config.segmentation_output,
-        num_prototype_masks=train_config.prototype_masks,
-        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
-        separate_objectness_head=train_config.separate_objectness_head,
-        include_stride4_output=train_config.include_stride4_output,
-        objectness_loss=train_config.objectness_loss,
-        tal_topk=train_config.tal_topk,
-        tal_alpha=train_config.tal_alpha,
-        tal_beta=train_config.tal_beta,
-        gamma=train_config.gamma,
-    )
-    model.load(state_dict)
-    return model
-
-
-def _load_model(cfg: PredictionConfig) -> tuple[HardcodedModel, DefaultConfig, dict[int, str]]:
-    checkpoint = load_model_checkpoint(cfg.model_path)
-    train_config = checkpoint["train_config"]
-    device = select_device(cfg.device or getattr(train_config, "device", ""))
-    model: HardcodedModel | None = None
-    state_dict = checkpoint["model_state_dict"]
-    model = _build_model_from_config(train_config, state_dict, device)
-    model.eval().to(device)
-    with contextlib.suppress(AttributeError):
-        model.device = device
+def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
+    loaded_model = load_checkpoint_model(cfg.model_path, device_override=cfg.device)
+    train_config = loaded_model.train_config
     num_classes = train_config.num_classes
     names = {i: f"class_{i}" for i in range(num_classes)}
 
-    return model, train_config, names
+    return loaded_model.model, train_config, names
 
 
 def _iter_nifti(input_dir: Path) -> Iterable[Path]:
@@ -90,7 +50,7 @@ def _iter_nifti(input_dir: Path) -> Iterable[Path]:
 
 
 def _postprocess_single(
-    pred_class_box: tuple[torch.Tensor, ...],
+    pred_class_box: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
     pred_mask_coeff: torch.Tensor | None,
     pred_prototype_masks: torch.Tensor | None,
     train_config: DefaultConfig,
@@ -101,53 +61,18 @@ def _postprocess_single(
 
     Output tensor columns: x1,y1,z1,x2,y2,z2,conf,class,(optional mask coeffs...)
     """
-    # Unpack detection outputs (inference_out, loss_out)
-    if isinstance(pred_class_box, (list, tuple)) and len(pred_class_box) == 2:
-        pred_class_box = pred_class_box[0]
-
-    if isinstance(pred_class_box, tuple) and len(pred_class_box) == 3:  # (dbox, cls_prob, obj_prob)
-        dbox, cls_prob, obj_prob = pred_class_box
-        # For separate objectness head: joint score = class_prob * objectness
-        cls_scores = cls_prob * obj_prob
-    elif isinstance(pred_class_box, tuple) and len(pred_class_box) == 2:  # (dbox, cls_prob)
-        dbox, cls_prob = pred_class_box
-        cls_scores = cls_prob
-    else:
-        # Already a combined prediction tensor of shape (B, 6 + C (+ M), N)
-        prediction = pred_class_box
-        detections = ops.non_max_suppression(
-            prediction,
-            prediction_config.conf,
-            prediction_config.iou,
-            multi_label=False,
-            agnostic=train_config.agnostic_nms,
+    detections = ops.postprocess_model_predictions(
+        pred_class_box,
+        pred_mask_coeff,
+        DetectionPostprocessConfig(
+            conf=prediction_config.conf or train_config.conf or 0.001,
+            iou=prediction_config.iou or train_config.iou,
+            agnostic_nms=train_config.agnostic_nms,
             max_det=train_config.max_det,
             nms_time_limit=train_config.nms_time_limit,
             nc=num_classes,
-        )[0].cpu()
-        return detections, pred_prototype_masks
-
-    # Convert to xyzxyz format if necessary already handled in ops.non_max_suppression
-    # Build combined prediction tensor in expected layout: (B, 6 + C, N)
-    prediction = torch.cat((dbox, cls_scores), 1)
-
-    # Optionally append mask coefficients (shape (B, M, N)) if counts align
-    if isinstance(pred_mask_coeff, torch.Tensor) and (
-        pred_mask_coeff.shape[0] == prediction.shape[0]
-        and pred_mask_coeff.shape[2] == prediction.shape[2]
-    ):
-        prediction = torch.cat((prediction, pred_mask_coeff), 1)
-
-    # Run NMS with multi_label=False to ensure argmax behaviour (ops handles selecting best class)
-    detections = ops.non_max_suppression(
-        prediction,
-        prediction_config.conf,
-        prediction_config.iou,
-        multi_label=False,
-        agnostic=train_config.agnostic_nms,
-        max_det=train_config.max_det,
-        nms_time_limit=train_config.nms_time_limit,
-        nc=num_classes,
+            multi_label=False,
+        ),
     )[0].cpu()
     return detections, pred_prototype_masks
 

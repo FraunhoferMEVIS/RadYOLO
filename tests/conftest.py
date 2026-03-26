@@ -16,7 +16,7 @@ from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
-from radyolo.models.model import HardcodedModel
+from radyolo.models.model import build_model_from_config, load_checkpoint_model
 from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA, select_device
 from radyolo.validation.validate import Validator
@@ -184,32 +184,11 @@ def preprocess_data_with_options(
 def export_onnx(last_model_path: Path) -> Path:
     checkpoint = load_model_checkpoint(last_model_path)
     train_config = checkpoint["train_config"]
-    state_dict = checkpoint["model_state_dict"]
-    model = HardcodedModel(
-        input_channels=train_config.input_channels,
-        num_classes=train_config.num_classes,
-        scale=train_config.model_scale,
-        box=train_config.box,
-        cls=train_config.cls,
-        dfl=train_config.dfl,
-        dfl_reg_max=train_config.dfl_reg_max,
-        bbox_parametrization=train_config.bbox_parametrization,
-        bbox_center_offset_limit=train_config.bbox_center_offset_limit,
-        mask_gain=train_config.mask_gain,
-        class_separate_gain=train_config.class_separate_gain,
+    model = build_model_from_config(
+        train_config,
         device=select_device(train_config.device),
-        enable_output_masks=train_config.segmentation_output,
-        num_prototype_masks=train_config.prototype_masks,
-        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
-        separate_objectness_head=train_config.separate_objectness_head,
-        include_stride4_output=train_config.include_stride4_output,
-        objectness_loss=train_config.objectness_loss,
-        tal_topk=train_config.tal_topk,
-        tal_alpha=train_config.tal_alpha,
-        tal_beta=train_config.tal_beta,
-        gamma=train_config.gamma,
+        state_dict=checkpoint["model_state_dict"],
     )
-    model.load(state_dict)
     model.eval()
     input_shape = (train_config.input_channels, *train_config.imgsz)
     export_model(model, input_shape, last_model_path)
@@ -217,37 +196,10 @@ def export_onnx(last_model_path: Path) -> Path:
 
 
 def run_validation(best_model_path: Path, group: str) -> Path:
-    checkpoint = load_model_checkpoint(best_model_path)
-    train_config = checkpoint["train_config"]
-    state_dict = checkpoint["model_state_dict"]
-    device = select_device(train_config.device)
-    model = HardcodedModel(
-        input_channels=train_config.input_channels,
-        num_classes=train_config.num_classes,
-        scale=train_config.model_scale,
-        box=train_config.box,
-        cls=train_config.cls,
-        dfl=train_config.dfl,
-        dfl_reg_max=train_config.dfl_reg_max,
-        bbox_parametrization=train_config.bbox_parametrization,
-        bbox_center_offset_limit=train_config.bbox_center_offset_limit,
-        mask_gain=train_config.mask_gain,
-        class_separate_gain=train_config.class_separate_gain,
-        device=device,
-        enable_output_masks=train_config.segmentation_output,
-        num_prototype_masks=train_config.prototype_masks,
-        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
-        separate_objectness_head=train_config.separate_objectness_head,
-        include_stride4_output=train_config.include_stride4_output,
-        objectness_loss=train_config.objectness_loss,
-        tal_topk=train_config.tal_topk,
-        tal_alpha=train_config.tal_alpha,
-        tal_beta=train_config.tal_beta,
-        gamma=train_config.gamma,
-    )
-    model.load(state_dict)
-    model.to(device)
-    model.device = device  # type: ignore[attr-defined]
+    loaded_model = load_checkpoint_model(best_model_path)
+    train_config = loaded_model.train_config
+    device = loaded_model.device
+    model = loaded_model.model
     dataset_root = Path(train_config.data)
     dataset_yaml = dataset_root / "dataset.yaml"
     with dataset_yaml.open(encoding="utf-8") as f:
