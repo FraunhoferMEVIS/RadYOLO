@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 
 from radyolo.config.config import DefaultConfig
 from radyolo.data import augmentations as augmentation_module
 from radyolo.data import data as data_module
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from _pytest.monkeypatch import MonkeyPatch
 
 
 def _make_config(tmp_path: Path, **overrides: Any) -> DefaultConfig:
@@ -25,7 +30,10 @@ def _make_config(tmp_path: Path, **overrides: Any) -> DefaultConfig:
     return DefaultConfig(**base_config)
 
 
-def _record_image_only_call(call_order: list[str], name: str):
+def _record_image_only_call(
+    call_order: list[str],
+    name: str,
+) -> Callable[[torch.Tensor, Any], torch.Tensor]:
     def _recorder(image: torch.Tensor, *_: Any, **__: Any) -> torch.Tensor:
         call_order.append(name)
         return image
@@ -33,7 +41,23 @@ def _record_image_only_call(call_order: list[str], name: str):
     return _recorder
 
 
-def test_intensity_augmentations_follow_configured_order_per_device(monkeypatch) -> None:
+def _make_batch(image: torch.Tensor) -> data_module.Batch:
+    return {
+        "img": image.unsqueeze(0),
+        "ori_shape": ((4, 4, 4),),
+        "ratio_pad": (None,),
+        "shape": ((4, 4, 4),),
+        "cls": torch.empty((0, 1), dtype=torch.float32),
+        "bboxes": torch.empty((0, 6), dtype=torch.float32),
+        "batch_idx": torch.empty((0,), dtype=torch.int64),
+        "masks": (None,),
+        "case_names": ("test-case",),
+    }
+
+
+def test_intensity_augmentations_follow_configured_order_per_device(
+    monkeypatch: MonkeyPatch,
+) -> None:
     call_order: list[str] = []
     monkeypatch.setattr(
         augmentation_module,
@@ -95,9 +119,53 @@ def test_intensity_augmentations_follow_configured_order_per_device(monkeypatch)
     assert call_order == ["noise", "mult_brightness", "contrast", "gamma"]
 
 
-def test_apply_configured_augmentations_preserves_order_on_same_device(
+def test_apply_configured_image_augmentations_preserves_order_on_same_device(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _make_config(
+        tmp_path,
+        gin_augmentation_device="cpu",
+        channel_dropout_augmentation_device="cpu",
+        zoom_augmentation_device="gpu",
+        rotation_augmentation_device="gpu",
+        cutout_augmentation_device="gpu",
+        mirroring_augmentation_device="gpu",
+    )
+    call_order: list[str] = []
+
+    monkeypatch.setattr(
+        data_module,
+        "batch_generators_intensity_augmentations",
+        _record_image_only_call(call_order, "intensity"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "gin_augmentation",
+        _record_image_only_call(call_order, "gin"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_channel_dropout",
+        _record_image_only_call(call_order, "dropout"),
+    )
+
+    image = torch.zeros((1, 4, 4, 4), dtype=torch.float32)
+    batch = _make_batch(image)
+
+    data_module.apply_configured_augmentations_to_batch(
+        batch,
+        config,
+        (4, 4, 4),
+        placement="cpu",
+    )
+
+    assert call_order == ["intensity", "gin", "dropout"]
+
+
+def test_apply_configured_augmentations_runs_spatial_before_image_augmentations(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     config = _make_config(
         tmp_path,
@@ -128,36 +196,35 @@ def test_apply_configured_augmentations_preserves_order_on_same_device(
 
     def _record_spatial(
         image: torch.Tensor,
-        classes: torch.Tensor,
-        bboxes: torch.Tensor,
+        labels: torch.Tensor,
         masks: torch.Tensor | None,
         *_: Any,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        call_order.append("spatial")
-        return image, classes, bboxes, masks
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        call_order.append("zoom")
+        return image, labels, masks
 
-    monkeypatch.setattr(data_module, "_apply_configured_spatial_augmentations_to_sample", _record_spatial)
+    monkeypatch.setattr(
+        data_module,
+        "random_zoom",
+        _record_spatial,
+    )
 
     image = torch.zeros((1, 4, 4, 4), dtype=torch.float32)
-    classes = torch.empty((0, 1), dtype=torch.float32)
-    bboxes = torch.empty((0, 6), dtype=torch.float32)
+    batch = _make_batch(image)
 
-    data_module._apply_configured_augmentations_to_sample(
-        image,
-        classes,
-        bboxes,
-        None,
+    data_module.apply_configured_augmentations_to_batch(
+        batch,
         config,
         (4, 4, 4),
         placement="cpu",
     )
 
-    assert call_order == ["intensity", "gin", "dropout", "spatial"]
+    assert call_order == ["zoom", "intensity", "gin", "dropout"]
 
 
 def test_apply_configured_augmentations_routes_only_matching_device(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     config = _make_config(
         tmp_path,
@@ -195,31 +262,30 @@ def test_apply_configured_augmentations_routes_only_matching_device(
 
     def _record_spatial(
         image: torch.Tensor,
-        classes: torch.Tensor,
-        bboxes: torch.Tensor,
+        labels: torch.Tensor,
         masks: torch.Tensor | None,
         *_: Any,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        call_order.append("spatial")
-        return image, classes, bboxes, masks
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        call_order.append("zoom")
+        return image, labels, masks
 
-    monkeypatch.setattr(data_module, "_apply_configured_spatial_augmentations_to_sample", _record_spatial)
+    monkeypatch.setattr(
+        data_module,
+        "random_zoom",
+        _record_spatial,
+    )
 
     image = torch.zeros((1, 4, 4, 4), dtype=torch.float32)
-    classes = torch.empty((0, 1), dtype=torch.float32)
-    bboxes = torch.empty((0, 6), dtype=torch.float32)
+    batch = _make_batch(image)
 
-    data_module._apply_configured_augmentations_to_sample(
-        image,
-        classes,
-        bboxes,
-        None,
+    data_module.apply_configured_augmentations_to_batch(
+        batch,
         config,
         (4, 4, 4),
         placement="cpu",
     )
 
-    assert call_order == ["gin", "spatial"]
+    assert call_order == ["zoom", "gin"]
 
 
 def test_gaussian_noise_and_blur_preserve_tensor_device() -> None:
