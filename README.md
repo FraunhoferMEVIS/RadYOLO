@@ -148,18 +148,10 @@ The main source code lives in the `radyolo/` package.
 End-to-end CLI tests live in `tests/` and create a tiny synthetic dataset (two 16×16×16 volumes) to exercise all commands quickly on CPU. Install dev dependencies and run:
 
 ```bash
-cd ./tests
-uv run pytest
+uv run --group dev pytest
 ```
 
-Or with plain pip:
+Coverage analysis:
 ```bash
-pip install -e .[dev]
-cd ./tests
-pytest
-```
-
-Optional coverage:
-```bash
-pytest --cov=radyolo --cov-report=term-missing
+uv run --group dev pytest --cov=radyolo --cov-report=xml --cov-report=term
 ```
