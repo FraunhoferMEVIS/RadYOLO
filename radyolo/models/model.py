@@ -14,6 +14,7 @@ from radyolo.models.layers import (
     Concat,
     Conv,
     Detect,
+    ModelOutput,
     PrototypeMasks,
     PrototypeMasksHighResolution,
     PrototypeMasksHighResolutionOneSkip,
@@ -256,17 +257,14 @@ class HardcodedModel(nn.Module):
             center_offset_limit=self.bbox_center_offset_limit,
         )
         s = 256
+        sample_output = self.forward(torch.zeros(1, input_channels, s, s, s))
         self.l23.stride = torch.tensor(
-            [s / x.shape[-2] for x in self.forward(torch.zeros(1, input_channels, s, s, s))[0]]
+            [s / x.shape[-2] for x in sample_output.raw_predictions]
         )
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-    def forward(self, x: torch.Tensor) -> tuple[
-        list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
-        torch.Tensor | None,
-        torch.Tensor | None,
-    ]:
+    def forward(self, x: torch.Tensor) -> ModelOutput:
         # BACKBONE
         x = o0 = self.l0(x)
         x = o1 = self.l1(x)
@@ -302,20 +300,23 @@ class HardcodedModel(nn.Module):
         x = o22 = self.l22(x)
 
         if self.include_stride4_output:
-            detections = self.l23([p2, o16, o19, o22])
+            output = self.l23([p2, o16, o19, o22])
         else:
-            detections = self.l23([o16, o19, o22])
+            output = self.l23([o16, o19, o22])
 
         if self.enable_output_masks:
             if self.include_stride4_output:
-                prototype_masks = self.prototype_layer(p2, o0)
+                output.prototype_masks = self.prototype_layer(p2, o0)
             elif self.higher_resolution_prototypes:
-                prototype_masks = self.prototype_layer(o16, o1, o0)
+                output.prototype_masks = self.prototype_layer(o16, o1, o0)
             else:
-                prototype_masks = self.prototype_layer(o16)
-            batch_size = prototype_masks.shape[0]
+                output.prototype_masks = self.prototype_layer(o16)
+            if output.prototype_masks is None:
+                msg = "Prototype masks are not available"
+                raise RuntimeError(msg)
+            batch_size = output.prototype_masks.shape[0]
             if self.include_stride4_output:
-                mask_coefficients = torch.cat(
+                output.mask_coefficients = torch.cat(
                     [
                         self.mask_coefficient_layer[0](p2).view(
                             batch_size, self.num_prototype_masks, -1
@@ -333,7 +334,7 @@ class HardcodedModel(nn.Module):
                     2,
                 )
             else:
-                mask_coefficients = torch.cat(
+                output.mask_coefficients = torch.cat(
                     [
                         self.mask_coefficient_layer[0](o16).view(
                             batch_size, self.num_prototype_masks, -1
@@ -347,8 +348,7 @@ class HardcodedModel(nn.Module):
                     ],
                     2,
                 )
-            return detections, mask_coefficients, prototype_masks
-        return detections, None, None
+        return output
 
     def load(self, state_dict: dict) -> None:
         state_dict_intersected = intersect_dicts(state_dict, self.state_dict())

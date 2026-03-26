@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never, cast, overload
 
 import torch
@@ -10,6 +11,36 @@ from radyolo.training.tal import BoxParametrization, decode_bboxes, make_anchors
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+@dataclass
+class ModelOutput:
+    raw_predictions: list[torch.Tensor] | None = None
+    decoded_boxes: torch.Tensor | None = None
+    class_probabilities: torch.Tensor | None = None
+    objectness_probabilities: torch.Tensor | None = None
+    mask_coefficients: torch.Tensor | None = None
+    prototype_masks: torch.Tensor | None = None
+
+    def to_prediction_components(self) -> tuple[torch.Tensor, ...]:
+        if self.decoded_boxes is None or self.class_probabilities is None:
+            msg = "Decoded detection outputs are not available"
+            raise RuntimeError(msg)
+        if self.objectness_probabilities is not None:
+            return (
+                self.decoded_boxes,
+                self.class_probabilities,
+                self.objectness_probabilities,
+            )
+        return (self.decoded_boxes, self.class_probabilities)
+
+    def to_export_tensors(self) -> tuple[torch.Tensor, ...]:
+        output_tensors = list(self.to_prediction_components())
+        if self.mask_coefficients is not None:
+            output_tensors.append(self.mask_coefficients)
+        if self.prototype_masks is not None:
+            output_tensors.append(self.prototype_masks)
+        return tuple(output_tensors)
 
 
 @overload
@@ -500,7 +531,7 @@ class Detect(nn.Module):
 
     def forward(
         self, pred_raw: list[torch.Tensor]
-    ) -> list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
+    ) -> ModelOutput:
         for i in range(self.nl):
             reg = self.cv_boxes[i](pred_raw[i])
             cls = self.cv_classes[i](pred_raw[i])
@@ -509,14 +540,14 @@ class Detect(nn.Module):
                 pred_raw[i] = torch.cat((reg, cls, obj), 1)
             else:
                 pred_raw[i] = torch.cat((reg, cls), 1)
+        output = ModelOutput(raw_predictions=pred_raw)
         if self.training:
-            return pred_raw
-        pred_with_final_layers = self._inference(pred_raw)
-        if self.export:
-            return pred_with_final_layers
-        return (pred_with_final_layers, pred_raw)
+            return output
+        return self._inference(output)
 
-    def _inference(self, x: list[torch.Tensor]) -> tuple[torch.Tensor, ...]:
+    def _inference(self, output: ModelOutput) -> ModelOutput:
+        """Adds decoded boxes and class probabilities to model output object."""
+        x = output.raw_predictions
         shape = x[0].shape
         if self.shape != shape:
             self.anchors, self.strides = (
@@ -526,14 +557,18 @@ class Detect(nn.Module):
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
         if self.separate_objectness_head:
             box, cls, obj = x_cat.split((self.reg_channels, self.nc, 1), 1)
-            dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-            cls_prob = cls.softmax(1)
-            obj_prob = obj.sigmoid()
-            return (dbox, cls_prob, obj_prob)
+            output.decoded_boxes = (
+                self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+            )
+            output.class_probabilities = cls.softmax(1)
+            output.objectness_probabilities = obj.sigmoid()
+            return output
         box, cls = x_cat.split((self.reg_channels, self.nc), 1)
-        dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-        cls_prob = cls.sigmoid()
-        return (dbox, cls_prob)
+        output.decoded_boxes = (
+            self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+        )
+        output.class_probabilities = cls.sigmoid()
+        return output
 
     def bias_init(self) -> None:
         for idx, (box_convolutions, class_convolutions, stride) in enumerate(

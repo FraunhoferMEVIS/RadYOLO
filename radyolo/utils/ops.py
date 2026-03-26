@@ -16,52 +16,45 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from radyolo.config.config import DetectionPostprocessConfig
+    from radyolo.models.layers import ModelOutput
 
 LOGGER = logging.getLogger(__name__)
 
 
-def prepare_prediction_for_nms(
-    prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
-    mask_coefficients: torch.Tensor | None,
+def prepare_model_output_for_nms(
+    model_output: ModelOutput,
 ) -> torch.Tensor:
-    if _is_detect_eval_output(prediction):
-        prediction = prediction[0]
+    if model_output.objectness_probabilities is not None:
+        class_scores = model_output.class_probabilities * model_output.objectness_probabilities
+    else:
+        class_scores = model_output.class_probabilities
+    prediction_tensor = torch.cat((model_output.decoded_boxes, class_scores), 1)
 
-    if isinstance(prediction, tuple) and len(prediction) == 3:
-        dbox, cls_prob, obj_prob = prediction
-        prediction = torch.cat((dbox, cls_prob * obj_prob), 1)
-    elif isinstance(prediction, tuple) and len(prediction) == 2:
-        dbox, cls_prob = prediction
-        prediction = torch.cat((dbox, cls_prob), 1)
-    elif not isinstance(prediction, torch.Tensor):
-        msg = f"Unsupported prediction type: {type(prediction)!r}"
-        raise TypeError(msg)
-
-    if isinstance(mask_coefficients, torch.Tensor):
+    if model_output.mask_coefficients is not None:
+        mask_coefficients = model_output.mask_coefficients
         if (
-            prediction.shape[0] != mask_coefficients.shape[0]
-            or prediction.shape[-1] != mask_coefficients.shape[-1]
+            prediction_tensor.shape[0] != mask_coefficients.shape[0]
+            or prediction_tensor.shape[-1] != mask_coefficients.shape[-1]
         ):
             msg = (
                 "Mask coefficients shape mismatch with predictions. "
-                f"Prediction shape={tuple(prediction.shape)}, "
+                f"Prediction shape={tuple(prediction_tensor.shape)}, "
                 f"mask_coefficients shape={tuple(mask_coefficients.shape)}"
             )
             raise ValueError(msg)
-        prediction = torch.cat((prediction, mask_coefficients), dim=1)
+        prediction_tensor = torch.cat((prediction_tensor, mask_coefficients), dim=1)
 
-    return prediction
+    return prediction_tensor
 
 
-def postprocess_model_predictions(
-    prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
-    mask_coefficients: torch.Tensor | None,
+def postprocess_model_output(
+    model_output: ModelOutput,
     postprocess_config: DetectionPostprocessConfig,
     *,
     labels: Sequence[torch.Tensor] | None = None,
 ) -> list[torch.Tensor]:
     return non_max_suppression(
-        prepare_prediction_for_nms(prediction, mask_coefficients),
+        model_output,
         postprocess_config.conf,
         postprocess_config.iou,
         labels=list(labels or []),
@@ -70,15 +63,6 @@ def postprocess_model_predictions(
         max_det=postprocess_config.max_det,
         nms_time_limit=postprocess_config.nms_time_limit,
         nc=postprocess_config.nc,
-    )
-
-
-def _is_detect_eval_output(prediction: object) -> bool:
-    return (
-        isinstance(prediction, tuple)
-        and len(prediction) == 2
-        and isinstance(prediction[0], tuple)
-        and isinstance(prediction[1], list)
     )
 
 
@@ -182,7 +166,7 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torc
 
 
 def non_max_suppression(
-    prediction: list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
+    model_output: ModelOutput,
     conf_thres: float = 0.1,
     iou_thres: float = 0.2,
     classes: list[int] | torch.Tensor | None = None,
@@ -201,9 +185,7 @@ def non_max_suppression(
     Supports masks and multiple labels per box.
 
     Args:
-        prediction (torch.Tensor): Tensor of shape (batch_size, num_classes+4+num_masks, num_boxes)
-            containing the predicted boxes, classes, and masks. The tensor should be in the format
-            output by a model, such as YOLO.
+        model_output (ModelOutput): Structured model output.
         conf_thres (float): The confidence threshold below which boxes will be filtered out.
             Valid values are between 0.0 and 1.0.
         iou_thres (float): The IoU threshold below which boxes will be filtered out during NMS.
@@ -232,10 +214,7 @@ def non_max_suppression(
         f"Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0"
     )
     assert 0 <= iou_thres <= 1, f"Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0"
-    if isinstance(
-        prediction, (list, tuple)
-    ):  # output = (inference_out, loss_out)
-        prediction = prediction[0]  # select only inference output
+    prediction = prepare_model_output_for_nms(model_output)
     if classes is not None:
         classes = torch.tensor(classes, device=prediction.device)
 

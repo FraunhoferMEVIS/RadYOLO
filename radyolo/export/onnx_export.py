@@ -1,15 +1,24 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
+from torch import nn
 
 from radyolo.models.layers import C2f, Detect
 
 if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
+
+
+class ExportModelWrapper(nn.Module):
+    def __init__(self, model: HardcodedModel) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        return self.model(x).to_export_tensors()
 
 
 def export_model(
@@ -36,6 +45,7 @@ def export_model(
             m.forward = m.forward_split
 
     onnx_path = Path(dest).with_suffix(".onnx")
+    export_wrapper = ExportModelWrapper(model)
 
     if model.enable_output_masks and not model.separate_objectness_head:
         output_names = ["boxes", "classScores", "maskCoefficients", "prototypeMasks"]
@@ -53,7 +63,7 @@ def export_model(
         output_names = ["boxes", "classScores"]
 
     torch.onnx.export(
-        model,
+        export_wrapper,
         inputs,
         onnx_path,
         verbose=False,

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from radyolo.config.config import DatasetConfig, DefaultConfig
     from radyolo.data.data import Batch
+    from radyolo.models.layers import ModelOutput
     from radyolo.models.model import HardcodedModel
     from radyolo.training.loss import v8DetectionLoss
     from radyolo.training.train import Trainer
@@ -124,20 +125,15 @@ class Validator:
             batch: Batch = self.preprocess(raw_batch)
 
             with torch.autocast(self.device.type), torch.no_grad():
-                raw_preds: (
-                    list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]
-                ) = model(batch["img"])
-                if isinstance(raw_preds, torch.Tensor):
-                    raise TypeError(raw_preds)
+                model_output: ModelOutput = model(batch["img"])
 
                 if self.training:
-                    validation_loss += loss(raw_preds, batch)[1]
+                    validation_loss += loss(model_output, batch)[1]
 
             # Postprocess and metrics
-            pred_class_box, pred_mask_coeff, pred_prototype_masks = raw_preds
-            preds = self.postprocess(pred_class_box, pred_mask_coeff)
+            preds = self.postprocess(model_output)
 
-            self.update_metrics(preds, batch, pred_prototype_masks)
+            self.update_metrics(preds, batch, model_output.prototype_masks)
             if self.config.plots and batch_i < 3:
                 val_sample_folder = self.save_dir / "validation_samples"
                 if not val_sample_folder.exists():
@@ -212,8 +208,7 @@ class Validator:
 
     def postprocess(
         self,
-        prediction: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
-        mask_coefficients: torch.Tensor | None,
+        model_output: ModelOutput,
     ) -> list[torch.Tensor]:
         postprocess_config = DetectionPostprocessConfig(
             conf=self.config.conf,
@@ -224,9 +219,8 @@ class Validator:
             nc=self.nc,
             multi_label=True,
         )
-        return ops.postprocess_model_predictions(
-            prediction,
-            mask_coefficients,
+        return ops.postprocess_model_output(
+            model_output,
             postprocess_config,
             labels=self.lb,
         )

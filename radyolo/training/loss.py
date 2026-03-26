@@ -23,7 +23,7 @@ from radyolo.validation.metrics import bbox_iou
 if TYPE_CHECKING:
     from radyolo.config.config import DefaultConfig
     from radyolo.data.data import Batch
-    from radyolo.models.layers import Detect
+    from radyolo.models.layers import Detect, ModelOutput
     from radyolo.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
@@ -280,17 +280,12 @@ class v8DetectionLoss:  # noqa: N801
 
     def __call__(
         self,
-        preds: tuple[
-            list[torch.Tensor] | torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]],
-            torch.Tensor | None,
-            torch.Tensor | None,
-        ],
+        model_output: ModelOutput,
         batch: Batch,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the detection loss multiplied by batch size."""
         loss = torch.zeros(5, device=self.device)  # box, cls_obj, dfl, mask, cls_sep
-        feats = preds[0]
-        feats = feats[1] if isinstance(feats, tuple) else feats  # Handling of inference pass
+        feats = model_output.raw_predictions
         flat = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
         if self.separate_objectness_head:
             pred_distri, pred_cls_logits, pred_obj_logit = flat.split(
@@ -404,9 +399,9 @@ class v8DetectionLoss:  # noqa: N801
             # Mask loss
             if self.enable_mask_loss:
                 mask_loss_count = 0
-                mask_coefficients = preds[1]
+                mask_coefficients = model_output.mask_coefficients
                 mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
-                prototype_masks = preds[2]
+                prototype_masks = model_output.prototype_masks
                 for batch_index, masks in enumerate(batch["masks"]):
                     target_gt_idx_batch = target_gt_idx[batch_index]
                     fg_mask_batch = fg_mask[batch_index]

@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
+    from radyolo.models.layers import ModelOutput
+
 LOGGER = logging.getLogger(__name__)
 
 MASK_THRESHOLD = 0.5
@@ -50,9 +52,7 @@ def _iter_nifti(input_dir: Path) -> Iterable[Path]:
 
 
 def _postprocess_single(
-    pred_class_box: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor],
-    pred_mask_coeff: torch.Tensor | None,
-    pred_prototype_masks: torch.Tensor | None,
+    model_output: ModelOutput,
     train_config: DefaultConfig,
     prediction_config: PredictionConfig,
     num_classes: int,
@@ -61,9 +61,8 @@ def _postprocess_single(
 
     Output tensor columns: x1,y1,z1,x2,y2,z2,conf,class,(optional mask coeffs...)
     """
-    detections = ops.postprocess_model_predictions(
-        pred_class_box,
-        pred_mask_coeff,
+    detections = ops.postprocess_model_output(
+        model_output,
         DetectionPostprocessConfig(
             conf=prediction_config.conf or train_config.conf or 0.001,
             iou=prediction_config.iou or train_config.iou,
@@ -74,7 +73,7 @@ def _postprocess_single(
             multi_label=False,
         ),
     )[0].cpu()
-    return detections, pred_prototype_masks
+    return detections, model_output.prototype_masks
 
 
 def _relative_box(
@@ -199,13 +198,9 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
                 torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
             )
             with torch.no_grad(), autocast_ctx:
-                pred_class_box, pred_mask_coeff, pred_prototype_masks = model(
-                    img_preprocessed.unsqueeze(0).to(device)
-                )
+                model_output: ModelOutput = model(img_preprocessed.unsqueeze(0).to(device))
             detections, proto_masks = _postprocess_single(
-                pred_class_box,
-                pred_mask_coeff,
-                pred_prototype_masks,
+                model_output,
                 train_config,
                 prediction_cfg,
                 len(names),
@@ -227,7 +222,7 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
                         "box_world_xyzxyz": [round(float(x), 2) for x in box_world_xyzxyz.tolist()],
                         "box_relative_xyzxyz": _relative_box(box_image_xyzxyz, original_shape),
                     }
-                    if pred_mask_coeff is not None and proto_masks is not None:
+                    if model_output.mask_coefficients is not None and proto_masks is not None:
                         proto = proto_masks[0]
                         mask_filename = _reconstruct_and_save_mask(
                             det,
