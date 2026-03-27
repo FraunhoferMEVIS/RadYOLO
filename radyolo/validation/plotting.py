@@ -621,6 +621,8 @@ def _annotate_projected_boxes(
         confs_np = np.asarray(confs, dtype=np.float32)
 
     for index, box in enumerate(boxes_2d):
+        if index >= len(classes_np) or not np.isfinite(box).all():
+            continue
         if confs_np is not None and confs_np[index] <= conf_thres:
             continue
         class_index = int(classes_np[index])
@@ -665,7 +667,7 @@ def plot_validation_case(
     difference_channels: tuple[int, int] = (2, 0),
     conf_thres: float = 0.1,
 ) -> None:
-    figure, axes = plt.subplots(2, 3, figsize=(15, 9), tight_layout=True)
+    figure, axes = plt.subplots(2, 3, figsize=(15, 9), constrained_layout=True)
     plane_titles = ("xy", "xz", "yz")
 
     for row_index, (row_title, boxes, classes, confs) in enumerate(
@@ -676,14 +678,15 @@ def plot_validation_case(
     ):
         for col_index, plane in enumerate(plane_titles):
             axis = axes[row_index, col_index]
+            projection = _project_case_volume(
+                image,
+                plane,
+                projection_mode,
+                image_mode=image_mode,
+                difference_channels=difference_channels,
+            )
             axis.imshow(
-                _project_case_volume(
-                    image,
-                    plane,
-                    projection_mode,
-                    image_mode=image_mode,
-                    difference_channels=difference_channels,
-                ),
+                projection,
                 cmap="gray",
                 interpolation="lanczos",
                 resample=True,
@@ -708,8 +711,7 @@ def plot_validation_case(
         elif image_mode != "default":
             image_mode_suffix = f", {image_mode}"
         figure.suptitle(f"{case_name} ({projection_mode} projection{image_mode_suffix})")
-        figure.tight_layout(rect=(0, 0, 1, 0.96))
-    figure.savefig(fname, dpi=120, bbox_inches="tight")
+    figure.savefig(fname, dpi=120)
     plt.close(figure)
 
 

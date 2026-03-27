@@ -101,6 +101,7 @@ class DefaultConfig(BaseModel):
     max_det: int = 300  # maximum number of detections per image
     half: bool = False  # use half precision (FP16)
     plots: bool = True  # save plots and images during train/val
+    clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds in val/predict
     validation_plot_projection: Literal["max", "mean"] = (
         "max"  # projection reduction used for validation case plots
     )

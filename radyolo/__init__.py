@@ -590,19 +590,24 @@ def convert_to_nndetection(
     "--conf",
     default=0.1,
     type=float,
-    help="Confidence threshold (overrides training config).",
+    help="Confidence threshold.",
 )
 @click.option(
     "--iou",
     default=0.2,
     type=float,
-    help="IoU threshold for NMS (overrides training config).",
+    help="IoU threshold for NMS.",
 )
 @click.option(
     "--device",
     default="0",
     type=str,
-    help="Device for inference (e.g. cpu, 0). Overrides training config device.",
+    help="Device for inference (e.g. cpu, 0).",
+)
+@click.option(
+    "--clip-boxes-to-image/--no-clip-boxes-to-image",
+    default=False,
+    help="Override whether predicted 3D boxes are clipped to image bounds before export.",
 )
 def predict(
     model_path: Path,
@@ -610,7 +615,8 @@ def predict(
     output_dir: Path,
     conf: float | None,
     iou: float | None,
-    device: str | None,
+    device: str,
+    clip_boxes_to_image: bool,
 ) -> int:
     """Run inference on .nii.gz images in INPUT_DIR and write JSON (and masks) to OUTPUT_DIR."""
     try:
@@ -622,6 +628,7 @@ def predict(
                 conf=conf,
                 iou=iou,
                 device=device,
+                clip_boxes_to_image=clip_boxes_to_image,
             )
         )
     except Exception as e:  # pragma: no cover

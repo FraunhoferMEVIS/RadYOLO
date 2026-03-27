@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 from radyolo.models.layers import ModelOutput
-from radyolo.utils.ops import non_max_suppression, prepare_model_output_for_nms
+from radyolo.utils.ops import non_max_suppression, prepare_model_output_for_nms, scale_boxes
 
 
 def test_model_output_converts_to_prediction_components() -> None:
@@ -83,3 +83,21 @@ def test_non_max_suppression_accepts_model_output(monkeypatch) -> None:
     assert len(result) == 1
     assert result[0].shape[1] == 9
     assert captured["iou_threshold"] == 0.2
+
+
+def test_scale_boxes_can_skip_clipping() -> None:
+    boxes = torch.tensor([[-2.0, -3.0, -4.0, 12.0, 13.0, 14.0]], dtype=torch.float32)
+
+    unclipped = scale_boxes((10, 10, 10), boxes.clone(), (10, 10, 10), clip=False)
+    clipped = scale_boxes((10, 10, 10), boxes.clone(), (10, 10, 10), clip=True)
+
+    assert torch.equal(unclipped, boxes)
+    assert torch.equal(clipped, torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0]]))
+
+
+def test_scale_boxes_defaults_to_no_clipping() -> None:
+    boxes = torch.tensor([[-2.0, -3.0, -4.0, 12.0, 13.0, 14.0]], dtype=torch.float32)
+
+    scaled = scale_boxes((10, 10, 10), boxes.clone(), (10, 10, 10))
+
+    assert torch.equal(scaled, boxes)

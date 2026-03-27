@@ -238,7 +238,13 @@ class Validator:
                 ops.xyzwhd2xyzxyz(bboxes)
                 * torch.tensor(imgsz, device=self.device)[[2, 1, 0, 2, 1, 0]]
             )  # target boxes
-            ops.scale_boxes(imgsz, bboxes, ori_shape, ratio_pad=ratio_pad)  # native-space labels
+            ops.scale_boxes(
+                imgsz,
+                bboxes,
+                ori_shape,
+                ratio_pad=ratio_pad,
+                clip=True,
+            )  # native-space labels
         return {
             "cls": classes,
             "bboxes": bboxes,
@@ -251,7 +257,11 @@ class Validator:
         """Prepares a batch of images and annotations for validation."""
         predn = pred.clone()
         ops.scale_boxes(
-            pbatch["imgsz"], predn[:, :6], pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
+            pbatch["imgsz"],
+            predn[:, :6],
+            pbatch["ori_shape"],
+            ratio_pad=pbatch["ratio_pad"],
+            clip=self.config.clip_boxes_to_image,
         )  # native-space pred
         return predn
 
@@ -585,12 +595,17 @@ class Validator:
             else:
                 reference_boxes = sample_bboxes.new_empty((0, 6))
 
+            predicted_boxes = prediction[:, :6]
+            if self.config.clip_boxes_to_image and len(predicted_boxes):
+                predicted_boxes = predicted_boxes.clone()
+                ops.clip_boxes(predicted_boxes, tuple(batch["img"][sample_index].shape[1:]))
+
             case_name = batch["case_names"][sample_index]
             plot_validation_case(
                 image=batch["img"][sample_index],
                 reference_boxes=reference_boxes,
                 reference_classes=sample_classes,
-                predicted_boxes=prediction[:, :6],
+                predicted_boxes=predicted_boxes,
                 predicted_classes=prediction[:, 7],
                 prediction_confs=prediction[:, 6],
                 fname=(

@@ -88,6 +88,7 @@ def scale_boxes(
     ratio_pad: tuple[tuple[float, float, float], tuple[int, int, int]] | None = None,
     padding: bool = True,
     xyzwhd: bool = False,
+    clip: bool = False,
 ) -> torch.Tensor:
     """Rescales bounding boxes (in the format of xyxy by default).
 
@@ -105,6 +106,7 @@ def scale_boxes(
         padding (bool): If True, assuming the boxes is based on image augmented by yolo style. If
             False then do regular rescaling.
         xyzwhd (bool): The box format is xyzwhd or not, default=False.
+        clip (bool): Whether to clip scaled coordinates to the target image bounds.
 
     Returns:
         boxes (torch.Tensor): The scaled bounding boxes, in the format of (x1, y1, z1, x2, y2, z2)
@@ -133,7 +135,9 @@ def scale_boxes(
             boxes[..., 4] -= pad[1]  # y padding
             boxes[..., 5] -= pad[2]  # z padding
     boxes[..., :6] /= torch.as_tensor(gain, device=boxes.device).tile(1, 2)
-    return clip_boxes(boxes, img0_shape)
+    if clip:
+        return clip_boxes(boxes, img0_shape)
+    return boxes
 
 
 def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:

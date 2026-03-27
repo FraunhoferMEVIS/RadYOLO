@@ -33,9 +33,10 @@ class PredictionConfig:
     model_path: Path
     input_dir: Path
     output_dir: Path
-    conf: float | None
-    iou: float | None
-    device: str | None = None  # optional device override (e.g. "cpu", "cuda:0")
+    conf: float
+    iou: float
+    device: str
+    clip_boxes_to_image: bool
 
 
 def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
@@ -64,8 +65,8 @@ def _postprocess_single(
     detections = ops.postprocess_model_output(
         model_output,
         DetectionPostprocessConfig(
-            conf=prediction_config.conf or train_config.conf or 0.001,
-            iou=prediction_config.iou or train_config.iou,
+            conf=prediction_config.conf,
+            iou=prediction_config.iou,
             agnostic_nms=train_config.agnostic_nms,
             max_det=train_config.max_det,
             nms_time_limit=train_config.nms_time_limit,
@@ -177,6 +178,7 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
         if not prediction_cfg.output_dir.exists():
             prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
         model, train_config, names = _load_model(prediction_cfg)
+        clip_boxes_to_image = prediction_cfg.clip_boxes_to_image
         target_size = tuple(train_config.imgsz)
         files = list(_iter_nifti(prediction_cfg.input_dir))
         if not files:
@@ -207,7 +209,13 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
             )
             image_results: list[dict[str, object]] = []
             if detections.numel():
-                ops.scale_boxes(target_size, detections[:, :6], original_shape, ratio_pad=None)
+                ops.scale_boxes(
+                    target_size,
+                    detections[:, :6],
+                    original_shape,
+                    ratio_pad=None,
+                    clip=clip_boxes_to_image,
+                )
                 for det_i, det in enumerate(detections):
                     box_image_xyzxyz = det[:6]
                     try:

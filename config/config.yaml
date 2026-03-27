@@ -34,6 +34,7 @@ nms_time_limit: 0.5 # (float) maximum time in seconds per image for NMS before e
 max_det: 300 # (int) maximum number of detections per image
 half: False # (bool) use half precision (FP16)
 plots: True # (bool) save plots and images during train/val
+clip_boxes_to_image: True # (bool) clip predicted 3D boxes to image bounds during validation/prediction
 validation_plot_projection: "mean" # (literal) projection reduction for validation plots, choices=[max, mean]
 validation_plot_image_mode: "default" # (literal) source image for validation plots, choices=[default, channel_difference]
 validation_plot_difference_channels: [2, 0] # (list[int]) channels used for difference plots as [minuend, subtrahend]

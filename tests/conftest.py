@@ -243,6 +243,7 @@ def run_prediction_dir(model_path: Path, input_dir: Path, output_dir: Path) -> P
             conf=0.1,
             iou=0.2,
             device="cpu",
+            clip_boxes_to_image=True,
         )
     )
     if result != 0:
