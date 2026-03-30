@@ -21,11 +21,13 @@ from ray.tune.search.basic_variant import BasicVariantGenerator
 from radyolo.config.config import get_cfg
 
 LOGGER = logging.getLogger(__name__)
+RNG = np.random.default_rng()
 
 SUPPORTED_DISTRIBUTIONS = {
     "choice",
     "uniform",
     "loguniform",
+    "one_minus_loguniform",
     "quniform",
     "qloguniform",
     "randint",
@@ -122,6 +124,27 @@ def _build_distribution(spec: Any) -> tuple[Any, str | None]:
         return tune.uniform(lower, upper), cast_type
     if distribution_type == "loguniform":
         return tune.loguniform(lower, upper), cast_type
+    if distribution_type == "one_minus_loguniform":
+        if not (0.0 < lower < upper < 1.0):
+            msg = "one_minus_loguniform requires 0 < lower < upper < 1"
+            raise ValueError(msg)
+
+        lower_complement = 1.0 - float(upper)
+        upper_complement = 1.0 - float(lower)
+        return (
+            tune.sample_from(
+                lambda _: float(
+                    1.0
+                    - np.exp(
+                        RNG.uniform(
+                            np.log(lower_complement),
+                            np.log(upper_complement),
+                        )
+                    )
+                )
+            ),
+            cast_type,
+        )
     if distribution_type == "quniform":
         q = spec.get("q")
         if q is None:

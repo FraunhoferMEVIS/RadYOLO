@@ -262,7 +262,8 @@ search_space:
     upper: 20.0
 
   ema_decay:
-    type: loguniform
+    # Sample 1 - ema_decay in log space so 0.9, 0.99, 0.999, ... are equally likely by decade.
+    type: one_minus_loguniform
     lower: 0.1
     upper: 0.99999
 
