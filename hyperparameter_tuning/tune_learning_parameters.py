@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -428,11 +429,14 @@ def _run_trial(
         with config_path.open("w", encoding="utf-8") as handle:
             yaml.safe_dump(run_config, handle, sort_keys=False)
 
+        training_start = time.perf_counter()
         return_code = _run_training(command, config_path, cwd=training_cwd)
+        training_minutes = (time.perf_counter() - training_start) / 60.0
         primary_metric_key = f"dataset_metric/{dataset_name}"
         secondary_metric_key = f"dataset_metric_secondary/{dataset_name}"
         primary_epoch_key = f"dataset_best_epoch/{dataset_name}"
         secondary_epoch_key = f"dataset_best_epoch_secondary/{dataset_name}"
+        training_minutes_key = f"dataset_training_minutes/{dataset_name}"
         if return_code != 0:
             LOGGER.warning(
                 "Training failed for dataset '%s' in trial %s with exit code %d",
@@ -490,6 +494,7 @@ def _run_trial(
         report_payload[secondary_metric_key] = float(secondary_metric)
         report_payload[primary_epoch_key] = int(primary_best_epoch)
         report_payload[secondary_epoch_key] = int(secondary_best_epoch)
+        report_payload[training_minutes_key] = float(training_minutes)
 
     aggregate_primary_metric = _aggregate(dataset_primary_metrics, dataset_aggregation)
     aggregate_secondary_metric = _aggregate(dataset_secondary_metrics, dataset_aggregation)
