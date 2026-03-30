@@ -15,6 +15,9 @@ import pandas as pd
 import yaml
 from ray import tune
 from ray.tune import RunConfig, Tuner
+from ray.tune.search.basic_variant import BasicVariantGenerator
+
+from radyolo.config.config import get_cfg
 
 LOGGER = logging.getLogger(__name__)
 
@@ -155,6 +158,33 @@ def _build_param_space(search_space_cfg: dict[str, Any]) -> tuple[dict[str, Any]
                 raise ValueError(msg)
             casts[key] = cast_hint
     return param_space, casts
+
+
+def _build_initial_evaluation_point(
+    template_config: dict[str, Any],
+    effective_template_config: dict[str, Any],
+    search_space_cfg: dict[str, Any],
+    cast_hints: dict[str, str],
+) -> dict[str, Any]:
+    initial_point: dict[str, Any] = {}
+    missing_keys: list[str] = []
+    for key in search_space_cfg:
+        if key in effective_template_config:
+            initial_point[key] = copy.deepcopy(effective_template_config[key])
+            continue
+        if key in template_config:
+            initial_point[key] = copy.deepcopy(template_config[key])
+            continue
+        missing_keys.append(key)
+
+    if missing_keys:
+        LOGGER.warning(
+            "Search-space keys without defaults in the template or validated runtime config "
+            "will not be pinned for the first trial: %s",
+            ", ".join(sorted(missing_keys)),
+        )
+
+    return _cast_sampled(initial_point, cast_hints)
 
 
 def _cast_sampled(sampled: dict[str, Any], casts: dict[str, str]) -> dict[str, Any]:
@@ -518,7 +548,14 @@ def _short_trial_dirname_creator(trial: Any) -> str:
 
 def _load_tune_settings(
     config_path: Path,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, str], dict[str, Any]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, str],
+    dict[str, Any],
+    dict[str, Any],
+]:
     tune_cfg = _read_yaml(config_path)
 
     template_path = tune_cfg.get("template_config")
@@ -528,6 +565,7 @@ def _load_tune_settings(
 
     template_config_path = Path(str(template_path)).expanduser().resolve()
     template_config = _read_yaml(template_config_path)
+    effective_template_config = get_cfg(template_config_path, {}).model_dump(mode="python")
 
     search_space_cfg = tune_cfg.get("search_space")
     if not isinstance(search_space_cfg, dict) or not search_space_cfg:
@@ -535,6 +573,12 @@ def _load_tune_settings(
         raise ValueError(msg)
 
     param_space, cast_hints = _build_param_space(search_space_cfg)
+    initial_evaluation_point = _build_initial_evaluation_point(
+        template_config,
+        effective_template_config,
+        search_space_cfg,
+        cast_hints,
+    )
 
     output_root = Path(str(tune_cfg.get("output_root", "hyperparameter_tuning/runs"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -562,16 +606,28 @@ def _load_tune_settings(
         "common_train_overrides": tune_cfg.get("common_train_overrides", {}),
     }
 
-    return tune_cfg, template_config, param_space, cast_hints, tune_settings
+    return (
+        tune_cfg,
+        template_config,
+        param_space,
+        cast_hints,
+        tune_settings,
+        initial_evaluation_point,
+    )
 
 
 def main() -> int:
     _setup_logging()
     args = _parse_args()
 
-    tune_cfg, template_config, param_space, cast_hints, tune_settings = _load_tune_settings(
-        args.tune_config
-    )
+    (
+        tune_cfg,
+        template_config,
+        param_space,
+        cast_hints,
+        tune_settings,
+        initial_evaluation_point,
+    ) = _load_tune_settings(args.tune_config)
 
     tune_options = tune_cfg.get("tune", {})
     if not isinstance(tune_options, dict):
@@ -609,12 +665,19 @@ def main() -> int:
             resume_errored=args.resume_errored,
         )
     else:
+        LOGGER.info(
+            "Seeding first tuning trial with template defaults for search-space keys: %s",
+            initial_evaluation_point,
+        )
         tuner = Tuner(
             trainable=trainable_with_resources,
             param_space=param_space,
             tune_config=tune.TuneConfig(
                 metric=metric_name,
                 mode=metric_mode,
+                search_alg=BasicVariantGenerator(
+                    points_to_evaluate=[initial_evaluation_point],
+                ),
                 num_samples=num_samples,
                 max_concurrent_trials=max_concurrent_trials,
                 trial_dirname_creator=(
