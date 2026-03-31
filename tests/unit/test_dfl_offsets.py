@@ -7,9 +7,9 @@ from radyolo.training.loss import BboxLoss, DFLoss
 from radyolo.training.tal import (
     CENTER_OFFSET_LIMIT,
     bbox2center_extents,
-    dist2bbox,
     bbox2dist,
     center_extents2bbox,
+    dist2bbox,
 )
 
 
