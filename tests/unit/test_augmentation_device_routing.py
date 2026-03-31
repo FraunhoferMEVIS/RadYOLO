@@ -41,6 +41,26 @@ def _record_image_only_call(
     return _recorder
 
 
+def _record_spatial_call(
+    call_order: list[str],
+    name: str,
+) -> Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor | None, Any],
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor | None],
+]:
+    def _recorder(
+        image: torch.Tensor,
+        labels: torch.Tensor,
+        masks: torch.Tensor | None,
+        *_: Any,
+        **__: Any,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        call_order.append(name)
+        return image, labels, masks
+
+    return _recorder
+
+
 def _make_batch(image: torch.Tensor) -> data_module.Batch:
     return {
         "img": image.unsqueeze(0),
@@ -172,9 +192,9 @@ def test_apply_configured_augmentations_runs_spatial_before_image_augmentations(
         gin_augmentation_device="cpu",
         channel_dropout_augmentation_device="cpu",
         zoom_augmentation_device="cpu",
-        rotation_augmentation_device="gpu",
-        cutout_augmentation_device="gpu",
-        mirroring_augmentation_device="gpu",
+        rotation_augmentation_device="cpu",
+        cutout_augmentation_device="cpu",
+        mirroring_augmentation_device="cpu",
     )
     call_order: list[str] = []
 
@@ -206,7 +226,22 @@ def test_apply_configured_augmentations_runs_spatial_before_image_augmentations(
     monkeypatch.setattr(
         data_module,
         "random_zoom",
-        _record_spatial,
+        _record_spatial_call(call_order, "zoom"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_rotation",
+        _record_spatial_call(call_order, "rotation"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "tensor_cutout",
+        _record_spatial_call(call_order, "cutout"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_mirroring",
+        _record_spatial_call(call_order, "mirror"),
     )
 
     image = torch.zeros((1, 4, 4, 4), dtype=torch.float32)
@@ -219,7 +254,7 @@ def test_apply_configured_augmentations_runs_spatial_before_image_augmentations(
         placement="cpu",
     )
 
-    assert call_order == ["zoom", "intensity", "gin", "dropout"]
+    assert call_order == ["zoom", "rotation", "cutout", "mirror", "intensity", "gin", "dropout"]
 
 
 def test_apply_configured_augmentations_routes_only_matching_device(
@@ -239,7 +274,7 @@ def test_apply_configured_augmentations_routes_only_matching_device(
         channel_dropout_augmentation_device="gpu",
         zoom_augmentation_device="cpu",
         rotation_augmentation_device="gpu",
-        cutout_augmentation_device="gpu",
+        cutout_augmentation_device="cpu",
         mirroring_augmentation_device="gpu",
     )
     call_order: list[str] = []
@@ -260,19 +295,25 @@ def test_apply_configured_augmentations_routes_only_matching_device(
         _record_image_only_call(call_order, "dropout"),
     )
 
-    def _record_spatial(
-        image: torch.Tensor,
-        labels: torch.Tensor,
-        masks: torch.Tensor | None,
-        *_: Any,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        call_order.append("zoom")
-        return image, labels, masks
-
     monkeypatch.setattr(
         data_module,
         "random_zoom",
-        _record_spatial,
+        _record_spatial_call(call_order, "zoom"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_rotation",
+        _record_spatial_call(call_order, "rotation"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "tensor_cutout",
+        _record_spatial_call(call_order, "cutout"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_mirroring",
+        _record_spatial_call(call_order, "mirror"),
     )
 
     image = torch.zeros((1, 4, 4, 4), dtype=torch.float32)
@@ -285,7 +326,68 @@ def test_apply_configured_augmentations_routes_only_matching_device(
         placement="cpu",
     )
 
-    assert call_order == ["zoom", "gin"]
+    assert call_order == ["zoom", "cutout", "gin"]
+
+
+def test_dataset_augmentation_applies_configured_sample_augmentations(
+    synthetic_dataset: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _make_config(synthetic_dataset)
+    dataset = data_module.NIfTIDatasetWithMasks(
+        src_path=synthetic_dataset,
+        imgsz=(8, 8, 8),
+        augment=True,
+        config=config,
+    )
+    image = torch.zeros((1, 4, 4, 4), dtype=torch.float32)
+    classes = torch.tensor([[0.0]], dtype=torch.float32)
+    bboxes = torch.tensor([[0.5, 0.5, 0.5, 0.25, 0.25, 0.25]], dtype=torch.float32)
+    masks = torch.zeros((4, 4, 4), dtype=torch.uint8)
+    sample: data_module.Sample = {
+        "image": image.clone(),
+        "shape": (4, 4, 4),
+        "original_shape": (4, 4, 4),
+        "ratio_pad": None,
+        "classes": classes.clone(),
+        "bboxes": bboxes.clone(),
+        "masks": masks.clone(),
+        "case_name": "case1",
+    }
+
+    def _apply_sample_augmentations(
+        image_in: torch.Tensor,
+        classes_in: torch.Tensor,
+        bboxes_in: torch.Tensor,
+        masks_in: torch.Tensor | None,
+        config_in: DefaultConfig,
+        imgsz_in: tuple[int, int, int],
+        *,
+        placement: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        assert config_in is config
+        assert imgsz_in == (8, 8, 8)
+        assert placement == "cpu"
+        assert torch.equal(image_in, image)
+        assert torch.equal(classes_in, classes)
+        assert torch.equal(bboxes_in, bboxes)
+        assert masks_in is not None
+        assert torch.equal(masks_in, masks)
+        return image_in + 1.0, classes_in + 1.0, bboxes_in + 1.0, masks_in + 1
+
+    monkeypatch.setattr(
+        data_module,
+        "_apply_configured_augmentations_to_sample",
+        _apply_sample_augmentations,
+    )
+
+    augmented = dataset.augmentation(sample)
+
+    assert torch.equal(augmented["image"], image + 1.0)
+    assert torch.equal(augmented["classes"], classes + 1.0)
+    assert torch.equal(augmented["bboxes"], bboxes + 1.0)
+    assert augmented["masks"] is not None
+    assert torch.equal(augmented["masks"], masks + 1)
 
 
 def test_gaussian_noise_and_blur_preserve_tensor_device_on_cpu() -> None:

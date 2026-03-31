@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import nibabel as nib
+import numpy as np
 import torch
 
+from radyolo.inference import predict as predict_module
+from radyolo.inference.predict import _box_image_to_world, _reconstruct_and_save_mask, _relative_box
 from radyolo.models.layers import ModelOutput
 from radyolo.utils.ops import non_max_suppression, prepare_model_output_for_nms, scale_boxes
 
@@ -101,3 +105,68 @@ def test_scale_boxes_defaults_to_no_clipping() -> None:
     scaled = scale_boxes((10, 10, 10), boxes.clone(), (10, 10, 10))
 
     assert torch.equal(scaled, boxes)
+
+
+def test_relative_box_normalizes_against_original_shape() -> None:
+    box = torch.tensor([2.0, 4.0, 6.0, 8.0, 10.0, 12.0], dtype=torch.float32)
+
+    relative = _relative_box(box, (20, 40, 80))
+
+    assert relative == [0.05, 0.05, 0.3, 0.2, 0.125, 0.6]
+
+
+def test_box_image_to_world_applies_affine_to_all_box_corners() -> None:
+    box = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=torch.float32)
+    affine = torch.tensor(
+        [
+            [2.0, 0.0, 0.0, 10.0],
+            [0.0, 3.0, 0.0, 20.0],
+            [0.0, 0.0, 4.0, 30.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+
+    world_box = _box_image_to_world(box, affine)
+
+    expected = torch.tensor([12.0, 26.0, 42.0, 18.0, 35.0, 54.0], dtype=torch.float32)
+    assert torch.equal(world_box, expected)
+
+
+def test_reconstruct_and_save_mask_writes_thresholded_nifti_mask(tmp_path, monkeypatch) -> None:
+    det = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 0.9, 0.0, 0.25, 0.75], dtype=torch.float32)
+    proto = torch.zeros((2, 2, 2), dtype=torch.float32)
+    nifti_img = nib.Nifti1Image(np.zeros((2, 2, 2), dtype=np.float32), affine=np.eye(4))
+    expected_mask = torch.tensor(
+        [
+            [[0.2, 0.7], [0.8, 0.1]],
+            [[0.6, 0.4], [0.3, 0.9]],
+        ],
+        dtype=torch.float32,
+    )
+
+    monkeypatch.setattr(
+        predict_module.ops,
+        "reconstruct_mask_probabilities",
+        lambda coeff, proto_masks: expected_mask,
+    )
+
+    mask_filename = _reconstruct_and_save_mask(
+        det,
+        proto,
+        original_shape=(2, 2, 2),
+        nifti_img=nifti_img,
+        mask_dir=tmp_path / "masks",
+        det_index=3,
+        case_name="caseA",
+    )
+
+    assert mask_filename == "caseA_det3.nii.gz"
+    saved_mask_path = tmp_path / "masks" / mask_filename
+    assert saved_mask_path.exists()
+
+    saved_mask = nib.load(str(saved_mask_path))
+    saved_data = np.asanyarray(saved_mask.dataobj)
+    assert np.array_equal(saved_mask.affine, np.eye(4))
+    assert set(np.unique(saved_data)).issubset({0, 1})
+    assert int(saved_data.sum()) == 4
