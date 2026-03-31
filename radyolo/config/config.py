@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from radyolo.config.spatial import PatchSize  # noqa: TC001, needs to be imported for pydantic model
+
 if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
 
@@ -69,7 +71,7 @@ class DefaultConfig(BaseModel):
         100  # epochs to wait for no observable improvement for early stopping of training
     )
     batch_size: int = 2  # number of images per batch
-    imgsz: list[int, int, int]  # input images size as (depth, height, width)
+    patch_size: PatchSize  # input patch size as {"x": x, "y": y, "z": z}
     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
     # applied globally or a list of such dicts for each channel. For ct you have to define
     # mean, std, clip_min and clip_max in the dict.

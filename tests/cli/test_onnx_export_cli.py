@@ -91,7 +91,9 @@ def test_onnx_export_cli_allows_float32_internal_ops(trained_run: Path) -> None:
 
     checkpoint = load_model_checkpoint(model_path)
     train_config = checkpoint["train_config"]
-    input_tensor = _build_deterministic_input((train_config.input_channels, *train_config.imgsz))
+    input_tensor = _build_deterministic_input(
+        (train_config.input_channels, *train_config.patch_size.get_zyx())
+    )
 
     torch_outputs, onnx_outputs = _run_torch_and_onnx_inference(model_path, onnx_path, input_tensor)
 

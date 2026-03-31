@@ -12,6 +12,7 @@ import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
@@ -197,7 +198,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             src_path=dataset_folder,
             fold=fold,
             group=group,
-            imgsz=tuple(train_config.imgsz),
+            patch_size=train_config.patch_size,
             augment=False,
             min_stride=get_model_min_stride(model),
             normalization=train_config.normalization,
@@ -264,7 +265,7 @@ def onnx_export(model_path: Path, internal_dtype: str) -> int:
             state_dict=checkpoint["model_state_dict"],
         )
 
-        input_shape = (train_config.input_channels, *train_config.imgsz)
+        input_shape = (train_config.input_channels, *train_config.patch_size.get_zyx())
         export_model(model, input_shape, model_path, internal_dtype=internal_dtype.lower())
     except Exception as e:  # pragma: no cover
         LOGGER.exception("An unexpected error occurred", exc_info=e)
@@ -420,14 +421,14 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     nargs=3,
     type=int,
     default=None,
-    help="Resample images and masks to a fixed extent as depth height width.",
+    help="Resample images and masks to a fixed image size as x y z.",
 )
 @click.option(
     "--voxel-size",
     nargs=3,
     type=float,
     default=None,
-    help="Resample images and masks to a fixed voxel size as depth height width.",
+    help="Resample images and masks to a fixed voxel size as x y z.",
 )
 @click.option(
     "--normalization",
@@ -461,13 +462,15 @@ def preprocess_data(
         if image_extent is not None and voxel_size is not None:
             msg = "Only one of --image-extent or --voxel-size can be specified."
             raise click.BadParameter(msg)
+        target_image_size = PatchSize.from_xyz(image_extent) if image_extent is not None else None
+        target_voxel_size = VoxelSize.from_xyz(voxel_size) if voxel_size is not None else None
         out_path = preprocess_dataset_fn(
             dataset_path=dataset_path,
             output_path=output_path,
             workers=workers,
             overwrite=overwrite,
-            target_shape=image_extent,
-            target_voxel_size=voxel_size,
+            target_image_size=target_image_size,
+            target_voxel_size=target_voxel_size,
             normalization=normalization,
             image_dtype=image_dtype.lower(),
         )

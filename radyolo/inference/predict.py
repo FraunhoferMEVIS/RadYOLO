@@ -179,7 +179,7 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
             prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
         model, train_config, names = _load_model(prediction_cfg)
         clip_boxes_to_image = prediction_cfg.clip_boxes_to_image
-        target_size = tuple(train_config.imgsz)
+        target_size = train_config.patch_size
         files = list(_iter_nifti(prediction_cfg.input_dir))
         if not files:
             LOGGER.error("No .nii.gz files found in %s", prediction_cfg.input_dir)
@@ -210,7 +210,7 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
             image_results: list[dict[str, object]] = []
             if detections.numel():
                 ops.scale_boxes(
-                    target_size,
+                    target_size.get_zyx(),
                     detections[:, :6],
                     original_shape,
                     ratio_pad=None,

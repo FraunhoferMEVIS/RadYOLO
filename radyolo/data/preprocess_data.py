@@ -5,15 +5,24 @@ import os
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from radyolo.data.normalization import NormalizationConfig
-from radyolo.data.preprocessing import ImageArrayDType, preprocess_image, resample_mask
-from radyolo.data.preprocessing import resolve_numpy_dtype, resolve_torch_dtype
+from radyolo.config.spatial import PatchSize, VoxelSize
+from radyolo.data.preprocessing import (
+    ImageArrayDType,
+    preprocess_image,
+    resample_mask,
+    resolve_numpy_dtype,
+    resolve_torch_dtype,
+)
+
+if TYPE_CHECKING:
+    from radyolo.data.normalization import NormalizationConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +40,7 @@ def _copy_file_if_exists(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def _load_nifti_tensor(nifti_path: Path) -> tuple[torch.Tensor, tuple[float, float, float]]:
+def _load_nifti_tensor(nifti_path: Path) -> tuple[torch.Tensor, VoxelSize]:
     nifti_image = nib.loadsave.load(nifti_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI image type for case at {nifti_path}"
@@ -40,7 +49,7 @@ def _load_nifti_tensor(nifti_path: Path) -> tuple[torch.Tensor, tuple[float, flo
     image = np.asanyarray(nifti_image.dataobj)
     image_tensor = torch.from_numpy(image)
     image_tensor = image_tensor.permute(*reversed(range(image_tensor.ndim)))
-    voxel_size = tuple(float(zoom) for zoom in reversed(nifti_image.header.get_zooms()[:3]))
+    voxel_size = VoxelSize.from_xyz(nifti_image.header.get_zooms()[:3])
     return image_tensor, voxel_size
 
 
@@ -55,8 +64,8 @@ def _convert_case_to_numpy(
     masks_dir: Path,
     out_images_dir: Path,
     out_masks_dir: Path | None,
-    target_shape: tuple[int, int, int] | None,
-    target_voxel_size: tuple[float, float, float] | None,
+    target_image_size: PatchSize | None,
+    target_voxel_size: VoxelSize | None,
     normalization: NormalizationConfig | list[NormalizationConfig],
     image_dtype: ImageArrayDType,
 ) -> None:
@@ -65,7 +74,7 @@ def _convert_case_to_numpy(
     image_preprocessed, _, resized_shape = preprocess_image(
         image_tensor,
         normalization,
-        target_shape=target_shape,
+        target_shape=target_image_size,
         input_voxel_size=voxel_size,
         target_voxel_size=target_voxel_size,
         output_dtype=resolve_torch_dtype(image_dtype),
@@ -85,7 +94,10 @@ def _convert_case_to_numpy(
     mask_path = masks_dir / f"{case_id}.nii.gz"
     if mask_path.exists():
         mask_tensor, _ = _load_nifti_tensor(mask_path)
-        mask_resampled = resample_mask(mask_tensor.to(dtype=torch.uint8), resized_shape)
+        mask_resampled = resample_mask(
+            mask_tensor.to(dtype=torch.uint8),
+            PatchSize.from_zyx(resized_shape),
+        )
         mask_out_path = out_masks_dir / f"{case_id}.npz"
         np.savez_compressed(
             mask_out_path,
@@ -98,8 +110,8 @@ def preprocess_dataset(
     output_path: Path,
     workers: int = 0,
     overwrite: bool = False,
-    target_shape: tuple[int, int, int] | None = None,
-    target_voxel_size: tuple[float, float, float] | None = None,
+    target_image_size: PatchSize | None = None,
+    target_voxel_size: VoxelSize | None = None,
     normalization: NormalizationConfig | list[NormalizationConfig] = {"type": "none"},
     image_dtype: ImageArrayDType = "float32",
 ) -> Path:
@@ -111,8 +123,8 @@ def preprocess_dataset(
     dataset_path = Path(dataset_path)
     output_path = Path(output_path)
 
-    if target_shape is not None and target_voxel_size is not None:
-        msg = "Only one of target_shape or target_voxel_size can be specified."
+    if target_image_size is not None and target_voxel_size is not None:
+        msg = "Only one of target_image_size or target_voxel_size can be specified."
         raise ValueError(msg)
 
     images_dir = dataset_path / "images"
@@ -182,7 +194,7 @@ def preprocess_dataset(
                 masks_dir,
                 out_images_dir,
                 out_masks_dir,
-                target_shape,
+                target_image_size,
                 target_voxel_size,
                 normalization,
                 image_dtype,

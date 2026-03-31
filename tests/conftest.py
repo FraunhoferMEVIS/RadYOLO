@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
@@ -18,7 +19,7 @@ from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
 from radyolo.models.model import build_model_from_config, load_checkpoint_model
 from radyolo.training.train import Trainer
-from radyolo.utils.util import ModelEMA, select_device
+from radyolo.utils.util import ModelEMA
 from radyolo.validation.validate import Validator
 
 
@@ -89,7 +90,7 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"warmup_epochs: 0.5\n"
             f"patience: 1\n"
             f"batch_size: 1\n"
-            f"imgsz: [64, 32, 32]\n"
+            f"patch_size: {{x: 32, y: 32, z: 64}}\n"
             f"normalization: {{type: 'none'}}\n"
             f"device: cpu\n"
             f"workers: 0\n"
@@ -174,8 +175,8 @@ def preprocess_data_with_options(
         output_path=output_path,
         workers=workers,
         overwrite=False,
-        target_shape=image_extent,
-        target_voxel_size=voxel_size,
+        target_image_size=PatchSize.from_xyz(image_extent) if image_extent is not None else None,
+        target_voxel_size=VoxelSize.from_xyz(voxel_size) if voxel_size is not None else None,
         normalization=cast("dict | list[dict]", normalization or {"type": "none"}),
         image_dtype=cast("str", image_dtype),
     )
@@ -189,7 +190,7 @@ def export_onnx(last_model_path: Path) -> Path:
         state_dict=checkpoint["model_state_dict"],
     )
     model.eval()
-    input_shape = (train_config.input_channels, *train_config.imgsz)
+    input_shape = (train_config.input_channels, *train_config.patch_size.get_zyx())
     export_model(model, input_shape, last_model_path, internal_dtype="float32")
     return last_model_path.with_suffix(".onnx")
 
@@ -208,7 +209,7 @@ def run_validation(best_model_path: Path, group: str) -> Path:
         src_path=dataset_root,
         fold=train_config.fold,
         group=group,
-        imgsz=tuple(train_config.imgsz),
+        patch_size=train_config.patch_size,
         augment=False,
         min_stride=int(model.stride.min().item()) if hasattr(model, "stride") else 8,
         normalization=train_config.normalization,

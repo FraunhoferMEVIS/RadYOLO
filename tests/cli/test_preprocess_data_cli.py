@@ -89,11 +89,11 @@ def test_preprocess_data_cli_resamples_to_fixed_extent(synthetic_dataset, tmp_pa
 
     assert result.exit_code == 0
     converted_image = np.load(output_dataset / "images" / "case1.npy")
-    assert converted_image.shape == (16, 18, 20)
+    assert converted_image.shape == (20, 18, 16)
 
     with np.load(output_dataset / "masks" / "case1.npz") as mask_archive:
         mask = mask_archive["mask"]
-    assert mask.shape == (16, 18, 20)
+    assert mask.shape == (20, 18, 16)
 
 
 def test_preprocess_data_cli_resamples_to_fixed_voxel_size_and_normalizes(tmp_path) -> None:
@@ -131,5 +131,5 @@ def test_preprocess_data_cli_resamples_to_fixed_voxel_size_and_normalizes(tmp_pa
     assert result.exit_code == 0
     converted_image = np.load(output_dataset / "images" / "case_voxel.npy")
     assert converted_image.dtype == np.float16
-    assert converted_image.shape == (8, 10, 12)
+    assert converted_image.shape == (4, 10, 24)
     assert abs(float(converted_image.astype(np.float32).mean())) < 0.05

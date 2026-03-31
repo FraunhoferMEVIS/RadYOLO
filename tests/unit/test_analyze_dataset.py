@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import nibabel as nib
 import numpy as np
 
+from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import (
     _foreground_channel_stats_and_samples,
     _image_stats,
@@ -37,7 +38,7 @@ def test_foreground_channel_stats_and_samples_uses_foreground_voxels() -> None:
     np.testing.assert_array_equal(samples, np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32))
 
 
-def test_load_nifti_returns_data_and_spacing_in_zyx_order(tmp_path: Path) -> None:
+def test_load_nifti_returns_data_and_spacing_in_xyz_order(tmp_path: Path) -> None:
     image_path = tmp_path / "case.nii.gz"
     array = np.arange(24, dtype=np.int16).reshape(2, 3, 4)
     affine = np.diag((0.5, 1.5, 2.5, 1.0))
@@ -46,13 +47,13 @@ def test_load_nifti_returns_data_and_spacing_in_zyx_order(tmp_path: Path) -> Non
     data, spacing = _load_nifti(image_path)
 
     np.testing.assert_array_equal(data, array)
-    assert spacing == (2.5, 1.5, 0.5)
+    assert spacing == VoxelSize(x=0.5, y=1.5, z=2.5)
 
 
 def test_labels_to_mask_builds_union_mask_from_normalized_boxes() -> None:
     entries = [(0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)]
 
-    mask = _labels_to_mask(entries, (4, 4, 4))
+    mask = _labels_to_mask(entries, PatchSize(x=4, y=4, z=4))
 
     expected = np.zeros((4, 4, 4), dtype=bool)
     expected[1:3, 1:3, 1:3] = True
@@ -74,8 +75,8 @@ def test_image_stats_reads_channels_first_nifti_and_foreground_stats(tmp_path: P
     foreground0 = channel0[1:3, 1:3, 1:3].astype(np.float32)
     foreground1 = channel1[1:3, 1:3, 1:3].astype(np.float32)
 
-    assert stats.shape == (4, 4, 4)
-    assert stats.spacing == (3.0, 2.0, 1.0)
+    assert stats.image_size == PatchSize(x=4, y=4, z=4)
+    assert stats.voxel_size == VoxelSize(x=1.0, y=2.0, z=3.0)
     assert len(stats.per_channel) == 2
     assert stats.per_channel[0] == {
         "min": float(foreground0.min()),

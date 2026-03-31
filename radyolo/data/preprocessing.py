@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 
 from radyolo.data.normalization import NormalizationConfig, normalize_image
+
+if TYPE_CHECKING:
+    from radyolo.config.spatial import (
+        PatchSize,
+        VoxelSize,
+    )
 
 ImageArrayDType = Literal["float32", "float16", "int16"]
 
@@ -41,36 +47,27 @@ def resolve_torch_dtype(dtype_name: ImageArrayDType | str) -> torch.dtype:
 def resolve_target_shape(
     source_shape: tuple[int, int, int],
     *,
-    target_shape: tuple[int, int, int] | None = None,
-    input_voxel_size: tuple[float, float, float] | None = None,
-    target_voxel_size: tuple[float, float, float] | None = None,
+    target_shape: PatchSize | None = None,
+    input_voxel_size: VoxelSize | None = None,
+    target_voxel_size: VoxelSize | None = None,
 ) -> tuple[int, int, int]:
     if target_shape is not None and target_voxel_size is not None:
         msg = "Only one of target_shape or target_voxel_size can be specified."
         raise ValueError(msg)
 
     if target_shape is not None:
-        if any(dimension <= 0 for dimension in target_shape):
-            msg = f"target_shape must only contain positive dimensions, got {target_shape}"
-            raise ValueError(msg)
-        return target_shape
+        return target_shape.get_zyx()
 
     if target_voxel_size is not None:
         if input_voxel_size is None:
             msg = "target_voxel_size requires input_voxel_size to be provided."
             raise ValueError(msg)
-        if any(spacing <= 0 for spacing in input_voxel_size):
-            msg = f"input_voxel_size must only contain positive values, got {input_voxel_size}"
-            raise ValueError(msg)
-        if any(spacing <= 0 for spacing in target_voxel_size):
-            msg = f"target_voxel_size must only contain positive values, got {target_voxel_size}"
-            raise ValueError(msg)
         return tuple(
-            max(1, int(round(size * source_spacing / target_spacing)))
+            max(1, round(size * source_spacing / target_spacing))
             for size, source_spacing, target_spacing in zip(
                 source_shape,
-                input_voxel_size,
-                target_voxel_size,
+                input_voxel_size.get_zyx(),
+                target_voxel_size.get_zyx(),
                 strict=True,
             )
         )
@@ -82,9 +79,9 @@ def preprocess_image(
     image: torch.Tensor,
     normalization: NormalizationConfig | list[NormalizationConfig] = {"type": "none"},
     *,
-    target_shape: tuple[int, int, int] | None = None,
-    input_voxel_size: tuple[float, float, float] | None = None,
-    target_voxel_size: tuple[float, float, float] | None = None,
+    target_shape: PatchSize | None = None,
+    input_voxel_size: VoxelSize | None = None,
+    target_voxel_size: VoxelSize | None = None,
     output_dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
     if image.ndim == 3:
@@ -120,22 +117,23 @@ def preprocess_image(
     return working_image, source_shape, destination_shape
 
 
-def resample_mask(mask: torch.Tensor, target_shape: tuple[int, int, int]) -> torch.Tensor:
+def resample_mask(mask: torch.Tensor, target_shape: PatchSize) -> torch.Tensor:
     if mask.ndim == 3:
         mask = mask.unsqueeze(0)
     if mask.ndim != 4:
         msg = f"Expected mask with 3 or 4 dimensions, got shape {tuple(mask.shape)}"
         raise ValueError(msg)
 
+    target_shape_zyx = target_shape.get_zyx()
     source_shape = tuple(int(dim) for dim in mask.shape[1:])
-    if source_shape == target_shape:
+    if source_shape == target_shape_zyx:
         return mask
 
     resized_mask = cast(
         "torch.Tensor",
         F.interpolate(
             mask.unsqueeze(0),
-            size=target_shape,
+            size=target_shape_zyx,
             mode="nearest-exact",
         ),
     ).squeeze(0)

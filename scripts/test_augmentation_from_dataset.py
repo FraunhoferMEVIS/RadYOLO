@@ -124,7 +124,7 @@ def _build_dataset(
 ) -> NIfTIDatasetWithMasks:
     return NIfTIDatasetWithMasks(
         src_path=args.data_root,
-        imgsz=tuple(cfg.imgsz),
+        patch_size=cfg.patch_size,
         augment=True,
         min_stride=8,
         pad=0.5,

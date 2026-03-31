@@ -41,7 +41,7 @@ common_train_overrides:
 
 # Each sampled hyperparameter set is trained on all listed datasets.
 # Per dataset you can configure:
-# - resampling: target shape used for training resampling (maps to train config 'imgsz')
+# - resampling: target shape used for training resampling (maps to train config 'patch_size')
 # - normalization: intensity normalization config (same schema as train config)
 # - overrides: optional extra train config overrides
 datasets:
@@ -49,7 +49,7 @@ datasets:
     data: D:/datasets/radyolo/Task01_BrainTumour
     fold: 0
     resampling:
-      imgsz: [240, 240, 160]
+      patch_size: {x: 240, y: 240, z: 160}
     normalization:
       - type: zscore
       - type: zscore
@@ -63,7 +63,7 @@ datasets:
     data: D:/datasets/radyolo/Task02_Heart
     fold: 0
     resampling:
-      imgsz: [320, 320, 128]
+      patch_size: {x: 320, y: 320, z: 128}
     normalization:
       type: zscore
     overrides:
@@ -74,7 +74,7 @@ datasets:
     data: D:/datasets/radyolo/Task03_Liver
     fold: 0
     resampling:
-      imgsz: [512, 512, 432]
+      patch_size: {x: 512, y: 512, z: 432}
     normalization:
       type: ct
       mean: -53
@@ -89,7 +89,7 @@ datasets:
     data: D:/datasets/radyolo/Task04_Hippocampus
     fold: 0
     resampling:
-      imgsz: [64, 64, 64]
+      patch_size: {x: 64, y: 64, z: 64}
     normalization:
       type: zscore
     overrides:
@@ -100,7 +100,7 @@ datasets:
     data: D:/datasets/radyolo/Task05_Prostate
     fold: 0
     resampling:
-      imgsz: [320, 320, 32]
+      patch_size: [320, 320, 32]
     normalization:
       - type: zscore
       - type: zscore
@@ -112,7 +112,7 @@ datasets:
     data: D:/datasets/radyolo/Task06_Lung
     fold: 0
     resampling:
-      imgsz: [512, 512, 256]
+      patch_size: {x: 512, y: 512, z: 256}
     normalization:
       type: ct
       mean: -409
@@ -127,7 +127,7 @@ datasets:
     data: D:/datasets/radyolo/Task07_Pancreas
     fold: 0
     resampling:
-      imgsz: [512, 512, 96]
+      patch_size: {x: 512, y: 512, z: 96}
     normalization:
       type: ct
       mean: 33
@@ -142,7 +142,7 @@ datasets:
     data: D:/datasets/radyolo/Task08_HepaticVessel
     fold: 0
     resampling:
-      imgsz: [512, 512, 64]
+      patch_size: {x: 512, y: 512, z: 64}
     normalization:
       type: ct
       mean: 25
@@ -157,7 +157,7 @@ datasets:
     data: D:/datasets/radyolo/Task09_Spleen
     fold: 0
     resampling:
-      imgsz: [512, 512, 96]
+      patch_size: {x: 512, y: 512, z: 96}
     normalization:
       type: ct
       mean: -23
@@ -172,7 +172,7 @@ datasets:
     data: D:/datasets/radyolo/Task10_Colon
     fold: 0
     resampling:
-      imgsz: [512, 512, 96]
+      patch_size: {x: 512, y: 512, z: 96}
     normalization:
       type: ct
       mean: 23

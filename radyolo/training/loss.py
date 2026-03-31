@@ -116,7 +116,7 @@ class BboxLoss(nn.Module):
         target_scores: torch.Tensor,
         target_scores_sum: torch.Tensor,
         fg_mask: torch.Tensor,
-        imgsz: torch.Tensor,
+        patch_size: torch.Tensor,
         stride_tensor: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """IoU loss."""
@@ -146,7 +146,7 @@ class BboxLoss(nn.Module):
                 target_bboxes,
                 bbox_parametrization=self.bbox_parametrization,
             )
-            scale = imgsz[[2, 1, 0, 2, 1, 0]].to(pred_dist.device, pred_dist.dtype)
+            scale = patch_size[[2, 1, 0, 2, 1, 0]].to(pred_dist.device, pred_dist.dtype)
             target_ltrb = target_ltrb * stride_tensor.unsqueeze(0)
             target_ltrb = target_ltrb / scale
             pred_dist = activate_box_prediction(
@@ -302,7 +302,7 @@ class v8DetectionLoss:  # noqa: N801
 
         dtype = pred_class_logits.dtype
         batch_size = pred_class_logits.shape[0]
-        imgsz = (
+        patch_size = (
             torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
         )  # image size (d,h,w)
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
@@ -312,7 +312,7 @@ class v8DetectionLoss:  # noqa: N801
             (batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1
         )
         targets = self.preprocess(
-            targets.to(self.device), batch_size, scale_tensor=imgsz[[2, 1, 0, 2, 1, 0]]
+            targets.to(self.device), batch_size, scale_tensor=patch_size[[2, 1, 0, 2, 1, 0]]
         )
         gt_labels, gt_bboxes = targets.split((1, 6), 2)  # cls, xyzxyz
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
@@ -392,7 +392,7 @@ class v8DetectionLoss:  # noqa: N801
                 target_scores,
                 target_scores_sum,
                 fg_mask,
-                imgsz,
+                patch_size,
                 stride_tensor,
             )
 

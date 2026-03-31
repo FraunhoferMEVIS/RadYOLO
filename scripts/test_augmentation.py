@@ -32,7 +32,7 @@ def create_base_volume(shape: tuple[int, int, int] = (256, 256, 256)) -> torch.T
     return img
 
 
-def create_boxes(num: int, imgsz: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def create_boxes(num: int, patch_size: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     lt_list = []
     rb_list = []
     for _ in range(num):
@@ -47,7 +47,7 @@ def create_boxes(num: int, imgsz: torch.Tensor) -> tuple[torch.Tensor, torch.Ten
     rb_t = torch.tensor(rb_list, dtype=torch.float32)
     cls = torch.arange(len(lt_list)).unsqueeze(-1).float()
     boxes_norm_xyzxyz = torch.cat([lt_t, rb_t], 1)
-    scale_xyzxyz = imgsz[[2, 1, 0, 2, 1, 0]].float()
+    scale_xyzxyz = patch_size[[2, 1, 0, 2, 1, 0]].float()
     boxes_abs_xyzxyz = boxes_norm_xyzxyz * scale_xyzxyz
     return cls, boxes_abs_xyzxyz
 
@@ -203,16 +203,16 @@ def build_grid_for_augmentation(
     aug_name: str,
     base_img: torch.Tensor,
     base_labels_abs_xyzxyz: torch.Tensor,
-    imgsz: torch.Tensor,
+    patch_size: torch.Tensor,
     n: int = 16,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
     """Return list of images, labels, masks for a single augmentation (original + variants)."""
-    scale_xyzxyz = imgsz[[2, 1, 0, 2, 1, 0]].float()
+    scale_xyzxyz = patch_size[[2, 1, 0, 2, 1, 0]].float()
     images: list[torch.Tensor] = []
     labels: list[torch.Tensor] = []
     masks_list: list[torch.Tensor] = []
     # base masks from original boxes
-    base_masks = create_elliptical_masks(base_labels_abs_xyzxyz, tuple(imgsz.tolist()))
+    base_masks = create_elliptical_masks(base_labels_abs_xyzxyz, tuple(patch_size.tolist()))
     images.append(base_img.clone())
     labels.append(base_labels_abs_xyzxyz.clone())
     masks_list.append(base_masks.clone())
@@ -350,8 +350,8 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     base_img = create_base_volume()
-    imgsz = torch.as_tensor(base_img.shape[1:])
-    cls_ids, boxes_abs_xyzxyz = create_boxes(6, imgsz)
+    patch_size = torch.as_tensor(base_img.shape[1:])
+    cls_ids, boxes_abs_xyzxyz = create_boxes(6, patch_size)
     base_labels_abs_xyzxyz = torch.cat([cls_ids, boxes_abs_xyzxyz], 1)
 
     augmentations = [
@@ -368,7 +368,7 @@ def main() -> None:
 
     for aug in augmentations:
         images, labels_abs_xyzxyz, masks_list = build_grid_for_augmentation(
-            aug, base_img, base_labels_abs_xyzxyz, imgsz
+            aug, base_img, base_labels_abs_xyzxyz, patch_size
         )
         imgs_tensor, batch_idx, labels_norm_xyzwhd, masks_xy, masks_xz = prepare_for_plot(
             images, labels_abs_xyzxyz, masks_list

@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 import nibabel as nib
 import numpy as np
 
+from radyolo.config.spatial import PatchSize
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -177,16 +179,14 @@ def write_npz(path: Path, array: np.ndarray) -> None:
 
 def comp_blosc2_params(
     image_size: tuple[int, int, int, int],
-    patch_size: tuple[int, int, int] | tuple[int, int],
+    patch_size: PatchSize,
     bytes_per_pixel: int = 4,
     l1_cache_size_per_core_in_bytes: int = 393216//6,
     l3_cache_size_per_core_in_bytes: int = 1048576//6,
     safety_factor: float = 0.8,
 ) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
     num_channels = image_size[0]
-    if len(patch_size) == 2:
-        patch_size = (1, *patch_size)
-    patch_size_np = np.array(patch_size)
+    patch_size_np = np.array(patch_size.get_zyx())
     block_size = np.array(
         (num_channels, *[2 ** (max(0, math.ceil(math.log2(i)))) for i in patch_size_np])
     )
@@ -245,7 +245,7 @@ def write_blosc2(path: Path, array: np.ndarray) -> None:
     image_size = tuple(array_with_channel.shape)
     block_size, chunk_size = comp_blosc2_params(
         image_size=image_size,
-        patch_size=array.shape,
+        patch_size=PatchSize.from_zyx(array.shape),
         bytes_per_pixel=array.itemsize,
     )
     cparams = {

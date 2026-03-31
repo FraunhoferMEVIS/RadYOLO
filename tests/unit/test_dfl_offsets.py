@@ -60,7 +60,7 @@ def test_bbox_loss_direct_path_uses_l1_offsets() -> None:
     target_scores = torch.ones((1, 1, 1))
     target_scores_sum = torch.tensor(1.0)
     fg_mask = torch.tensor([[True]])
-    imgsz = torch.tensor([40.0, 40.0, 40.0])
+    patch_size = torch.tensor([40.0, 40.0, 40.0])
     stride_tensor = torch.tensor([[4.0]])
 
     loss_iou, loss_l1 = loss_fn(
@@ -71,7 +71,7 @@ def test_bbox_loss_direct_path_uses_l1_offsets() -> None:
         target_scores,
         target_scores_sum,
         fg_mask,
-        imgsz,
+        patch_size,
         stride_tensor,
     )
 
@@ -162,7 +162,7 @@ def test_bbox_loss_center_extents_direct_path_uses_constrained_parameters() -> N
     target_scores = torch.ones((1, 1, 1))
     target_scores_sum = torch.tensor(1.0)
     fg_mask = torch.tensor([[True]])
-    imgsz = torch.tensor([40.0, 40.0, 40.0])
+    patch_size = torch.tensor([40.0, 40.0, 40.0])
     stride_tensor = torch.tensor([[4.0]])
 
     loss_iou, loss_l1 = loss_fn(
@@ -173,7 +173,7 @@ def test_bbox_loss_center_extents_direct_path_uses_constrained_parameters() -> N
         target_scores,
         target_scores_sum,
         fg_mask,
-        imgsz,
+        patch_size,
         stride_tensor,
     )
 
@@ -191,7 +191,7 @@ def test_bbox_loss_center_extents_direct_path_uses_custom_offset_limit() -> None
     target_scores = torch.ones((1, 1, 1))
     target_scores_sum = torch.tensor(1.0)
     fg_mask = torch.tensor([[True]])
-    imgsz = torch.tensor([40.0, 40.0, 40.0])
+    patch_size = torch.tensor([40.0, 40.0, 40.0])
     stride_tensor = torch.tensor([[4.0]])
 
     raw_prediction = torch.tensor([[[10.0, 0.0, 0.0, 0.0, 1.0, 1.0]]])
@@ -211,7 +211,7 @@ def test_bbox_loss_center_extents_direct_path_uses_custom_offset_limit() -> None
         target_scores,
         target_scores_sum,
         fg_mask,
-        imgsz,
+        patch_size,
         stride_tensor,
     )
 

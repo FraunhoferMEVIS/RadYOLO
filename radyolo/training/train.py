@@ -526,7 +526,7 @@ class Trainer:
             apply_configured_augmentations_to_batch(
                 batch,
                 self.config,
-                tuple(self.config.imgsz),
+                self.config.patch_size,
                 placement="gpu",
             )
         return batch
@@ -590,7 +590,7 @@ class Trainer:
             src_path=dataset_path,
             fold=fold,
             group=mode,
-            imgsz=tuple(self.config.imgsz),
+            patch_size=self.config.patch_size,
             augment=self.config.augment and mode == "train",
             min_stride=get_model_min_stride(model),
             pad=0.0 if mode == "train" else 0.5,

@@ -9,7 +9,7 @@ fold: 0 # (int) fold from data splits file to use for training
 epochs: 1000 # (int) number of epochs to train for
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
 batch_size: 2 # (int) number of images per batch
-imgsz: [96, 96, 96] # (list[int]) input images size for model as list [d,h,w]
+patch_size: {x: 96, y: 96, z: 64} # input patch size stored in x, y, z (width, height, depth) order
 normalization: {type: "none"} # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 save: True # (bool) save train checkpoints
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)

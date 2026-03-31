@@ -322,25 +322,42 @@ def _normalize_name(raw: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in raw)
 
 
-def _as_positive_int_triplet(value: Any, *, field_name: str) -> list[int]:
-    if not isinstance(value, (list, tuple)) or len(value) != 3:
-        msg = f"'{field_name}' must be a list/tuple with 3 integer values"
-        raise ValueError(msg)
+def _as_positive_patch_size(value: Any, *, field_name: str) -> dict[str, int]:
+    if isinstance(value, dict):
+        expected_axes = ("x", "y", "z")
+        missing_axes = [axis for axis in expected_axes if axis not in value]
+        if missing_axes:
+            msg = (
+                f"'{field_name}' must define axes x, y, z; "
+                f"missing {', '.join(missing_axes)}"
+            )
+            raise ValueError(msg)
+        ordered_values = [value[axis] for axis in expected_axes]
+        axis_labels = list(expected_axes)
+    elif isinstance(value, (list, tuple)):
+        if len(value) != 3:
+            msg = f"'{field_name}' must be a 3-item sequence or {{x, y, z}} mapping"
+            raise ValueError(msg)
+        ordered_values = list(value)
+        axis_labels = ["x", "y", "z"]
+    else:
+        msg = f"'{field_name}' must be a 3-item sequence or {{x, y, z}} mapping"
+        raise TypeError(msg)
 
-    parsed: list[int] = []
-    for idx, item in enumerate(value):
+    parsed: dict[str, int] = {}
+    for axis_label, item in zip(axis_labels, ordered_values, strict=True):
         if isinstance(item, bool):
-            msg = f"'{field_name}[{idx}]' must be an integer, got bool"
+            msg = f"'{field_name}.{axis_label}' must be an integer, got bool"
             raise TypeError(msg)
         try:
             int_item = int(item)
         except (TypeError, ValueError) as exc:
-            msg = f"'{field_name}[{idx}]' must be an integer"
+            msg = f"'{field_name}.{axis_label}' must be an integer"
             raise TypeError(msg) from exc
         if int_item <= 0:
-            msg = f"'{field_name}[{idx}]' must be > 0"
+            msg = f"'{field_name}.{axis_label}' must be > 0"
             raise ValueError(msg)
-        parsed.append(int_item)
+        parsed[axis_label] = int_item
     return parsed
 
 
@@ -364,25 +381,14 @@ def _build_dataset_train_overrides(dataset_entry: dict[str, Any], *, index: int)
             msg = f"Dataset entry #{index} key 'resampling' must be a mapping"
             raise TypeError(msg)
 
-        has_imgsz = "imgsz" in resampling_cfg
-        has_target_shape = "target_shape" in resampling_cfg
-        if has_imgsz and has_target_shape:
-            msg = (
-                f"Dataset entry #{index} 'resampling' supports either 'imgsz' or "
-                "'target_shape', not both"
-            )
-            raise ValueError(msg)
+        if "patch_size" not in resampling_cfg:
+            msg = f"Dataset entry #{index} 'resampling' must define 'patch_size'"
+            raise KeyError(msg)
 
-        if has_imgsz:
-            merged_overrides["imgsz"] = _as_positive_int_triplet(
-                resampling_cfg["imgsz"],
-                field_name=f"datasets[{index - 1}].resampling.imgsz",
-            )
-        elif has_target_shape:
-            merged_overrides["imgsz"] = _as_positive_int_triplet(
-                resampling_cfg["target_shape"],
-                field_name=f"datasets[{index - 1}].resampling.target_shape",
-            )
+        merged_overrides["patch_size"] = _as_positive_patch_size(
+            resampling_cfg["patch_size"],
+            field_name=f"datasets[{index - 1}].resampling.patch_size",
+        )
 
     return merged_overrides
 

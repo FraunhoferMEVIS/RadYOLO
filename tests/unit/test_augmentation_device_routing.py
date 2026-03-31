@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from radyolo.config.config import DefaultConfig
+from radyolo.config.spatial import PatchSize
 from radyolo.data import augmentations as augmentation_module
 from radyolo.data import data as data_module
 
@@ -23,7 +24,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> DefaultConfig:
         "data": tmp_path,
         "fold": 0,
         "batch_size": 1,
-        "imgsz": [8, 8, 8],
+        "patch_size": {"x": 8, "y": 8, "z": 8},
         "name": "test",
     }
     base_config.update(overrides)
@@ -176,7 +177,7 @@ def test_apply_configured_image_augmentations_preserves_order_on_same_device(
     data_module.apply_configured_augmentations_to_batch(
         batch,
         config,
-        (4, 4, 4),
+        PatchSize(x=4, y=4, z=4),
         placement="cpu",
     )
 
@@ -250,7 +251,7 @@ def test_apply_configured_augmentations_runs_spatial_before_image_augmentations(
     data_module.apply_configured_augmentations_to_batch(
         batch,
         config,
-        (4, 4, 4),
+        PatchSize(x=4, y=4, z=4),
         placement="cpu",
     )
 
@@ -322,7 +323,7 @@ def test_apply_configured_augmentations_routes_only_matching_device(
     data_module.apply_configured_augmentations_to_batch(
         batch,
         config,
-        (4, 4, 4),
+        PatchSize(x=4, y=4, z=4),
         placement="cpu",
     )
 
@@ -336,7 +337,7 @@ def test_dataset_augmentation_applies_configured_sample_augmentations(
     config = _make_config(synthetic_dataset)
     dataset = data_module.NIfTIDatasetWithMasks(
         src_path=synthetic_dataset,
-        imgsz=(8, 8, 8),
+        patch_size=PatchSize(x=8, y=8, z=8),
         augment=True,
         config=config,
     )
@@ -361,12 +362,12 @@ def test_dataset_augmentation_applies_configured_sample_augmentations(
         bboxes_in: torch.Tensor,
         masks_in: torch.Tensor | None,
         config_in: DefaultConfig,
-        imgsz_in: tuple[int, int, int],
+        patch_size_in: PatchSize,
         *,
         placement: str,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         assert config_in is config
-        assert imgsz_in == (8, 8, 8)
+        assert patch_size_in == PatchSize(x=8, y=8, z=8)
         assert placement == "cpu"
         assert torch.equal(image_in, image)
         assert torch.equal(classes_in, classes)

@@ -5,7 +5,7 @@ import logging
 import os
 from collections.abc import Sized
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import nibabel as nib
 import numpy as np
@@ -22,12 +22,13 @@ from radyolo.data.augmentations import (
     random_zoom,
     tensor_cutout,
 )
-from radyolo.data.normalization import NormalizationConfig
 from radyolo.data.preprocessing import preprocess_image, resample_mask
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 if TYPE_CHECKING:
     from radyolo.config.config import DefaultConfig
+    from radyolo.config.spatial import PatchSize
+    from radyolo.data.normalization import NormalizationConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def _apply_configured_augmentations_to_sample(
     bboxes: torch.Tensor,
     masks: torch.Tensor | None,
     config: DefaultConfig,
-    imgsz: tuple[int, int, int],
+    patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     if _has_spatial_augmentations_on_device(config, placement):
@@ -141,7 +142,7 @@ def _apply_configured_augmentations_to_sample(
             bboxes,
             masks,
             config,
-            imgsz,
+            patch_size,
             placement,
         )
     image = _apply_configured_image_augmentations(image, config, placement)
@@ -154,12 +155,12 @@ def _apply_configured_spatial_augmentations_to_sample(
     bboxes: torch.Tensor,
     masks: torch.Tensor | None,
     config: DefaultConfig,
-    imgsz: tuple[int, int, int],
+    patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     labels = torch.cat((classes, bboxes), dim=1)
     scale_tensor = torch.tensor(
-        imgsz,
+        patch_size.get_zyx(),
         device=labels.device,
         dtype=labels.dtype,
     )[[2, 1, 0, 2, 1, 0]]
@@ -227,7 +228,7 @@ def _apply_configured_spatial_augmentations_to_sample(
 def apply_configured_augmentations_to_batch(
     batch: Batch,
     config: DefaultConfig,
-    imgsz: tuple[int, int, int],
+    patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> Batch:
     images = batch["img"]
@@ -249,7 +250,7 @@ def apply_configured_augmentations_to_batch(
             sample_bboxes,
             sample_masks,
             config,
-            imgsz,
+            patch_size,
             placement,
         )
         image_aug = image_aug.to(device=batch_device)
@@ -288,10 +289,10 @@ def apply_configured_augmentations_to_batch(
 def apply_configured_spatial_augmentations_to_batch(
     batch: Batch,
     config: DefaultConfig,
-    imgsz: tuple[int, int, int],
+    patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> Batch:
-    return apply_configured_augmentations_to_batch(batch, config, imgsz, placement)
+    return apply_configured_augmentations_to_batch(batch, config, patch_size, placement)
 
 
 class Sample(TypedDict):
@@ -324,7 +325,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
     def __init__(
         self,
         src_path: Path,
-        imgsz: tuple[int, int, int],
+        patch_size: PatchSize,
         augment: bool = False,
         min_stride: int = 8,
         pad: float = 0.5,
@@ -336,7 +337,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
     ) -> None:
         super().__init__()
         self.src_path = src_path
-        self.imgsz = imgsz
+        self.patch_size = patch_size
         self.augment = augment
         self.min_stride = min_stride
         self.pad = pad
@@ -392,7 +393,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
             bboxes,
             masks,
             self.config,
-            self.imgsz,
+            self.patch_size,
             placement="cpu",
         )
 
@@ -453,7 +454,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
         image_resampled_normalized, original_shape, resized_shape = preprocess_image(
             image,
             self.normalization,
-            target_shape=self.imgsz,
+            target_shape=self.patch_size,
             output_dtype=torch.float32,
         )
         return image_resampled_normalized, original_shape, resized_shape
@@ -491,7 +492,7 @@ class NIfTIDatasetWithMasks(Dataset[Sample], Sized):
                     mask_numpy = np.array(mask_archive["mask"], dtype=np.uint8)
             mask_tensor = torch.from_numpy(mask_numpy)
             mask_tensor = mask_tensor.permute(*reversed(range(mask_tensor.ndim)))
-            mask_tensor_resampled = resample_mask(mask_tensor, self.imgsz)
+            mask_tensor_resampled = resample_mask(mask_tensor, self.patch_size)
         else:
             mask_tensor_resampled = None
 

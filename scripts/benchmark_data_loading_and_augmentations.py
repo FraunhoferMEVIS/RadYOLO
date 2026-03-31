@@ -16,6 +16,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 
 from radyolo.config.config import DefaultConfig
+from radyolo.config.spatial import PatchSize
 from radyolo.data.data import _apply_configured_augmentations_to_sample
 from radyolo.data.normalization import normalize_image
 
@@ -364,7 +365,7 @@ def build_augmentation_config(
         "data": Path("."),
         "fold": 0,
         "batch_size": 1,
-        "imgsz": [size, size, size],
+        "patch_size": {"x": size, "y": size, "z": size},
         "name": f"benchmark_{augmentation}",
         "normalization": {"type": "none"},
         "augment": True,
@@ -480,7 +481,7 @@ def make_configured_augmentation_operation(
     config: DefaultConfig,
     placement: str,
 ) -> Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]]:
-    imgsz = tuple(volume.shape[1:])
+    patch_size = PatchSize.from_zyx(volume.shape[1:])
 
     def operation() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         with torch.inference_mode():
@@ -490,7 +491,7 @@ def make_configured_augmentation_operation(
                 bboxes.clone(),
                 masks=None,
                 config=config,
-                imgsz=imgsz,
+                patch_size=patch_size,
                 placement=placement,
             )
 

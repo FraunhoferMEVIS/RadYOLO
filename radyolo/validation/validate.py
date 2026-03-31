@@ -231,15 +231,15 @@ class Validator:
         classes = batch["cls"][idx].squeeze(-1)
         bboxes = batch["bboxes"][idx]
         ori_shape = batch["ori_shape"][si]
-        imgsz = batch["img"].shape[2:]
+        patch_size = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
         if len(classes):
             bboxes = (
                 ops.xyzwhd2xyzxyz(bboxes)
-                * torch.tensor(imgsz, device=self.device)[[2, 1, 0, 2, 1, 0]]
+                * torch.tensor(patch_size, device=self.device)[[2, 1, 0, 2, 1, 0]]
             )  # target boxes
             ops.scale_boxes(
-                imgsz,
+                patch_size,
                 bboxes,
                 ori_shape,
                 ratio_pad=ratio_pad,
@@ -249,7 +249,7 @@ class Validator:
             "cls": classes,
             "bboxes": bboxes,
             "ori_shape": ori_shape,
-            "imgsz": imgsz,
+            "patch_size": patch_size,
             "ratio_pad": ratio_pad,
         }
 
@@ -257,7 +257,7 @@ class Validator:
         """Prepares a batch of images and annotations for validation."""
         predn = pred.clone()
         ops.scale_boxes(
-            pbatch["imgsz"],
+            pbatch["patch_size"],
             predn[:, :6],
             pbatch["ori_shape"],
             ratio_pad=pbatch["ratio_pad"],

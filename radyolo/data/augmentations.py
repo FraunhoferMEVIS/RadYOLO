@@ -142,7 +142,7 @@ def random_zoom(
 
     augmented_labels = labels.clone()
 
-    # get original image shape (resized to imgsz_z x imgsz_y x imgsz_x by this point in dataloader)
+    # get original image shape (resized to patch_size z, y, x by this point in dataloader)
     channels, d, h, w = image.shape
     if uniform_zoom:
         zoom_factors = (random.uniform(min_zoom, max_zoom),) * 3  # (d, h, w) identical factors
