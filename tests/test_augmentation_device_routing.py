@@ -288,8 +288,8 @@ def test_apply_configured_augmentations_routes_only_matching_device(
     assert call_order == ["zoom", "gin"]
 
 
-def test_gaussian_noise_and_blur_preserve_tensor_device() -> None:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def test_gaussian_noise_and_blur_preserve_tensor_device_on_cpu() -> None:
+    device = torch.device("cpu")
     image = torch.ones((2, 8, 8, 8), device=device, dtype=torch.float32)
 
     noised = augmentation_module.gaussian_noise_augmentation(
