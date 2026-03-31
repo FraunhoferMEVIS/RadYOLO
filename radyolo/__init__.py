@@ -240,7 +240,14 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
         path_type=Path,
     ),
 )
-def onnx_export(model_path: Path) -> int:
+@click.option(
+    "--internal-dtype",
+    type=click.Choice(["float16", "float32"], case_sensitive=False),
+    default="float16",
+    show_default=True,
+    help="Internal compute dtype for the exported ONNX graph. Inputs and outputs stay float32.",
+)
+def onnx_export(model_path: Path, internal_dtype: str) -> int:
     """Export a ModelCheckpoint to ONNX-Format.
 
     This command expects a PATH to a ModelCheckpoint loadable by `torch.load()`, usually
@@ -258,7 +265,7 @@ def onnx_export(model_path: Path) -> int:
         )
 
         input_shape = (train_config.input_channels, *train_config.imgsz)
-        export_model(model, input_shape, model_path)
+        export_model(model, input_shape, model_path, internal_dtype=internal_dtype.lower())
     except Exception as e:  # pragma: no cover
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1

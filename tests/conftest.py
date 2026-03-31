@@ -190,7 +190,7 @@ def export_onnx(last_model_path: Path) -> Path:
     )
     model.eval()
     input_shape = (train_config.input_channels, *train_config.imgsz)
-    export_model(model, input_shape, last_model_path)
+    export_model(model, input_shape, last_model_path, internal_dtype="float32")
     return last_model_path.with_suffix(".onnx")
 
 

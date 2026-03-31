@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+import onnx
 import torch
+from onnxconverter_common import float16
 from torch import nn
 
 from radyolo.models.layers import C2f, Detect
 
 if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
+
+
+ExportInternalDType = Literal["float16", "float32"]
 
 
 class ExportModelWrapper(nn.Module):
@@ -25,6 +30,7 @@ def export_model(
     model: HardcodedModel,
     input_shape: tuple[int, ...],
     dest: Path | str,
+    internal_dtype: ExportInternalDType = "float16",
 ) -> Path:
     inputs = torch.randn((1, *input_shape)).to("cpu")
     model.to("cpu")
@@ -33,7 +39,9 @@ def export_model(
     model.eval()
     model.float()
 
-    # TODO(kgeissler): Make export to float16 with input and output layers as float32
+    if internal_dtype not in {"float16", "float32"}:
+        msg = f"Unsupported internal ONNX dtype: {internal_dtype}"
+        raise ValueError(msg)
 
     for _ in range(2):
         model(inputs)
@@ -71,4 +79,10 @@ def export_model(
         output_names=output_names,
         dynamic_axes=None,
     )
+
+    if internal_dtype == "float16":
+        onnx_model = onnx.load(onnx_path)
+        onnx_model = float16.convert_float_to_float16(onnx_model, keep_io_types=True)
+        onnx.save(onnx_model, onnx_path)
+
     return onnx_path

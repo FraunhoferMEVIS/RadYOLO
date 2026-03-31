@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 import torch
 from click.testing import CliRunner
@@ -10,6 +11,9 @@ from click.testing import CliRunner
 from radyolo import main
 from radyolo.config.config import load_model_checkpoint
 from radyolo.models.model import build_model_from_config
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _build_deterministic_input(input_shape: tuple[int, ...]) -> torch.Tensor:
@@ -42,7 +46,11 @@ def _run_torch_and_onnx_inference(
     return torch_outputs, onnx_outputs
 
 
-def test_onnx_export_cli(trained_run: Path) -> None:
+def _load_onnx_model(onnx_path: Path) -> onnx.ModelProto:
+    return onnx.load(onnx_path)
+
+
+def test_onnx_export_cli_defaults_to_float16_internal_ops(trained_run: Path) -> None:
     model_path = trained_run / "weights" / "last.pt"
     runner = CliRunner()
 
@@ -51,6 +59,35 @@ def test_onnx_export_cli(trained_run: Path) -> None:
     assert result.exit_code == 0
     onnx_path = model_path.with_suffix(".onnx")
     assert onnx_path.exists(), "ONNX export not created"
+
+    onnx_model = _load_onnx_model(onnx_path)
+
+    assert onnx_model.graph.input[0].type.tensor_type.elem_type == onnx.TensorProto.FLOAT
+    assert all(
+        output.type.tensor_type.elem_type == onnx.TensorProto.FLOAT
+        for output in onnx_model.graph.output
+    )
+    assert any(
+        initializer.data_type == onnx.TensorProto.FLOAT16
+        for initializer in onnx_model.graph.initializer
+    )
+
+
+def test_onnx_export_cli_allows_float32_internal_ops(trained_run: Path) -> None:
+    model_path = trained_run / "weights" / "last.pt"
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["onnx-export", str(model_path), "--internal-dtype", "float32"])
+
+    assert result.exit_code == 0
+    onnx_path = model_path.with_suffix(".onnx")
+    assert onnx_path.exists(), "ONNX export not created"
+
+    onnx_model = _load_onnx_model(onnx_path)
+    assert all(
+        initializer.data_type != onnx.TensorProto.FLOAT16
+        for initializer in onnx_model.graph.initializer
+    )
 
     checkpoint = load_model_checkpoint(model_path)
     train_config = checkpoint["train_config"]

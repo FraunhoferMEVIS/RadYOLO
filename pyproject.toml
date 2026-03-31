@@ -18,6 +18,7 @@ dependencies = [
   "nibabel>=5.3.2",
   "numpy>=2.3.0",
   "onnx>=1.19.0",
+  "onnxconverter-common>=1.14.0",
   "onnxscript>=0.1.0.dev20250114",
   "opencv-python-headless>=4.11.0.86",
   "pandas>=2.3.0",
