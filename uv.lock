@@ -2168,7 +2168,7 @@ dev = [
     { name = "matplotlib", specifier = ">=3.10.0" },
     { name = "pytest", specifier = ">=8.3.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
-    { name = "pytest-html", specifier = ">=4.1.0" },
+    { name = "pytest-html", specifier = ">=4.2.0" },
     { name = "ray", extras = ["tune"], specifier = "==2.51.2" },
     { name = "ruff", specifier = ">=0.13.0" },
 ]
