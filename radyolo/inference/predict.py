@@ -105,13 +105,13 @@ def _reconstruct_and_save_mask(
         return None
     coeff = det[8 : 8 + nm].to(device=proto.device)
     mask_prob = ops.reconstruct_mask_probabilities(coeff, proto)
-    mask_prob_r = mask_prob.permute(2, 0, 1).unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
+    mask_prob_r = mask_prob.unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
     mask_up = F.interpolate(
         mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
-    )[0, 0].permute(1, 2, 0)
+    )[0, 0].permute(2, 1, 0) # (W, H, D)
     mask_bin = (mask_up >= MASK_THRESHOLD).cpu().numpy().astype("uint8")
     mask_affine = nifti_img.affine
-    mask_img = nib.Nifti1Image(mask_bin.transpose(2, 0, 1), affine=mask_affine)
+    mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
     mask_dir.mkdir(exist_ok=True)
     mask_filename = f"{case_name}_det{det_index}.nii.gz"
     mask_path = mask_dir / mask_filename
