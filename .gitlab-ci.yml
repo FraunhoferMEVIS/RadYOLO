@@ -25,7 +25,7 @@ test:
   stage: test
   script:
     - uv sync --locked --group dev
-    - uv run --group dev pytest --junitxml=pytest-report.xml --cov=radyolo --cov-report=term --cov-report=xml
+    - uv run --group dev pytest --junitxml=pytest-report.xml --html=pytest-report.html --self-contained-html --cov=radyolo --cov-report=term --cov-report=xml --cov-report=html
   coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+%)$/'
   artifacts:
     when: always
@@ -36,4 +36,6 @@ test:
         path: coverage.xml
     paths:
       - pytest-report.xml
+      - pytest-report.html
       - coverage.xml
+      - htmlcov/
