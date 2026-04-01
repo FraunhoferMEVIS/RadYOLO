@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import json
 import nibabel as nib
 import numpy as np
 
@@ -11,6 +12,7 @@ from radyolo.data.analyze_dataset import (
     _image_stats,
     _labels_to_mask,
     _load_nifti,
+    analyze_dataset,
 )
 
 if TYPE_CHECKING:
@@ -94,3 +96,29 @@ def test_image_stats_reads_channels_first_nifti_and_foreground_stats(tmp_path: P
     }
     np.testing.assert_array_equal(stats.samples_per_channel[0], foreground0.reshape(-1))
     np.testing.assert_array_equal(stats.samples_per_channel[1], foreground1.reshape(-1))
+
+
+def test_analyze_dataset_writes_resampled_summary_and_box_sizes(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset"
+    images_dir = dataset_path / "images"
+    labels_dir = dataset_path / "labels"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir()
+
+    case1_image = np.ones((10, 20, 30), dtype=np.float32)
+    case2_image = np.ones((20, 40, 60), dtype=np.float32)
+    _write_nifti(images_dir / "case1.nii.gz", case1_image, np.diag((1.0, 1.0, 1.0, 1.0)))
+    _write_nifti(images_dir / "case2.nii.gz", case2_image, np.diag((0.5, 0.5, 0.5, 1.0)))
+    for case_id in ("case1", "case2"):
+        (labels_dir / f"{case_id}.txt").write_text(
+            "0 0.5 0.5 0.5 0.5 0.5 0.5\n",
+            encoding="utf-8",
+        )
+
+    fingerprint_path = analyze_dataset(dataset_path, workers=1)
+    fingerprint = json.loads(fingerprint_path.read_text(encoding="utf-8"))
+
+    assert fingerprint["median_voxel_size_mm"] == [0.75, 0.75, 0.75]
+    assert fingerprint["median_resampled_imagesize"] == [13, 27, 40]
+    assert fingerprint["box_size_median_vox"] == {"0": [6.5, 13.5, 20.0]}
+    assert fingerprint["box_size_p10_vox"] == {"0": [6.5, 13.5, 20.0]}

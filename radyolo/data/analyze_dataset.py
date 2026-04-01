@@ -35,8 +35,8 @@ class ImageStats(NamedTuple):
 
 class LabelStats(NamedTuple):
     n_by_class: dict[str, int]
-    # sizes per class in mm for each axis [x, y, z]
-    sizes_by_class_mm: dict[str, list[VoxelSize]]
+    # sizes per class in voxels on the resampled image grid for each axis [x, y, z]
+    sizes_by_class_vox: dict[str, list[VoxelSize]]
 
 
 @dataclass
@@ -45,10 +45,11 @@ class DatasetFingerprint:
     foreground_channel_stats: list[dict[str, float]]
     median_image_size: PatchSize
     median_voxel_size_mm: VoxelSize
+    median_resampled_imagesize: PatchSize
     # Box stats per class
     boxes_per_class: dict[str, int]
-    box_size_median_mm: dict[str, VoxelSize]
-    box_size_p10_mm: dict[str, VoxelSize]
+    box_size_median_vox: dict[str, VoxelSize]
+    box_size_p10_vox: dict[str, VoxelSize]
     # Masks
     n_masks_available: int
 
@@ -58,12 +59,13 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "foreground_channel_stats": fingerprint.foreground_channel_stats,
         "median_image_size": list(fingerprint.median_image_size.get_xyz()),
         "median_voxel_size_mm": list(fingerprint.median_voxel_size_mm.get_xyz()),
+        "median_resampled_imagesize": list(fingerprint.median_resampled_imagesize.get_xyz()),
         "boxes_per_class": fingerprint.boxes_per_class,
-        "box_size_median_mm": {
-            cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_mm.items()
+        "box_size_median_vox": {
+            cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_vox.items()
         },
-        "box_size_p10_mm": {
-            cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_p10_mm.items()
+        "box_size_p10_vox": {
+            cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_p10_vox.items()
         },
         "n_masks_available": fingerprint.n_masks_available,
     }
@@ -257,32 +259,56 @@ def _label_stats_for_case(
     labels_file: Path,
     image_size: PatchSize,
     voxel_size: VoxelSize,
+    target_voxel_size: VoxelSize,
 ) -> LabelStats:
     entries = _labels_for_case(labels_file)
     n_by_class: dict[str, int] = {}
-    sizes_by_class_mm: dict[str, list[VoxelSize]] = {}
+    sizes_by_class_vox: dict[str, list[VoxelSize]] = {}
     if not entries:
-        return LabelStats(n_by_class, sizes_by_class_mm)
+        return LabelStats(n_by_class, sizes_by_class_vox)
 
-    image_size = np.array(image_size.get_xyz(), dtype=np.float64)
-    image_spacing = np.array(voxel_size.get_xyz(), dtype=np.float64)  # (x,y,z) mm
+    resampled_image_size = np.array(
+        _resolve_resampled_image_size(
+            image_size,
+            voxel_size,
+            target_voxel_size,
+        ).get_xyz(),
+        dtype=np.float64,
+    )
 
     for cls, _x, _y, _z, w, h, d in entries:
         cls_key = str(cls)
-        # labels are normalized in [0,1], sizes relative to image size; convert to mm
+        # labels are normalized in [0,1], sizes relative to the resampled image size
         xyz_norm = np.array([w, h, d], dtype=np.float64)
-        size_vox = xyz_norm * image_size
-        size_mm = size_vox * image_spacing
-        sizes_by_class_mm.setdefault(cls_key, []).append(
-            VoxelSize(x=float(size_mm[0]), y=float(size_mm[1]), z=float(size_mm[2]))
+        size_vox = xyz_norm * resampled_image_size
+        sizes_by_class_vox.setdefault(cls_key, []).append(
+            VoxelSize(x=float(size_vox[0]), y=float(size_vox[1]), z=float(size_vox[2]))
         )
         n_by_class[cls_key] = n_by_class.get(cls_key, 0) + 1
 
-    return LabelStats(n_by_class=n_by_class, sizes_by_class_mm=sizes_by_class_mm)
+    return LabelStats(n_by_class=n_by_class, sizes_by_class_vox=sizes_by_class_vox)
 
 
 def _has_mask(mask_path: Path) -> bool:
     return mask_path.exists()
+
+
+def _resolve_resampled_image_size(
+    image_size: PatchSize,
+    source_voxel_size: VoxelSize,
+    target_voxel_size: VoxelSize,
+) -> PatchSize:
+    return PatchSize.from_xyz(
+        [
+            max(1, round(size * source_spacing / target_spacing))
+            for size, source_spacing, target_spacing in zip(
+                image_size.get_xyz(),
+                source_voxel_size.get_xyz(),
+                target_voxel_size.get_xyz(),
+                strict=True,
+            )
+        ]
+    )
 
 
 def _iter_cases(dataset_path: Path) -> Iterable[tuple[str, Path]]:
@@ -324,7 +350,7 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         max_workers = workers
 
     image_stats_results: list[ImageStats] = []
-    label_stats_results: list[LabelStats] = []
+    label_stats_inputs: list[tuple[Path, PatchSize, VoxelSize]] = []
     n_masks = 0
 
     total_cases = len(cases)
@@ -348,13 +374,9 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
             except Exception:
                 LOGGER.exception("Failed to read image %s", image_path)
             else:
-                try:
-                    label_stats = _label_stats_for_case(
-                        label_path, image_stats.image_size, image_stats.voxel_size
-                    )
-                    label_stats_results.append(label_stats)
-                except Exception:
-                    LOGGER.exception("Failed to read labels for %s", label_path)
+                label_stats_inputs.append(
+                    (label_path, image_stats.image_size, image_stats.voxel_size)
+                )
 
                 if _has_mask(mask_path):
                     n_masks += 1
@@ -454,30 +476,58 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     median_image_size = PatchSize.from_xyz(np.median(images_sizes, axis=0).astype(int).tolist())
     median_voxel_size = VoxelSize.from_xyz(np.median(voxel_sizes, axis=0).astype(float).tolist())
 
+    resampled_image_sizes = np.array(
+        [
+            _resolve_resampled_image_size(
+                stats.image_size,
+                stats.voxel_size,
+                median_voxel_size,
+            ).get_xyz()
+            for stats in image_stats_results
+        ],
+        dtype=np.int64,
+    )
+    median_resampled_imagesize = PatchSize.from_xyz(
+        np.median(resampled_image_sizes, axis=0).astype(int).tolist()
+    )
+
+    label_stats_results: list[LabelStats] = []
+    for label_path, image_size, voxel_size in label_stats_inputs:
+        try:
+            label_stats = _label_stats_for_case(
+                label_path,
+                image_size,
+                voxel_size,
+                median_voxel_size,
+            )
+            label_stats_results.append(label_stats)
+        except Exception:
+            LOGGER.exception("Failed to read labels for %s", label_path)
+
     # Aggregate label stats
     total_by_class: dict[str, int] = {}
     all_sizes_by_class: dict[str, list[VoxelSize]] = {}
     for label_stats in label_stats_results:
         for cls, count in label_stats.n_by_class.items():
             total_by_class[cls] = total_by_class.get(cls, 0) + count
-        for cls, lst in label_stats.sizes_by_class_mm.items():
+        for cls, lst in label_stats.sizes_by_class_vox.items():
             all_sizes_by_class.setdefault(cls, []).extend(lst)
 
     # Compute medians and 10th percentiles per class per axis
-    box_size_median_mm: dict[str, VoxelSize] = {}
-    box_size_p10_mm: dict[str, VoxelSize] = {}
+    box_size_median_vox: dict[str, VoxelSize] = {}
+    box_size_p10_vox: dict[str, VoxelSize] = {}
     for cls, lst in all_sizes_by_class.items():
-        arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)  # (M,3) x,y,z in mm
+        arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)  # (M,3) x,y,z in vox
         if arr.size == 0:
             continue
         median = np.median(arr, axis=0)
         p10 = np.percentile(arr, 10, axis=0)
-        box_size_median_mm[cls] = VoxelSize(
+        box_size_median_vox[cls] = VoxelSize(
             x=float(median[0]),
             y=float(median[1]),
             z=float(median[2]),
         )
-        box_size_p10_mm[cls] = VoxelSize(
+        box_size_p10_vox[cls] = VoxelSize(
             x=float(p10[0]),
             y=float(p10[1]),
             z=float(p10[2]),
@@ -487,9 +537,10 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         foreground_channel_stats=foreground_channel_stats,
         median_image_size=median_image_size,
         median_voxel_size_mm=median_voxel_size,
+        median_resampled_imagesize=median_resampled_imagesize,
         boxes_per_class=total_by_class,
-        box_size_median_mm=box_size_median_mm,
-        box_size_p10_mm=box_size_p10_mm,
+        box_size_median_vox=box_size_median_vox,
+        box_size_p10_vox=box_size_p10_vox,
         n_masks_available=n_masks,
     )
 
