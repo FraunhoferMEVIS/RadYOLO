@@ -35,3 +35,18 @@ def test_dataset_loads_preprocessed_blosc2_images_and_masks(
     assert masks is not None
     assert masks.dtype == torch.uint8
     assert masks.shape == (1, 64, 32, 32)
+
+
+def test_whole_image_dataset_length_includes_foreground_oversamples(
+    synthetic_dataset,
+) -> None:
+    dataset = WholeImageDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=32, y=32, z=64),
+        augment=False,
+        foreground_oversampling=0.5,
+    )
+
+    assert len(dataset.cases) == 3
+    assert dataset.foreground_oversample_count == 3
+    assert len(dataset) == 6

@@ -44,6 +44,17 @@ def test_default_config_requires_named_patch_size_objects(tmp_path: Path) -> Non
     assert cfg.patch_size.get_zyx() == (20, 18, 16)
 
 
+def test_default_config_accepts_foreground_oversampling(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path, {"x": 20, "y": 18, "z": 16}),
+            "foreground_oversampling": 0.25,
+        }
+    )
+
+    assert cfg.foreground_oversampling == 0.25
+
+
 def test_resolve_target_shape_uses_voxel_sizes_through_named_axes() -> None:
     target_shape = resolve_target_shape(
         (6, 5, 4),

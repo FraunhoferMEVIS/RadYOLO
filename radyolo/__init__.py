@@ -203,6 +203,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             min_stride=get_model_min_stride(model),
             normalization=train_config.normalization,
             load_masks=train_config.segmentation_output,
+            foreground_oversampling=0.0,
         )
 
         dataloader = build_dataloader(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -176,3 +178,63 @@ def test_patchwise_dataset_centers_oversized_patch_dimensions(
     assert torch.all(sample["image"][..., 16:32] == 1)
     assert torch.all(sample["image"][..., 32:40] == 0)
     assert torch.all(sample["image"][..., 40:] == 0)
+
+
+def test_patchwise_dataset_length_includes_foreground_oversamples(
+    synthetic_dataset: Path,
+) -> None:
+    dataset = PatchWiseDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        foreground_oversampling=0.33,
+    )
+
+    assert len(dataset.cases) == 3
+    assert dataset.foreground_oversample_count == 2
+    assert len(dataset) == 5
+
+
+def test_patchwise_dataset_oversampled_indices_sample_from_foreground_boxes(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dataset_root = tmp_path / "foreground_only_case1"
+    shutil.copytree(synthetic_dataset, dataset_root)
+    (dataset_root / "data_splits.json").write_text(
+        json.dumps([
+            {"train": ["case1", "case2", "case3"], "val": ["case4"], "test": ["case5"]}
+        ]),
+        encoding="utf-8",
+    )
+    (dataset_root / "labels" / "case2.txt").write_text("", encoding="utf-8")
+    (dataset_root / "labels" / "case3.txt").write_text("", encoding="utf-8")
+
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        foreground_oversampling=0.33,
+    )
+    expected_bounds = [(8, 23), (8, 23), (16, 47)]
+    sampled_bounds: list[tuple[int, int]] = []
+
+    def _unexpected_uniform_sampling(_image_shape_xyz, _patch_shape_xyz):
+        raise AssertionError("Foreground oversampled indices must not use uniform patch sampling")
+
+    def _recording_randint(lower: int, upper: int) -> int:
+        sampled_bounds.append((lower, upper))
+        return upper
+
+    monkeypatch.setattr(dataset, "_sample_patch_center", _unexpected_uniform_sampling)
+    monkeypatch.setattr(data_module.random, "randint", _recording_randint)
+
+    sample = dataset[len(dataset.cases)]
+
+    assert dataset.foreground_cases == ("case1",)
+    assert sampled_bounds == expected_bounds
+    assert sample["case_name"] == "case1"
+    assert sample["classes"].shape == (1, 1)
+    assert sample["bboxes"].shape == (1, 6)
+    assert sample["masks"] is not None

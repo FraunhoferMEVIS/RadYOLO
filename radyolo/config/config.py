@@ -72,6 +72,11 @@ class DefaultConfig(BaseModel):
     )
     batch_size: int = 2  # number of images per batch
     patch_size: PatchSize  # input patch size as {"x": x, "y": y, "z": z}
+    foreground_oversampling: float = Field(
+        0.0,
+        ge=0.0,
+        lt=1.0,
+    )  # fraction of samples per train epoch that should be extra foreground oversamples
     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
     # applied globally or a list of such dicts for each channel. For ct you have to define
     # mean, std, clip_min and clip_max in the dict.

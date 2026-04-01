@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import random
 from collections.abc import Sized
@@ -514,6 +515,60 @@ def _load_labels(src_path: Path, case_name: str) -> tuple[torch.Tensor, torch.Te
     return torch.from_numpy(labels[:, 0:1]), torch.from_numpy(labels[:, 1:])
 
 
+def _load_foreground_case_bboxes(
+    src_path: Path,
+    cases: list[str],
+) -> dict[str, torch.Tensor]:
+    foreground_case_bboxes: dict[str, torch.Tensor] = {}
+    for case_name in cases:
+        _classes, bboxes = _load_labels(src_path, case_name)
+        if bboxes.shape[0] > 0:
+            foreground_case_bboxes[case_name] = bboxes
+    return foreground_case_bboxes
+
+
+def _compute_foreground_oversample_count(
+    num_cases: int,
+    foreground_oversampling: float,
+) -> int:
+    if foreground_oversampling <= 0 or num_cases == 0:
+        return 0
+    return math.ceil((num_cases * foreground_oversampling) / (1.0 - foreground_oversampling))
+
+
+def _validate_foreground_oversampling(foreground_oversampling: float) -> None:
+    if not 0.0 <= foreground_oversampling < 1.0:
+        msg = (
+            "foreground_oversampling must be in the range [0, 1), "
+            f"got {foreground_oversampling}."
+        )
+        raise ValueError(msg)
+
+
+def _sample_patch_center_from_bbox(
+    bbox: torch.Tensor,
+    image_shape_xyz: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    bbox_tensor = bbox.to(dtype=torch.float32).unsqueeze(0)
+    image_scale = bbox_tensor.new_tensor((*image_shape_xyz, *image_shape_xyz))
+    box_xyzxyz = xyzwhd2xyzxyz(bbox_tensor * image_scale)[0]
+
+    center_xyz = []
+    for axis, image_dim in enumerate(image_shape_xyz):
+        lower = float(box_xyzxyz[axis].item())
+        upper = float(box_xyzxyz[axis + 3].item())
+        lower_idx = max(math.floor(lower), 0)
+        upper_idx = min(math.ceil(upper) - 1, image_dim - 1)
+
+        if upper_idx < lower_idx:
+            sampled_position = round((lower + upper) / 2.0)
+        else:
+            sampled_position = random.randint(lower_idx, upper_idx)
+        center_xyz.append(min(max(sampled_position, 0), image_dim - 1))
+
+    return tuple(center_xyz)
+
+
 def _load_mask_array(
     src_path: Path,
     case_name: str,
@@ -795,9 +850,11 @@ class WholeImageDataset(Dataset[Sample], Sized):
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
         load_masks: bool = True,
+        foreground_oversampling: float = 0.0,
         config: DefaultConfig | None = None,
     ) -> None:
         super().__init__()
+        _validate_foreground_oversampling(foreground_oversampling)
         self.src_path = src_path
         self.patch_size = patch_size
         self.augment = augment
@@ -808,7 +865,20 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.normalization = _resolve_normalization(normalization)
         self.config = config
         self.load_masks = load_masks
+        self.foreground_oversampling = foreground_oversampling
         self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
+        self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
+        self.foreground_cases = tuple(self.foreground_case_bboxes)
+        self.foreground_oversample_count = _compute_foreground_oversample_count(
+            len(self.cases),
+            foreground_oversampling if self.foreground_cases else 0.0,
+        )
+        if foreground_oversampling > 0 and not self.foreground_cases:
+            LOGGER.warning(
+                "WholeImageDataset foreground oversampling requested for split '%s', "
+                "but no foreground labels were found. Falling back to one sample per case.",
+                group,
+            )
 
     def _get_image_path(self, case_name: str) -> Path:
         return _get_image_path(self.src_path, case_name, self.image_format)
@@ -842,7 +912,18 @@ class WholeImageDataset(Dataset[Sample], Sized):
         return _detect_image_format(self.src_path, self.cases)
 
     def __len__(self) -> int:
-        return len(self.cases)
+        return len(self.cases) + self.foreground_oversample_count
+
+    def _sample_foreground_case(self) -> str:
+        return random.choice(self.foreground_cases)
+
+    def _resolve_case_name(self, index: int) -> str:
+        dataset_length = len(self)
+        if index < 0 or index >= dataset_length:
+            raise IndexError(index)
+        if index < len(self.cases):
+            return self.cases[index]
+        return self._sample_foreground_case()
 
     def __getitem__(self, index: int) -> Sample:
         with torch.no_grad():
@@ -857,7 +938,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         )
 
     def load_image_label_and_mask(self, index: int) -> Sample:
-        case_name = self.cases[index]
+        case_name = self._resolve_case_name(index)
 
         image = self.load_image(case_name)
         image, original_shape, resized_shape = self.resample_and_normalize(image)
@@ -923,9 +1004,11 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
         load_masks: bool = True,
+        foreground_oversampling: float = 0.33,
         config: DefaultConfig | None = None,
     ) -> None:
         super().__init__()
+        _validate_foreground_oversampling(foreground_oversampling)
         self.src_path = src_path
         self.patch_size = patch_size
         self.augment = augment
@@ -936,10 +1019,23 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.normalization = _resolve_normalization(normalization)
         self.config = config
         self.load_masks = load_masks
+        self.foreground_oversampling = foreground_oversampling
         self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
+        self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
+        self.foreground_cases = tuple(self.foreground_case_bboxes)
+        self.foreground_oversample_count = _compute_foreground_oversample_count(
+            len(self.cases),
+            foreground_oversampling if self.foreground_cases else 0.0,
+        )
+        if foreground_oversampling > 0 and not self.foreground_cases:
+            LOGGER.warning(
+                "PatchWiseDataset foreground oversampling requested for split '%s', "
+                "but no foreground labels were found. Falling back to one sample per case.",
+                group,
+            )
 
     def __len__(self) -> int:
-        return len(self.cases)
+        return len(self.cases) + self.foreground_oversample_count
 
     def __getitem__(self, index: int) -> Sample:
         with torch.no_grad():
@@ -963,6 +1059,27 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_shape_xyz: tuple[int, int, int],
     ) -> tuple[int, int, int]:
         return _sample_patch_center(image_shape_xyz, patch_shape_xyz)
+
+    @staticmethod
+    def _sample_patch_center_from_bbox(
+        bbox: torch.Tensor,
+        image_shape_xyz: tuple[int, int, int],
+    ) -> tuple[int, int, int]:
+        return _sample_patch_center_from_bbox(bbox, image_shape_xyz)
+
+    def _sample_foreground_case_and_bbox(self) -> tuple[str, torch.Tensor]:
+        case_name = random.choice(self.foreground_cases)
+        case_bboxes = self.foreground_case_bboxes[case_name]
+        bbox_index = random.randrange(case_bboxes.shape[0])
+        return case_name, case_bboxes[bbox_index]
+
+    def _resolve_sampling_target(self, index: int) -> tuple[str, torch.Tensor | None]:
+        dataset_length = len(self)
+        if index < 0 or index >= dataset_length:
+            raise IndexError(index)
+        if index < len(self.cases):
+            return self.cases[index], None
+        return self._sample_foreground_case_and_bbox()
 
     def _get_chunked_image_shape(self, case_name: str) -> tuple[int, int, int]:
         return _get_chunked_blosc2_shape(
@@ -1042,13 +1159,19 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         )
 
     def load_image_label_and_mask(self, index: int) -> Sample:
-        case_name = self.cases[index]
+        case_name, foreground_bbox = self._resolve_sampling_target(index)
         patch_shape_xyz = self.patch_size.get_xyz()
 
         if self.image_format in {"nifti", "numpy"}:
             image_array = _load_image_array(self.src_path, case_name, self.image_format)
             image_shape_xyz = _get_spatial_shape(tuple(int(dim) for dim in image_array.shape))
-            patch_center_xyz = self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+            if foreground_bbox is None:
+                patch_center_xyz = self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+            else:
+                patch_center_xyz = self._sample_patch_center_from_bbox(
+                    foreground_bbox,
+                    image_shape_xyz,
+                )
             patch_origin_xyz = _compute_patch_origin(patch_center_xyz, patch_shape_xyz)
             image_patch = _extract_patch_from_array(
                 image_array,
@@ -1058,7 +1181,13 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             )
         else:
             image_shape_xyz = self._get_chunked_image_shape(case_name)
-            patch_center_xyz = self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+            if foreground_bbox is None:
+                patch_center_xyz = self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+            else:
+                patch_center_xyz = self._sample_patch_center_from_bbox(
+                    foreground_bbox,
+                    image_shape_xyz,
+                )
             patch_origin_xyz = _compute_patch_origin(patch_center_xyz, patch_shape_xyz)
             image_patch = self._load_chunked_image_patch(
                 case_name,
