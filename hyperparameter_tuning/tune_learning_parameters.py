@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,65 @@ SUPPORTED_DISTRIBUTIONS = {
 }
 
 DEFAULT_TRAINING_COMMAND = ["uv", "run", "-m", "radyolo", "-v", "train"]
+
+
+def _is_numeric_search_value(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_discrete_initial_point_value(
+    value: object,
+    spec: Mapping[str, object],
+) -> str | None:
+    values = spec.get("values", [])
+    if value in values:
+        return None
+    return f"template default {value!r} is not in {values!r}"
+
+
+def _validate_numeric_initial_point_bounds(
+    distribution_type: str,
+    value: float,
+    spec: Mapping[str, object],
+) -> str | None:
+    lower = spec.get("lower")
+    upper = spec.get("upper")
+
+    if lower is not None and value < float(lower):
+        return f"template default {value!r} is below lower bound {lower!r}"
+
+    if upper is None:
+        return None
+
+    upper_value = float(upper)
+    if distribution_type in {"randint", "qrandint"} and value >= upper_value:
+        return f"template default {value!r} must be < upper bound {upper!r}"
+    if distribution_type not in {"randint", "qrandint"} and value > upper_value:
+        return f"template default {value!r} is above upper bound {upper!r}"
+    return None
+
+
+def _validate_numeric_initial_point_q(
+    distribution_type: str,
+    value: float,
+    spec: Mapping[str, object],
+) -> str | None:
+    if distribution_type in {"randint", "qrandint"} and int(value) != value:
+        return f"template default {value!r} must be an integer for {distribution_type}"
+
+    q = spec.get("q")
+    if q is None:
+        return None
+
+    q_value = float(q)
+    if q_value <= 0:
+        return f"distribution {distribution_type} requires q > 0"
+
+    lower_value = float(spec.get("lower", 0.0))
+    steps = (value - lower_value) / q_value
+    if math.isclose(steps, round(steps), rel_tol=0.0, abs_tol=1e-9):
+        return None
+    return f"template default {value!r} does not align to q={q!r}"
 
 
 def _setup_logging() -> None:
@@ -199,6 +259,35 @@ def _build_param_space(search_space_cfg: dict[str, Any]) -> tuple[dict[str, Any]
     return param_space, casts
 
 
+def _validate_initial_point_value(value: object, spec: object) -> str | None:
+    if not isinstance(spec, Mapping) or "type" not in spec:
+        return None
+
+    distribution_type = str(spec["type"])
+    if distribution_type in {"choice", "grid_search"}:
+        return _validate_discrete_initial_point_value(value, spec)
+
+    if distribution_type == "one_minus_loguniform":
+        return (
+            "distribution uses tune.sample_from and cannot be seeded via "
+            "points_to_evaluate"
+        )
+
+    if not _is_numeric_search_value(value):
+        return f"template default {value!r} must be numeric for {distribution_type}"
+
+    numeric_value = float(value)
+    bounds_error = _validate_numeric_initial_point_bounds(
+        distribution_type,
+        numeric_value,
+        spec,
+    )
+    if bounds_error is not None:
+        return bounds_error
+
+    return _validate_numeric_initial_point_q(distribution_type, numeric_value, spec)
+
+
 def _build_initial_evaluation_point(
     template_config: dict[str, Any],
     effective_template_config: dict[str, Any],
@@ -207,20 +296,34 @@ def _build_initial_evaluation_point(
 ) -> dict[str, Any]:
     initial_point: dict[str, Any] = {}
     missing_keys: list[str] = []
-    for key in search_space_cfg:
+    skipped_keys: list[str] = []
+    for key, spec in search_space_cfg.items():
         if key in effective_template_config:
-            initial_point[key] = copy.deepcopy(effective_template_config[key])
+            candidate_value = copy.deepcopy(effective_template_config[key])
+        elif key in template_config:
+            candidate_value = copy.deepcopy(template_config[key])
+        else:
+            missing_keys.append(key)
             continue
-        if key in template_config:
-            initial_point[key] = copy.deepcopy(template_config[key])
+
+        validation_error = _validate_initial_point_value(candidate_value, spec)
+        if validation_error is not None:
+            skipped_keys.append(f"{key} ({validation_error})")
             continue
-        missing_keys.append(key)
+
+        initial_point[key] = candidate_value
 
     if missing_keys:
         LOGGER.warning(
             "Search-space keys without defaults in the template or validated runtime config "
             "will not be pinned for the first trial: %s",
             ", ".join(sorted(missing_keys)),
+        )
+
+    if skipped_keys:
+        LOGGER.warning(
+            "Skipping incompatible template defaults for the first seeded trial: %s",
+            ", ".join(sorted(skipped_keys)),
         )
 
     return _cast_sampled(initial_point, cast_hints)
