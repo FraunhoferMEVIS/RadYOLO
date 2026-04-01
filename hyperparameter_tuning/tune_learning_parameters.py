@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import importlib
 import logging
 import math
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,20 @@ from ray import tune
 from ray.tune import RunConfig, Tuner
 from ray.tune.search.basic_variant import BasicVariantGenerator
 
-from radyolo.config.config import get_cfg
+
+def _ensure_project_root_on_sys_path(script_path: Path | None = None) -> Path:
+    project_root = (script_path or Path(__file__)).resolve().parent.parent
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+    return project_root
+
+
+def _get_cfg_loader() -> Any:
+    return importlib.import_module("radyolo.config.config").get_cfg
+
+
+_ensure_project_root_on_sys_path()
 
 LOGGER = logging.getLogger(__name__)
 RNG = np.random.default_rng()
@@ -599,6 +614,7 @@ def _load_tune_settings(
 
     template_config_path = Path(str(template_path)).expanduser().resolve()
     template_config = _read_yaml(template_config_path)
+    get_cfg = _get_cfg_loader()
     effective_template_config = get_cfg(template_config_path, {}).model_dump(mode="python")
 
     search_space_cfg = tune_cfg.get("search_space")

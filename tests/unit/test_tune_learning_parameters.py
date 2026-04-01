@@ -1,8 +1,31 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
-from hyperparameter_tuning.tune_learning_parameters import _build_dataset_train_overrides
+from hyperparameter_tuning.tune_learning_parameters import (
+    _build_dataset_train_overrides,
+    _ensure_project_root_on_sys_path,
+)
+
+
+def test_ensure_project_root_on_sys_path_inserts_repo_root_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root_path = tmp_path / "RadYOLO"
+    script_dir = project_root_path / "hyperparameter_tuning"
+    script_path = script_dir / "tune_learning_parameters.py"
+    monkeypatch.setattr(sys, "path", [str(script_dir)])
+
+    project_root = _ensure_project_root_on_sys_path(script_path)
+    _ensure_project_root_on_sys_path(script_path)
+
+    assert project_root == project_root_path.resolve()
+    assert sys.path[0] == str(project_root_path.resolve())
+    assert sys.path.count(str(project_root_path.resolve())) == 1
 
 
 def test_build_dataset_train_overrides_accepts_named_patch_size_mapping() -> None:
