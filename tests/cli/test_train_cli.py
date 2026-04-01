@@ -27,7 +27,10 @@ def test_train_cli(minimal_train_config: Path, tmp_path: Path) -> None:
     assert result.exit_code == 0
     run_dir = Path(config["project"]) / str(config["name"])
     best_path = run_dir / "weights" / "best.pt"
+    copied_config = run_dir / "train_config.yaml"
     assert best_path.exists(), "best.pt missing"
     assert (run_dir / "results.csv").exists(), "results.csv missing"
+    assert copied_config.exists(), "train_config.yaml missing"
+    assert copied_config.read_text(encoding="utf-8") == test_config.read_text(encoding="utf-8")
     checkpoint = load_model_checkpoint(best_path)
     assert checkpoint["train_config"].separate_objectness_head is True

@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import gc
 import logging
+import shutil
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -54,6 +55,7 @@ class YoloFilter(logging.Filter):
 
 class Trainer:
     def __init__(self, cfg: str | Path) -> None:
+        self.config_path = Path(cfg)
         self.config = get_cfg(cfg, {})
         run_dir = Path() / (self.config.project or "runs")
         if not run_dir.is_dir():
@@ -114,6 +116,9 @@ class Trainer:
         # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
         self.ewa_mAP1095 = None
         self.ewa_alpha = 0.6
+
+    def copy_train_config(self) -> None:
+        shutil.copy2(self.config_path, self.save_dir / "train_config.yaml")
 
     def check_resume(self) -> None:
         resume = self.config.resume
@@ -255,6 +260,7 @@ class Trainer:
         )
 
     def train(self) -> None:
+        self.copy_train_config()
         (
             model,
             scaler,
