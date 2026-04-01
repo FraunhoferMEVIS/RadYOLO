@@ -12,7 +12,7 @@ import yaml
 from radyolo.config.config import DatasetConfig, load_model_checkpoint
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
-from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.data.data import WholeImageDataset, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
@@ -168,6 +168,7 @@ def preprocess_data_with_options(
     image_extent: tuple[int, int, int] | None = None,
     voxel_size: tuple[float, float, float] | None = None,
     normalization: dict | list[dict] | None = None,
+    image_format: str = "npy",
     image_dtype: str = "float32",
 ) -> Path:
     return preprocess_dataset_fn(
@@ -178,6 +179,7 @@ def preprocess_data_with_options(
         target_image_size=PatchSize.from_xyz(image_extent) if image_extent is not None else None,
         target_voxel_size=VoxelSize.from_xyz(voxel_size) if voxel_size is not None else None,
         normalization=cast("dict | list[dict]", normalization or {"type": "none"}),
+        image_format=cast("str", image_format),
         image_dtype=cast("str", image_dtype),
     )
 
@@ -205,7 +207,7 @@ def run_validation(best_model_path: Path, group: str) -> Path:
     with dataset_yaml.open(encoding="utf-8") as f:
         yaml_config = yaml.safe_load(f)
     dataset_config = DatasetConfig.model_validate(yaml_config)
-    dataset = NIfTIDatasetWithMasks(
+    dataset = WholeImageDataset(
         src_path=dataset_root,
         fold=train_config.fold,
         group=group,

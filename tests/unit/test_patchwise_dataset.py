@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from radyolo.config.spatial import PatchSize
+from radyolo.data import data as data_module
+from radyolo.data.data import PatchWiseDataset
+from radyolo.data.preprocess_data import preprocess_dataset
+
+
+def _build_dataset_for_format(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    image_format: str,
+) -> tuple[Path, str]:
+    if image_format == "nifti":
+        return synthetic_dataset, "nifti"
+    if image_format == "numpy":
+        return (
+            preprocess_dataset(
+                dataset_path=synthetic_dataset,
+                output_path=tmp_path / "preprocessed_numpy_dataset",
+                workers=0,
+                image_format="npy",
+            ),
+            "numpy",
+        )
+    return (
+        preprocess_dataset(
+            dataset_path=synthetic_dataset,
+            output_path=tmp_path / "preprocessed_blosc2_dataset",
+            workers=0,
+            image_format="blosc2",
+        ),
+        "blosc2",
+    )
+
+
+def test_patchwise_dataset_extracts_centered_patch_for_all_supported_formats(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    expected_classes = torch.tensor([[0.0]], dtype=torch.float32)
+    expected_bboxes = torch.tensor([[0.5, 0.5, 0.5, 1.0, 1.0, 1.0]], dtype=torch.float32)
+    expected_mask: torch.Tensor | None = None
+
+    for image_format in ("nifti", "numpy", "blosc2"):
+        dataset_root, expected_format = _build_dataset_for_format(
+            synthetic_dataset,
+            tmp_path / image_format,
+            image_format,
+        )
+        dataset = PatchWiseDataset(
+            src_path=dataset_root,
+            patch_size=PatchSize(x=16, y=16, z=32),
+            augment=False,
+        )
+        monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
+
+        sample = dataset[0]
+
+        assert dataset.image_format == expected_format
+        assert sample["image"].dtype == torch.float32
+        assert sample["image"].shape == (1, 32, 16, 16)
+        assert torch.all(sample["image"] == 1)
+        assert sample["original_shape"] == (64, 32, 32)
+        assert sample["ratio_pad"] == ((1.0, 1.0, 1.0), (-8, -8, -16))
+        assert torch.allclose(sample["classes"], expected_classes)
+        assert torch.allclose(sample["bboxes"], expected_bboxes)
+        assert sample["masks"] is not None
+        assert sample["masks"].shape == (1, 32, 16, 16)
+        assert torch.all((sample["masks"] == 0) | (sample["masks"] == 1))
+        if expected_mask is None:
+            expected_mask = sample["masks"].clone()
+        else:
+            assert torch.equal(sample["masks"], expected_mask)
+
+
+def test_patchwise_dataset_requests_only_patch_region_from_blosc2(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FakeChunkedArray:
+        def __init__(self, dtype: np.dtype) -> None:
+            self.shape = (32, 32, 64)
+            self.requests: list[tuple[slice, slice, slice]] = []
+            self.dtype = dtype
+
+        def __getitem__(self, item: tuple[slice, slice, slice]) -> np.ndarray:
+            self.requests.append(item)
+            return np.ones(
+                tuple(slice_.stop - slice_.start for slice_ in item),
+                dtype=self.dtype,
+            )
+
+    expected_request = (slice(8, 24), slice(8, 24), slice(16, 48))
+
+    dataset_root, _ = _build_dataset_for_format(
+        synthetic_dataset,
+        tmp_path / "chunked_blosc2",
+        "blosc2",
+    )
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+    )
+    fake_image_store = FakeChunkedArray(np.float32)
+    fake_mask_store = FakeChunkedArray(np.uint8)
+    monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
+
+    def _open_store(path: str, *_args, **_kwargs):
+        normalized_path = path.replace("\\", "/")
+        if normalized_path.endswith("images/case1.b2nd"):
+            return fake_image_store
+        if normalized_path.endswith("masks/case1.b2nd"):
+            return fake_mask_store
+        raise AssertionError(f"Unexpected blosc2 path requested: {path}")
+
+    monkeypatch.setattr(data_module.blosc2, "open", _open_store)
+
+    sample = dataset[0]
+
+    assert sample["image"].shape == (1, 32, 16, 16)
+    assert fake_image_store.requests == [expected_request]
+    assert fake_mask_store.requests == [expected_request]
+    assert sample["masks"] is not None
+    assert sample["masks"].shape == (1, 32, 16, 16)
+
+
+def test_sample_patch_center_stays_inside_image_when_patch_fits() -> None:
+    patch_shape_xyz = (16, 16, 32)
+
+    for _ in range(200):
+        center_xyz = data_module._sample_patch_center((32, 32, 64), patch_shape_xyz)
+        origin_xyz = data_module._compute_patch_origin(center_xyz, patch_shape_xyz)
+
+        assert origin_xyz[0] >= 0
+        assert origin_xyz[1] >= 0
+        assert origin_xyz[2] >= 0
+        assert origin_xyz[0] + patch_shape_xyz[0] <= 32
+        assert origin_xyz[1] + patch_shape_xyz[1] <= 32
+        assert origin_xyz[2] + patch_shape_xyz[2] <= 64
+
+
+def test_patchwise_dataset_centers_oversized_patch_dimensions(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dataset_root, _ = _build_dataset_for_format(
+        synthetic_dataset,
+        tmp_path / "oversized_patch_numpy",
+        "numpy",
+    )
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=48, y=16, z=32),
+        augment=False,
+    )
+    monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
+
+    sample = dataset[0]
+
+    assert sample["image"].shape == (1, 32, 16, 48)
+    assert sample["ratio_pad"] == ((1.0, 1.0, 1.0), (8, -8, -16))
+    assert torch.all(sample["image"][..., :8] == 0)
+    assert torch.all(sample["image"][..., 8:16] == 0)
+    assert torch.all(sample["image"][..., 16:32] == 1)
+    assert torch.all(sample["image"][..., 32:40] == 0)
+    assert torch.all(sample["image"][..., 40:] == 0)

@@ -24,7 +24,7 @@ from radyolo.config.config import (
     save_model_checkpoint,
 )
 from radyolo.data.data import (
-    NIfTIDatasetWithMasks,
+    WholeImageDataset,
     apply_configured_augmentations_to_batch,
     build_dataloader,
 )
@@ -586,7 +586,7 @@ class Trainer:
         if mode not in {"train", "val"}:
             message = f"get_dataloader() only supports modes train and val, but got {mode}"
             raise ValueError(message)
-        dataset = NIfTIDatasetWithMasks(
+        dataset = WholeImageDataset(
             src_path=dataset_path,
             fold=fold,
             group=mode,

@@ -10,7 +10,7 @@ import nibabel as nib
 import torch
 
 from radyolo.config.config import DefaultConfig, get_cfg, get_dataset_cfg
-from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.data.data import WholeImageDataset, build_dataloader
 from radyolo.utils.ops import xyzwhd2xyzxyz
 
 LOGGER = logging.getLogger("test_augmentation_from_dataset")
@@ -121,8 +121,8 @@ def _masks_filename(case: str) -> str:
 
 def _build_dataset(
     cfg: DefaultConfig, args: argparse.Namespace
-) -> NIfTIDatasetWithMasks:
-    return NIfTIDatasetWithMasks(
+) -> WholeImageDataset:
+    return WholeImageDataset(
         src_path=args.data_root,
         patch_size=cfg.patch_size,
         augment=True,

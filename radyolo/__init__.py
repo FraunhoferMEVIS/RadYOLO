@@ -15,7 +15,7 @@ from radyolo.config.config import DatasetConfig, load_model_checkpoint
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
-from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.data.data import WholeImageDataset, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
@@ -194,7 +194,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
         device = loaded_model.device
         ema = ModelEMA(model)
 
-        dataset = NIfTIDatasetWithMasks(
+        dataset = WholeImageDataset(
             src_path=dataset_folder,
             fold=fold,
             group=group,
@@ -414,7 +414,7 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     "--overwrite/--no-overwrite",
     default=False,
     show_default=True,
-    help="Allow writing into an output folder that already contains .npy images.",
+    help="Allow writing into an output folder that already contains preprocessed images.",
 )
 @click.option(
     "--image-extent",
@@ -441,11 +441,18 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     ),
 )
 @click.option(
+    "--image-format",
+    type=click.Choice(["npy", "blosc2"], case_sensitive=False),
+    default="blosc2",
+    show_default=True,
+    help="Storage format for preprocessed images.",
+)
+@click.option(
     "--image-dtype",
     type=click.Choice(["float32", "float16", "int16"], case_sensitive=False),
     default="float32",
     show_default=True,
-    help="Output dtype for saved .npy images.",
+    help="Output dtype for saved preprocessed images.",
 )
 def preprocess_data(
     dataset_path: Path,
@@ -455,9 +462,10 @@ def preprocess_data(
     image_extent: tuple[int, int, int] | None,
     voxel_size: tuple[float, float, float] | None,
     normalization: dict | list[dict],
+    image_format: str,
     image_dtype: str,
 ) -> int:
-    """Preprocess a NIfTI dataset and store images as .npy arrays in OUTPUT_PATH."""
+    """Preprocess a NIfTI dataset and store images as .npy or .b2nd outputs in OUTPUT_PATH."""
     try:
         if image_extent is not None and voxel_size is not None:
             msg = "Only one of --image-extent or --voxel-size can be specified."
@@ -472,6 +480,7 @@ def preprocess_data(
             target_image_size=target_image_size,
             target_voxel_size=target_voxel_size,
             normalization=normalization,
+            image_format=image_format.lower(),
             image_dtype=image_dtype.lower(),
         )
         LOGGER.info("Preprocessed dataset written to %s", out_path)

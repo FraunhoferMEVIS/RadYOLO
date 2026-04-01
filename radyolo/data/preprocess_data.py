@@ -4,9 +4,11 @@ import logging
 import os
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+import blosc2
 import nibabel as nib
 import numpy as np
 import torch
@@ -25,6 +27,22 @@ if TYPE_CHECKING:
     from radyolo.data.normalization import NormalizationConfig
 
 LOGGER = logging.getLogger(__name__)
+
+DEFAULT_L1_CACHE_SIZE_PER_CORE_IN_BYTES = 32768
+DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES = 1441792
+DEFAULT_CACHE_SAFETY_FACTOR = 0.8
+
+type ImageStorageFormat = Literal["npy", "blosc2"]
+type NormalizationSpec = NormalizationConfig | list[NormalizationConfig]
+
+
+@dataclass(frozen=True)
+class PreprocessCaseConfig:
+    target_image_size: PatchSize | None
+    target_voxel_size: VoxelSize | None
+    normalization: NormalizationSpec
+    image_dtype: ImageArrayDType
+    image_format: ImageStorageFormat
 
 
 def _iter_cases(images_dir: Path) -> list[tuple[str, Path]]:
@@ -55,7 +73,240 @@ def _load_nifti_tensor(nifti_path: Path) -> tuple[torch.Tensor, VoxelSize]:
 
 def _tensor_to_saved_numpy(image: torch.Tensor, original_ndim: int) -> np.ndarray:
     image_to_store = image.squeeze(0) if original_ndim == 3 and image.shape[0] == 1 else image
-    return np.ascontiguousarray(image_to_store.permute(*reversed(range(image_to_store.ndim))).cpu().numpy())
+    return np.ascontiguousarray(
+        image_to_store.permute(*reversed(range(image_to_store.ndim))).cpu().numpy()
+    )
+
+
+def _remove_path_if_exists(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def _remove_case_outputs(out_dir: Path, case_id: str, suffixes: tuple[str, ...]) -> None:
+    for suffix in suffixes:
+        _remove_path_if_exists(out_dir / f"{case_id}{suffix}")
+
+
+def _estimate_array_nbytes(shape: tuple[int, ...], itemsize: int) -> int:
+    return int(np.prod(shape, dtype=np.int64)) * itemsize
+
+
+def _previous_power_of_two(value: int) -> int:
+    if value <= 1:
+        return 1
+    return 1 << ((value - 1).bit_length() - 1)
+
+
+def _compute_block_shape(
+    image_shape: tuple[int, ...],
+    dtype: np.dtype,
+    l1_cache_size_per_core_in_bytes: int = DEFAULT_L1_CACHE_SIZE_PER_CORE_IN_BYTES,
+    safety_factor: float = DEFAULT_CACHE_SAFETY_FACTOR,
+) -> tuple[int, ...]:
+    if any(dim <= 0 for dim in image_shape):
+        msg = f"Array shape must contain only positive integers, got {image_shape}."
+        raise ValueError(msg)
+
+    itemsize = np.dtype(dtype).itemsize
+    target_nbytes = max(1, int(l1_cache_size_per_core_in_bytes * safety_factor))
+    block_shape = list(image_shape)
+
+    while _estimate_array_nbytes(tuple(block_shape), itemsize) > target_nbytes:
+        axis_order = sorted(
+            range(len(block_shape)),
+            key=lambda axis: (
+                block_shape[axis] / image_shape[axis],
+                block_shape[axis],
+            ),
+            reverse=True,
+        )
+        for axis in axis_order:
+            if block_shape[axis] <= 1:
+                continue
+            block_shape[axis] = _previous_power_of_two(block_shape[axis])
+            break
+        else:
+            break
+
+    return tuple(block_shape)
+
+
+def _compute_chunk_shape(
+    image_shape: tuple[int, ...],
+    block_shape: tuple[int, ...],
+    dtype: np.dtype,
+    l3_cache_size_per_core_in_bytes: int = DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES,
+    safety_factor: float = DEFAULT_CACHE_SAFETY_FACTOR,
+) -> tuple[int, ...]:
+    itemsize = np.dtype(dtype).itemsize
+    target_nbytes = max(1, int(l3_cache_size_per_core_in_bytes * safety_factor))
+    chunk_shape = list(block_shape)
+
+    while tuple(chunk_shape) != image_shape:
+        axis_order = sorted(
+            range(len(chunk_shape)),
+            key=lambda axis: (
+                chunk_shape[axis] / block_shape[axis],
+                chunk_shape[axis],
+            ),
+        )
+        for axis in axis_order:
+            if chunk_shape[axis] >= image_shape[axis]:
+                continue
+            candidate = chunk_shape.copy()
+            candidate[axis] = min(candidate[axis] + block_shape[axis], image_shape[axis])
+            if _estimate_array_nbytes(tuple(candidate), itemsize) <= target_nbytes:
+                chunk_shape = candidate
+                break
+        else:
+            break
+
+    return tuple(chunk_shape)
+
+
+def _compute_storage_shapes(
+    image_shape: tuple[int, ...],
+    dtype: np.dtype,
+    l1_cache_size_per_core_in_bytes: int = DEFAULT_L1_CACHE_SIZE_PER_CORE_IN_BYTES,
+    l3_cache_size_per_core_in_bytes: int = DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES,
+    safety_factor: float = DEFAULT_CACHE_SAFETY_FACTOR,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    block_shape = _compute_block_shape(
+        image_shape,
+        dtype,
+        l1_cache_size_per_core_in_bytes=l1_cache_size_per_core_in_bytes,
+        safety_factor=safety_factor,
+    )
+    chunk_shape = _compute_chunk_shape(
+        image_shape,
+        block_shape,
+        dtype,
+        l3_cache_size_per_core_in_bytes=l3_cache_size_per_core_in_bytes,
+        safety_factor=safety_factor,
+    )
+    return block_shape, chunk_shape
+
+
+def _save_preprocessed_blosc2_array(
+    array: np.ndarray,
+    output_path: Path,
+    *,
+    use_full_image_chunk: bool,
+) -> None:
+    array_shape = tuple(int(dim) for dim in array.shape)
+    array_dtype = np.dtype(array.dtype)
+
+    _remove_path_if_exists(output_path)
+    blosc2.set_nthreads(1)
+    if use_full_image_chunk:
+        normalized_chunk_shape = array_shape
+        normalized_block_shape = _compute_block_shape(array_shape, array_dtype)
+    else:
+        normalized_block_shape, normalized_chunk_shape = _compute_storage_shapes(
+            array_shape,
+            array_dtype,
+        )
+    cparams = {"codec": blosc2.Codec.ZSTD, "clevel": 8, "nthreads": 1}
+    blosc2.asarray(
+        np.ascontiguousarray(array),
+        urlpath=str(output_path),
+        chunks=normalized_chunk_shape,
+        blocks=normalized_block_shape,
+        cparams=cparams,
+    )
+
+
+def _save_preprocessed_image(
+    image: np.ndarray,
+    out_images_dir: Path,
+    case_id: str,
+    image_format: ImageStorageFormat,
+    *,
+    use_full_image_chunk: bool,
+) -> None:
+    _remove_case_outputs(out_images_dir, case_id, (".npy", ".b2nd"))
+
+    if image_format == "npy":
+        np.save(out_images_dir / f"{case_id}.npy", image, allow_pickle=False)
+        return
+
+    _save_preprocessed_blosc2_array(
+        image,
+        out_images_dir / f"{case_id}.b2nd",
+        use_full_image_chunk=use_full_image_chunk,
+    )
+
+
+def _save_preprocessed_mask(
+    mask: np.ndarray,
+    out_masks_dir: Path,
+    case_id: str,
+    image_format: ImageStorageFormat,
+    *,
+    use_full_image_chunk: bool,
+) -> None:
+    _remove_case_outputs(out_masks_dir, case_id, (".npz", ".b2nd"))
+
+    if image_format == "npy":
+        np.savez_compressed(out_masks_dir / f"{case_id}.npz", mask=mask)
+        return
+
+    _save_preprocessed_blosc2_array(
+        mask,
+        out_masks_dir / f"{case_id}.b2nd",
+        use_full_image_chunk=use_full_image_chunk,
+    )
+
+
+def _has_preprocessed_image_outputs(out_images_dir: Path) -> bool:
+    return (
+        any(out_images_dir.glob("*.npy"))
+        or any(out_images_dir.glob("*.b2nd"))
+    )
+
+
+def _validate_image_output_options(
+    target_image_size: PatchSize | None,
+    target_voxel_size: VoxelSize | None,
+    image_format: ImageStorageFormat,
+) -> None:
+    if target_image_size is not None and target_voxel_size is not None:
+        msg = "Only one of target_image_size or target_voxel_size can be specified."
+        raise ValueError(msg)
+    if image_format not in {"npy", "blosc2"}:
+        msg = f"Unsupported image format: {image_format}"
+        raise ValueError(msg)
+
+
+def _validate_existing_outputs(
+    out_images_dir: Path,
+    out_masks_dir: Path | None,
+    overwrite: bool,
+) -> None:
+    if (
+        out_images_dir.exists()
+        and _has_preprocessed_image_outputs(out_images_dir)
+        and not overwrite
+    ):
+        msg = (
+            "Output images directory already contains preprocessed image files at "
+            f"{out_images_dir}. Use overwrite=True to allow replacing files."
+        )
+        raise FileExistsError(msg)
+    if (
+        out_masks_dir
+        and out_masks_dir.exists()
+        and (any(out_masks_dir.glob("*.npz")) or any(out_masks_dir.glob("*.b2nd")))
+        and not overwrite
+    ):
+        msg = (
+            f"Output masks directory already contains preprocessed mask files at {out_masks_dir}. "
+            "Use overwrite=True to allow replacing files."
+        )
+        raise FileExistsError(msg)
 
 
 def _convert_case_to_numpy(
@@ -64,28 +315,26 @@ def _convert_case_to_numpy(
     masks_dir: Path,
     out_images_dir: Path,
     out_masks_dir: Path | None,
-    target_image_size: PatchSize | None,
-    target_voxel_size: VoxelSize | None,
-    normalization: NormalizationConfig | list[NormalizationConfig],
-    image_dtype: ImageArrayDType,
+    config: PreprocessCaseConfig,
 ) -> None:
-    image_out_path = out_images_dir / f"{case_id}.npy"
     image_tensor, voxel_size = _load_nifti_tensor(image_path)
     image_preprocessed, _, resized_shape = preprocess_image(
         image_tensor,
-        normalization,
-        target_shape=target_image_size,
+        config.normalization,
+        target_shape=config.target_image_size,
         input_voxel_size=voxel_size,
-        target_voxel_size=target_voxel_size,
-        output_dtype=resolve_torch_dtype(image_dtype),
+        target_voxel_size=config.target_voxel_size,
+        output_dtype=resolve_torch_dtype(config.image_dtype),
     )
-    np.save(
-        image_out_path,
+    _save_preprocessed_image(
         _tensor_to_saved_numpy(image_preprocessed, image_tensor.ndim).astype(
-            resolve_numpy_dtype(image_dtype),
+            resolve_numpy_dtype(config.image_dtype),
             copy=False,
         ),
-        allow_pickle=False,
+        out_images_dir,
+        case_id,
+        config.image_format,
+        use_full_image_chunk=config.target_image_size is not None,
     )
 
     if out_masks_dir is None:
@@ -98,34 +347,44 @@ def _convert_case_to_numpy(
             mask_tensor.to(dtype=torch.uint8),
             PatchSize.from_zyx(resized_shape),
         )
-        mask_out_path = out_masks_dir / f"{case_id}.npz"
-        np.savez_compressed(
-            mask_out_path,
-            mask=_tensor_to_saved_numpy(mask_resampled, mask_tensor.ndim).astype(np.uint8, copy=False),
+        _save_preprocessed_mask(
+            _tensor_to_saved_numpy(mask_resampled, mask_tensor.ndim).astype(
+                np.uint8,
+                copy=False,
+            ),
+            out_masks_dir,
+            case_id,
+            config.image_format,
+            use_full_image_chunk=config.target_image_size is not None,
         )
 
 
-def preprocess_dataset(
+def preprocess_dataset(  # noqa: PLR0913
     dataset_path: Path,
     output_path: Path,
     workers: int = 0,
     overwrite: bool = False,
     target_image_size: PatchSize | None = None,
     target_voxel_size: VoxelSize | None = None,
-    normalization: NormalizationConfig | list[NormalizationConfig] = {"type": "none"},
+    normalization: NormalizationSpec | None = None,
     image_dtype: ImageArrayDType = "float32",
+    image_format: ImageStorageFormat = "blosc2",
 ) -> Path:
-    """Convert NIfTI images to NumPy arrays in a mirrored dataset folder structure.
+    """Convert NIfTI images to array stores in a mirrored dataset folder structure.
 
-    The output dataset keeps labels unchanged and stores images as `.npy` arrays and
-    optional masks as compressed `.npz` arrays.
+    The output dataset keeps labels unchanged and stores images as `.b2nd` arrays by
+    default or `.npy` files when requested. Optional masks mirror that choice as
+    `.b2nd` arrays or compressed `.npz` archives.
     """
     dataset_path = Path(dataset_path)
     output_path = Path(output_path)
+    normalization = {"type": "none"} if normalization is None else normalization
 
-    if target_image_size is not None and target_voxel_size is not None:
-        msg = "Only one of target_image_size or target_voxel_size can be specified."
-        raise ValueError(msg)
+    _validate_image_output_options(
+        target_image_size=target_image_size,
+        target_voxel_size=target_voxel_size,
+        image_format=image_format,
+    )
 
     images_dir = dataset_path / "images"
     labels_dir = dataset_path / "labels"
@@ -145,23 +404,11 @@ def preprocess_dataset(
 
     out_images_dir = output_path / "images"
     out_masks_dir = output_path / "masks" if masks_dir.exists() else None
-    if out_images_dir.exists() and any(out_images_dir.glob("*.npy")) and not overwrite:
-        msg = (
-            f"Output images directory already contains .npy files at {out_images_dir}. "
-            "Use overwrite=True to allow replacing files."
-        )
-        raise FileExistsError(msg)
-    if (
-        out_masks_dir
-        and out_masks_dir.exists()
-        and any(out_masks_dir.glob("*.npz"))
-        and not overwrite
-    ):
-        msg = (
-            f"Output masks directory already contains .npz files at {out_masks_dir}. "
-            "Use overwrite=True to allow replacing files."
-        )
-        raise FileExistsError(msg)
+    _validate_existing_outputs(
+        out_images_dir=out_images_dir,
+        out_masks_dir=out_masks_dir,
+        overwrite=overwrite,
+    )
 
     output_path.mkdir(parents=True, exist_ok=True)
     out_images_dir.mkdir(parents=True, exist_ok=True)
@@ -176,6 +423,14 @@ def preprocess_dataset(
     max_workers = os.cpu_count() or 1
     if workers > 0:
         max_workers = workers
+
+    case_config = PreprocessCaseConfig(
+        target_image_size=target_image_size,
+        target_voxel_size=target_voxel_size,
+        normalization=normalization,
+        image_dtype=image_dtype,
+        image_format=image_format,
+    )
 
     LOGGER.info(
         "Preprocessing %d cases from %s to %s using %d workers",
@@ -194,10 +449,7 @@ def preprocess_dataset(
                 masks_dir,
                 out_images_dir,
                 out_masks_dir,
-                target_image_size,
-                target_voxel_size,
-                normalization,
-                image_dtype,
+                case_config,
             ): case_id
             for case_id, image_path in cases
         }

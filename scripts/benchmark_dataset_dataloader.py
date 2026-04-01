@@ -11,7 +11,7 @@ import torch
 from tqdm.auto import tqdm
 
 from radyolo.config.spatial import PatchSize
-from radyolo.data.data import NIfTIDatasetWithMasks, build_dataloader
+from radyolo.data.data import WholeImageDataset, build_dataloader
 
 LOGGER = logging.getLogger("benchmark_dataset_dataloader")
 
@@ -92,8 +92,8 @@ def build_benchmark_dataset(
     fold: int,
     group: str,
     load_masks: bool,
-) -> NIfTIDatasetWithMasks:
-    return NIfTIDatasetWithMasks(
+) -> WholeImageDataset:
+    return WholeImageDataset(
         src_path=dataset_path,
         patch_size=PatchSize.from_xyz(patch_size_xyz),
         augment=False,

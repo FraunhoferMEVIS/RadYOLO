@@ -335,7 +335,7 @@ def test_dataset_augmentation_applies_configured_sample_augmentations(
     monkeypatch: MonkeyPatch,
 ) -> None:
     config = _make_config(synthetic_dataset)
-    dataset = data_module.NIfTIDatasetWithMasks(
+    dataset = data_module.WholeImageDataset(
         src_path=synthetic_dataset,
         patch_size=PatchSize(x=8, y=8, z=8),
         augment=True,

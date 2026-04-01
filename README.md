@@ -111,15 +111,18 @@ uv run -m radyolo create-data-splits <path_to_dataset_folder>
 
 By default it splits the data using a 5-fold cross validation scheme, where each group uses three of the folds as `train` set, one as `val` set and one as `test` set. The `val` set is used to compute the validation metrics during training and select the best model, while the `test` set is left out of the training to serve as independent test data in the end.
 
-### Preprocess dataset images to NumPy
+### Preprocess dataset images to arrays
 
-To preprocess a dataset in the predefined NIfTI format and store the images as `.npy` files in a new folder, call:
+To preprocess a dataset in the predefined NIfTI format and store the images as compressed `.b2nd` (blosc2 ndarray) files in a new folder, call:
 
 ```bash
-uv run -m radyolo preprocess-data <path_to_dataset_folder> <path_to_output_folder>
+uv run -m radyolo preprocess-data --image-extent x y z --normalization "{type: zscore}" --image-dtype float16 <path_to_dataset_folder> <path_to_output_folder>
 ```
 
-The command copies labels and dataset metadata and converts all files from `images/*.nii.gz` to `images/*.npy` in the output dataset. If `masks/*.nii.gz` are present, they are converted to compressed `masks/*.npz` files.
+The command copies labels and dataset metadata and converts all files from `images/*.nii.gz` to `images/*.b2nd` in the output dataset. If `masks/*.nii.gz` are present, they are converted to `masks/*.b2nd` files.
+
+The dataset can be resampled to a fixed voxel size using `--voxel-size x y z` or image extent using `--image-extent x y z`. When preprocessing to a fixed image extent, each blosc2 array is stored as a single full-image chunk. When preprocessing to a target voxel size, chunk and block sizes are selected automatically based on the output image shape and dtype to support efficient patch loading during training.
+
 
 ### Convert RadYOLO dataset to nnDetection
 
