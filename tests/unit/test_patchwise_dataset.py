@@ -133,19 +133,21 @@ def test_patchwise_dataset_requests_only_patch_region_from_blosc2(
     assert sample["masks"].shape == (1, 32, 16, 16)
 
 
-def test_sample_patch_center_stays_inside_image_when_patch_fits() -> None:
+def test_sample_patch_center_allows_up_to_twenty_percent_overhang_when_patch_fits() -> None:
     patch_shape_xyz = (16, 16, 32)
+    max_overhang_xyz = tuple(int(dim * 0.2) for dim in patch_shape_xyz)
+    image_shape_xyz = (32, 32, 64)
 
     for _ in range(200):
-        center_xyz = data_module._sample_patch_center((32, 32, 64), patch_shape_xyz)
+        center_xyz = data_module._sample_patch_center(image_shape_xyz, patch_shape_xyz)
         origin_xyz = data_module._compute_patch_origin(center_xyz, patch_shape_xyz)
 
-        assert origin_xyz[0] >= 0
-        assert origin_xyz[1] >= 0
-        assert origin_xyz[2] >= 0
-        assert origin_xyz[0] + patch_shape_xyz[0] <= 32
-        assert origin_xyz[1] + patch_shape_xyz[1] <= 32
-        assert origin_xyz[2] + patch_shape_xyz[2] <= 64
+        assert origin_xyz[0] >= -max_overhang_xyz[0]
+        assert origin_xyz[1] >= -max_overhang_xyz[1]
+        assert origin_xyz[2] >= -max_overhang_xyz[2]
+        assert origin_xyz[0] + patch_shape_xyz[0] <= image_shape_xyz[0] + max_overhang_xyz[0]
+        assert origin_xyz[1] + patch_shape_xyz[1] <= image_shape_xyz[1] + max_overhang_xyz[1]
+        assert origin_xyz[2] + patch_shape_xyz[2] <= image_shape_xyz[2] + max_overhang_xyz[2]
 
 
 def test_patchwise_dataset_centers_oversized_patch_dimensions(

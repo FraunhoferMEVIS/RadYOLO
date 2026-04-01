@@ -653,9 +653,9 @@ def _sample_patch_center_for_axis(image_dim: int, patch_dim: int) -> int:
     if patch_dim >= image_dim:
         return image_dim // 2
 
-    # Allow 20 percent padding when extracting patch, that will be cropped after data augmentation
-    lower_center = int((patch_dim / 2) * 0.8)
-    upper_center = image_dim - (patch_dim - lower_center)
+    max_overhang = int(patch_dim * 0.2)
+    lower_center = (patch_dim // 2) - max_overhang
+    upper_center = image_dim - (patch_dim - (patch_dim // 2)) + max_overhang
     return random.randint(lower_center, upper_center)
 
 
