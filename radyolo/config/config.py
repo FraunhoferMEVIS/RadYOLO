@@ -147,8 +147,8 @@ class DefaultConfig(BaseModel):
 
     # Validation settings
     val: bool = True  # validate/test during training
-    confidence_threshold: float | None = (
-        0.001  # object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
+    confidence_threshold_validation: float = (
+        0.001  # object confidence threshold for validation/detection metrics
     )
     nms_iou_threshold: float = 0.2  # intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
     nms_time_limit: float = 0.5  # maximum time in seconds per image for NMS before early exit
@@ -168,6 +168,7 @@ class DefaultConfig(BaseModel):
         2,
         0,
     )  # channels used for difference plots as [minuend, subtrahend]
+    confidence_threshold_plotting: float = 0.1  # object confidence threshold for validation plots
 
     # Zoom Augmentation
     max_zoom: float = Field(1.5, ge=0)

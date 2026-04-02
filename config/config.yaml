@@ -65,19 +65,20 @@ bbox_center_offset_limit: 4       # (float) max absolute anchor-relative center 
 bbox_parametrization: "center_extents" # (literal) bbox prediction format, choices=[ltrb, center_extents]; center_extents requires dfl_reg_max=1
 
 # Validation Settings
-val: True                 # (bool) validate/test during training
-confidence_threshold:     # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
-nms_iou_threshold: 0.2    # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
-nms_time_limit: 0.5       # (float) maximum time in seconds per image for NMS before early exit
-agnostic_nms: False       # (bool) class-agnostic NMS
-max_det: 300              # (int) maximum number of detections per image
-clip_boxes_to_image: True # (bool) clip predicted 3D boxes to image bounds during validation/prediction
+val: True                              # (bool) validate/test during training
+confidence_threshold_validation: 0.001 # (float) object confidence threshold used for validation metrics/detection postprocessing
+nms_iou_threshold: 0.2                 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+nms_time_limit: 0.5                    # (float) maximum time in seconds per image for NMS before early exit
+agnostic_nms: False                    # (bool) class-agnostic NMS
+max_det: 300                           # (int) maximum number of detections per image
+clip_boxes_to_image: True              # (bool) clip predicted 3D boxes to image bounds during validation/prediction
 
 # Plot Settings
 plots: True                                 # (bool) save plots and images during train/val
 validation_plot_projection: "mean"          # (literal) projection reduction for validation plots, choices=[max, mean]
 validation_plot_image_mode: "default"       # (literal) source image for validation plots, choices=[default, channel_difference]
 validation_plot_difference_channels: [2, 0] # (list[int]) channels used for difference plots as [minuend, subtrahend]
+confidence_threshold_plotting: 0.1          # (float) object confidence threshold used when rendering validation plots
 
 # Zoom Augmentation
 max_zoom: 1.4

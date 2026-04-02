@@ -62,9 +62,10 @@ class Validator:
             "target_img": [],
         }
         self.nc: int = len(self.names)
-        if self.config.confidence_threshold is None:
-            self.config.confidence_threshold = 0.001
-        self.confusion_matrix = ConfusionMatrix(self.nc, self.config.confidence_threshold)
+        self.confusion_matrix = ConfusionMatrix(
+            self.nc,
+            self.config.confidence_threshold_validation,
+        )
         self.predictions_for_saving: dict[str, list[dict[str, Any]]] = {}
         self.save_predictions = save_predictions
 
@@ -168,7 +169,7 @@ class Validator:
         self.metrics.names = self.names
         self.confusion_matrix = ConfusionMatrix(
             nc=self.nc,
-            conf=self.config.confidence_threshold,
+            conf=self.config.confidence_threshold_validation,
         )
         self.seen = 0
         self.predictions_for_saving = {}
@@ -214,7 +215,7 @@ class Validator:
         model_output: ModelOutput,
     ) -> list[torch.Tensor]:
         postprocess_config = DetectionPostprocessConfig(
-            confidence_threshold=self.config.confidence_threshold,
+            confidence_threshold=self.config.confidence_threshold_validation,
             nms_iou_threshold=self.config.nms_iou_threshold,
             agnostic_nms=self.config.agnostic_nms,
             max_det=self.config.max_det,
@@ -584,6 +585,9 @@ class Validator:
     def plot_validation_cases(self, batch: Batch, preds: list[torch.Tensor]) -> None:
         """Plot one 2x3 comparison figure per validation case."""
         for sample_index, prediction in enumerate(preds):
+            plot_prediction = prediction[
+                prediction[:, 6] >= self.config.confidence_threshold_plotting
+            ]
             sample_mask = batch["batch_idx"] == sample_index
             sample_classes = batch["cls"][sample_mask].squeeze(-1)
             sample_bboxes = batch["bboxes"][sample_mask]
@@ -598,7 +602,7 @@ class Validator:
             else:
                 reference_boxes = sample_bboxes.new_empty((0, 6))
 
-            predicted_boxes = prediction[:, :6]
+            predicted_boxes = plot_prediction[:, :6]
             if self.config.clip_boxes_to_image and len(predicted_boxes):
                 predicted_boxes = predicted_boxes.clone()
                 ops.clip_boxes(predicted_boxes, tuple(batch["img"][sample_index].shape[1:]))
@@ -609,8 +613,8 @@ class Validator:
                 reference_boxes=reference_boxes,
                 reference_classes=sample_classes,
                 predicted_boxes=predicted_boxes,
-                predicted_classes=prediction[:, 7],
-                prediction_confs=prediction[:, 6],
+                predicted_classes=plot_prediction[:, 7],
+                prediction_confs=plot_prediction[:, 6],
                 fname=(
                     self.save_dir
                     / "validation_samples"
