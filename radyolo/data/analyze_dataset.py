@@ -22,28 +22,26 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ImageStats(NamedTuple):
-    # Per-channel statistics for an image, within FOREGROUND only.
-    # Contains: min,max,sum,sumsq,count (no per-image percentiles anymore)
+    """Per-image foreground statistics and sampled intensities for each channel."""
+
     per_channel: list[dict[str, float]]
-    # image size in voxels
     image_size: PatchSize
-    # voxel size in mm
     voxel_size: VoxelSize
-    # whether the case contains at least one labeled object
     has_objects: bool
-    # foreground intensity samples per channel (1D float arrays, up to sample_cap per image)
     samples_per_channel: list[np.ndarray]
 
 
 class LabelStats(NamedTuple):
+    """Per-class object counts and box sizes on the resampled image grid."""
+
     n_by_class: dict[str, int]
-    # sizes per class in voxels on the resampled image grid for each axis [x, y, z]
     sizes_by_class_vox: dict[str, list[VoxelSize]]
 
 
 @dataclass
 class DatasetFingerprint:
-    # Per-channel stats aggregated
+    """Aggregated dataset statistics written to dataset_fingerprint.json."""
+
     foreground_channel_stats: list[dict[str, float]]
     median_image_size: PatchSize
     median_voxel_size_mm: VoxelSize
@@ -52,11 +50,9 @@ class DatasetFingerprint:
     median_resampled_imagesize: PatchSize
     resampled_imagesize_p10_vox: PatchSize
     resampled_imagesize_p90_vox: PatchSize
-    # Box stats per class
     boxes_per_class: dict[str, int]
     box_size_median_vox: dict[str, VoxelSize]
     box_size_p95_vox: VoxelSize | None
-    # Masks
     n_images_with_masks: int
     n_images_with_objects: int
     n_images_without_objects: int
@@ -105,10 +101,8 @@ def _foreground_channel_stats_and_samples(
             [], dtype=np.float32
         )
 
-    # Extract foreground intensities
     fg = arr[foreground_mask].astype(np.float32, copy=False)
     n = int(fg.size)
-    # Stats
     s = float(fg.sum(dtype=np.float64))
     ss = float(np.square(fg, dtype=np.float64).sum(dtype=np.float64))
     foreground_stats = {
@@ -119,25 +113,23 @@ def _foreground_channel_stats_and_samples(
         "count": float(n),
     }
 
-    # Sampling for global percentiles
     if n <= sample_cap:
         samples = fg
     else:
-        # uniform random sample without replacement
         idx = np.random.default_rng().choice(n, size=sample_cap, replace=False)
         samples = fg[idx]
     return foreground_stats, samples
 
 
 def _load_nifti(path: Path) -> tuple[np.ndarray, VoxelSize]:
+    """Load a NIfTI image and return its array data with spatial voxel size."""
+
     img = nib.loadsave.load(str(path))
     if not isinstance(img, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI at {path}"
         raise TypeError(msg)
     data = np.asanyarray(img.dataobj)
-    # spacing: nib loads affine, voxel sizes are diagonal of Zooms or from header
     zooms = img.header.get_zooms()
-    # Expect at least (x,y,z)
     spatial_dims = 3
     if len(zooms) >= spatial_dims:
         voxel_size = VoxelSize.from_xyz(zooms[:3])
@@ -160,7 +152,6 @@ def _labels_to_mask(
     if not entries:
         return mask
     for _cls, x, y, z, w, h, d in entries:
-        # Convert normalized center/size to voxel indices (half-open slices)
         cx = x * x_shape
         cy = y * y_shape
         cz = z * z_shape
@@ -175,7 +166,6 @@ def _labels_to_mask(
         z0 = int(np.floor(cz - dz / 2.0))
         z1 = int(np.ceil(cz + dz / 2.0))
 
-        # clamp to bounds and skip empty
         x0 = max(0, min(x_shape, x0))
         x1 = max(0, min(x_shape, x1))
         y0 = max(0, min(y_shape, y0))
@@ -189,30 +179,27 @@ def _labels_to_mask(
 
 
 def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) -> ImageStats:
+    """Compute per-channel foreground statistics for a single image."""
+
     num_only_spatial_dims = 3
     num_spatial_and_channel_dims = 4
     heuristic_max_channel_number = 8
     data, voxel_size = _load_nifti(image_path)
 
-    # Build per-channel arrays in (X, Y, Z) order
     if data.ndim == num_only_spatial_dims:
-        data_per_channel = [data]  # (X, Y, Z)
+        data_per_channel = [data]
         image_size = PatchSize.from_xyz((data.shape[0], data.shape[1], data.shape[2]))
     elif data.ndim == num_spatial_and_channel_dims:
-        # either (X,Y,Z,C) or (C,X,Y,Z); heuristic: if first dim small (<=8) treat as channels-first
         if data.shape[0] <= heuristic_max_channel_number and data.shape[0] < data.shape[-1]:
-            # (C,X,Y,Z)
             data_per_channel = [data[c, ...] for c in range(data.shape[0])]
             image_size = PatchSize.from_xyz((data.shape[1], data.shape[2], data.shape[3]))
         else:
-            # (X,Y,Z,C)
             data_per_channel = [data[..., c] for c in range(data.shape[-1])]
             image_size = PatchSize.from_xyz((data.shape[0], data.shape[1], data.shape[2]))
     else:
         msg = f"Unsupported image ndim {data.ndim} at {image_path}"
         raise ValueError(msg)
 
-    # Foreground mask from labels (in XYZ order)
     entries = _labels_for_case(labels_path)
     mask = (
         _labels_to_mask(entries, image_size)
@@ -239,6 +226,8 @@ def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) 
 def _parse_label_line(
     line: str,
 ) -> tuple[int, float, float, float, float, float, float]:
+    """Parse one YOLO-style 3D box annotation line."""
+
     expected_line_parts = 7
     parts = line.strip().split()
     if len(parts) != expected_line_parts:
@@ -255,11 +244,13 @@ def _parse_label_line(
 def _labels_for_case(
     labels_path: Path,
 ) -> list[tuple[int, float, float, float, float, float, float]]:
+    """Load all non-empty label entries for one case."""
+
     if not labels_path.exists():
         return []
-    txt = labels_path.read_text(encoding="utf-8").strip().splitlines()
+    label_lines = labels_path.read_text(encoding="utf-8").strip().splitlines()
     entries: list[tuple[int, float, float, float, float, float, float]] = []
-    for line in txt:
+    for line in label_lines:
         if not line.strip():
             continue
         cls, x, y, z, w, h, d = _parse_label_line(line)
@@ -278,6 +269,8 @@ def _label_stats_for_case(
     voxel_size: VoxelSize,
     target_voxel_size: VoxelSize,
 ) -> LabelStats:
+    """Compute per-class box counts and sizes for one label file."""
+
     entries = _labels_for_case(labels_file)
     n_by_class: dict[str, int] = {}
     sizes_by_class_vox: dict[str, list[VoxelSize]] = {}
@@ -295,7 +288,6 @@ def _label_stats_for_case(
 
     for cls, _x, _y, _z, w, h, d in entries:
         cls_key = str(cls)
-        # labels are normalized in [0,1], sizes relative to the resampled image size
         xyz_norm = np.array([w, h, d], dtype=np.float64)
         size_vox = xyz_norm * resampled_image_size
         sizes_by_class_vox.setdefault(cls_key, []).append(
@@ -315,6 +307,8 @@ def _resolve_resampled_image_size(
     source_voxel_size: VoxelSize,
     target_voxel_size: VoxelSize,
 ) -> PatchSize:
+    """Project an image size onto a target voxel spacing."""
+
     return PatchSize.from_xyz(
         [
             max(1, round(size * source_spacing / target_spacing))
@@ -337,15 +331,16 @@ def _voxel_size_from_percentile(values_xyz: np.ndarray, percentile: float) -> Vo
 
 
 def _iter_cases(dataset_path: Path) -> Iterable[tuple[str, Path]]:
+    """Yield case ids and image paths for all dataset images."""
+
     images_dir = dataset_path / "images"
     if not images_dir.exists():
         msg = f"Missing images directory at {images_dir}"
         raise FileNotFoundError(msg)
-    for p in sorted(images_dir.glob("*.nii.gz")):
-        name = p.name
-        # case id = filename without .nii.gz
-        case_id = name[:-7] if name.endswith(".nii.gz") else p.stem
-        yield case_id, p
+    for image_path in sorted(images_dir.glob("*.nii.gz")):
+        image_name = image_path.name
+        case_id = image_name[:-7] if image_name.endswith(".nii.gz") else image_path.stem
+        yield case_id, image_path
 
 
 def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
@@ -382,7 +377,6 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
 
     total_cases = len(cases)
     LOGGER.info("Starting dataset analysis: %d cases, %d workers", total_cases, max_workers)
-    # Run image and label/mask computations in parallel per case to minimize IO bottlenecks
     executor = ProcessPoolExecutor(max_workers=max_workers)
     futures = {}
     processed = 0
@@ -434,7 +428,6 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
 
     n_channels = max(len(stats.per_channel) for stats in image_stats_results)
 
-    # Prepare accumulators (foreground-only)
     aggregated = [
         {
             "min": np.inf,
@@ -442,7 +435,7 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
             "sum": 0.0,
             "sumsq": 0.0,
             "count": 0.0,
-            "samples": [],  # list of np.ndarray
+            "samples": [],
         }
         for _ in range(n_channels)
     ]
@@ -457,7 +450,6 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
             aggregated[ch_idx]["sumsq"] += ch_stats.get("sumsq", 0.0)  # type: ignore[index]
             aggregated[ch_idx]["count"] += count  # type: ignore[index]
 
-        # Collect global percentile samples per channel
         for ch_idx, samples in enumerate(stats.samples_per_channel):
             if samples.size:
                 aggregated[ch_idx]["samples"].append(samples)  # type: ignore[index]
@@ -472,7 +464,6 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         else:
             mean = float("nan")
             std = float("nan")
-        # Global percentiles from pooled foreground samples
         if channel["samples"]:
             pooled = np.concatenate(channel["samples"])  # type: ignore[index]
             p005, p995 = np.percentile(pooled, [0.5, 99.5])
@@ -496,14 +487,13 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
             }
         )
 
-    # Median image size and voxel size
     images_sizes = np.array(
         [stats.image_size.get_xyz() for stats in image_stats_results], dtype=np.int64
-    )  # (N,3)
+    )
     voxel_sizes = np.array(
         [stats.voxel_size.get_xyz() for stats in image_stats_results],
         dtype=np.float64,
-    )  # (N,3)
+    )
     median_image_size = PatchSize.from_xyz(np.median(images_sizes, axis=0).astype(int).tolist())
     median_voxel_size = VoxelSize.from_xyz(np.median(voxel_sizes, axis=0).astype(float).tolist())
     voxel_size_p10 = _voxel_size_from_percentile(voxel_sizes, 10)
@@ -537,7 +527,6 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         except Exception:
             LOGGER.exception("Failed to read labels for %s", label_path)
 
-    # Aggregate label stats
     total_by_class: dict[str, int] = {}
     all_sizes_by_class: dict[str, list[VoxelSize]] = {}
     for label_stats in label_stats_results:
@@ -546,11 +535,10 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         for cls, lst in label_stats.sizes_by_class_vox.items():
             all_sizes_by_class.setdefault(cls, []).extend(lst)
 
-    # Compute medians per class per axis and the global p90 across all objects.
     box_size_median_vox: dict[str, VoxelSize] = {}
     all_box_sizes: list[tuple[float, float, float]] = []
     for cls, lst in all_sizes_by_class.items():
-        arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)  # (M,3) x,y,z in vox
+        arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)
         if arr.size == 0:
             continue
         all_box_sizes.extend([tuple(size.get_xyz()) for size in lst])
