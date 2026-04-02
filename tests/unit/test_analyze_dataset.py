@@ -126,10 +126,12 @@ def test_analyze_dataset_writes_resampled_summary_and_box_sizes(tmp_path: Path) 
     assert fingerprint["resampled_imagesize_p90_vox"] == [13, 27, 40]
     assert fingerprint["box_size_median_vox"] == {"0": [6.5, 13.5, 20.0]}
     assert fingerprint["box_size_p95_vox"] == [6.5, 13.5, 20.0]
+    assert fingerprint["n_images_with_objects"] == 2
+    assert fingerprint["n_images_without_objects"] == 0
     assert "box_size_p10_vox" not in fingerprint
 
 
-def test_analyze_dataset_box_size_p90_uses_all_objects_from_all_classes(tmp_path: Path) -> None:
+def test_analyze_dataset_box_size_p95_uses_all_objects_from_all_classes(tmp_path: Path) -> None:
     dataset_path = tmp_path / "dataset"
     images_dir = dataset_path / "images"
     labels_dir = dataset_path / "labels"
@@ -159,3 +161,26 @@ def test_analyze_dataset_box_size_p90_uses_all_objects_from_all_classes(tmp_path
         "2": [70.0, 80.0, 90.0],
     }
     assert fingerprint["box_size_p95_vox"] == [67.0, 77.0, 87.0]
+
+
+def test_analyze_dataset_counts_images_with_and_without_objects(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset"
+    images_dir = dataset_path / "images"
+    labels_dir = dataset_path / "labels"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir()
+
+    image = np.ones((12, 12, 12), dtype=np.float32)
+    affine = np.diag((1.0, 1.0, 1.0, 1.0))
+    _write_nifti(images_dir / "case_with.nii.gz", image, affine)
+    _write_nifti(images_dir / "case_empty.nii.gz", image, affine)
+    _write_nifti(images_dir / "case_missing.nii.gz", image, affine)
+
+    (labels_dir / "case_with.txt").write_text("0 0.5 0.5 0.5 0.2 0.2 0.2\n", encoding="utf-8")
+    (labels_dir / "case_empty.txt").write_text("", encoding="utf-8")
+
+    fingerprint_path = analyze_dataset(dataset_path, workers=1)
+    fingerprint = json.loads(fingerprint_path.read_text(encoding="utf-8"))
+
+    assert fingerprint["n_images_with_objects"] == 1
+    assert fingerprint["n_images_without_objects"] == 2

@@ -29,6 +29,8 @@ class ImageStats(NamedTuple):
     image_size: PatchSize
     # voxel size in mm
     voxel_size: VoxelSize
+    # whether the case contains at least one labeled object
+    has_objects: bool
     # foreground intensity samples per channel (1D float arrays, up to sample_cap per image)
     samples_per_channel: list[np.ndarray]
 
@@ -55,7 +57,9 @@ class DatasetFingerprint:
     box_size_median_vox: dict[str, VoxelSize]
     box_size_p95_vox: VoxelSize | None
     # Masks
-    n_masks_available: int
+    n_images_with_masks: int
+    n_images_with_objects: int
+    n_images_without_objects: int
 
 
 def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str, object]:
@@ -77,7 +81,9 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
             if fingerprint.box_size_p95_vox is not None
             else None
         ),
-        "n_masks_available": fingerprint.n_masks_available,
+        "n_images_with_masks": fingerprint.n_images_with_masks,
+        "n_images_with_objects": fingerprint.n_images_with_objects,
+        "n_images_without_objects": fingerprint.n_images_without_objects,
     }
 
 
@@ -225,6 +231,7 @@ def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) 
         per_channel=per_channel_stats,
         image_size=image_size,
         voxel_size=voxel_size,
+        has_objects=bool(entries),
         samples_per_channel=samples_per_channel,
     )
 
@@ -370,6 +377,8 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     image_stats_results: list[ImageStats] = []
     label_stats_inputs: list[tuple[Path, PatchSize, VoxelSize]] = []
     n_masks = 0
+    n_images_with_objects = 0
+    n_images_without_objects = 0
 
     total_cases = len(cases)
     LOGGER.info("Starting dataset analysis: %d cases, %d workers", total_cases, max_workers)
@@ -395,6 +404,10 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
                 label_stats_inputs.append(
                     (label_path, image_stats.image_size, image_stats.voxel_size)
                 )
+                if image_stats.has_objects:
+                    n_images_with_objects += 1
+                else:
+                    n_images_without_objects += 1
 
                 if _has_mask(mask_path):
                     n_masks += 1
@@ -569,7 +582,9 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         boxes_per_class=total_by_class,
         box_size_median_vox=box_size_median_vox,
         box_size_p95_vox=box_size_p95_vox,
-        n_masks_available=n_masks,
+        n_images_with_masks=n_masks,
+        n_images_with_objects=n_images_with_objects,
+        n_images_without_objects=n_images_without_objects,
     )
 
     out_path = dataset_path / "dataset_fingerprint.json"
