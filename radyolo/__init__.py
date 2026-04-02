@@ -12,6 +12,7 @@ import yaml
 from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.config.propose_model_config import propose_model_config as propose_model_config_fn
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
@@ -377,6 +378,77 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
         LOGGER.info("Dataset fingerprint written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to analyze dataset", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("propose-model-config")
+@click.argument(
+    "dataset_path",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--model_scale",
+    type=click.Choice(
+        ["n", "s", "m", "l", "x"],
+        case_sensitive=False,
+    ),
+    default="m",
+    help="Scale of the RadYOLO model. Larger models are slower, but potentially more accurate.",
+)
+@click.option(
+    "--gpu_ram_limit_gb",
+    type=float,
+    default=11,
+    help="The GPU RAM that the patch sized should be optimized for.",
+)
+@click.option(
+    "--output",
+    type=click.Path(
+        file_okay=True, dir_okay=False, writable=True, resolve_path=True, path_type=Path
+    ),
+    default=None,
+    help="Optional output path for the proposed training config YAML.",
+)
+@click.option(
+    "--workers",
+    default=0,
+    show_default=True,
+    help="Number of parallel workers to use when analyze-dataset needs to be run.",
+)
+def propose_model_config(
+    dataset_path: Path,
+    model_scale: str,
+    gpu_ram_limit_gb: float,
+    output: Path | None,
+    workers: int,
+) -> int:
+    """Propose a training config for DATASET_PATH for a target model scale and GPU RAM limit."""
+    try:
+        result = propose_model_config_fn(
+            dataset_path=dataset_path,
+            model_scale=model_scale.lower(),
+            gpu_ram_limit_gb=gpu_ram_limit_gb,
+            output_path=output,
+            workers=workers,
+        )
+        LOGGER.info(
+            "Proposed config written to %s (estimated training memory %.2f GB)",
+            result.output_path,
+            result.estimated_memory_gb,
+        )
+        if result.analysis_ran:
+            LOGGER.info("Dataset fingerprint written to %s", result.fingerprint_path)
+    except Exception as e:
+        LOGGER.exception("Failed to propose model config", exc_info=e)
         return 1
     else:
         return 0

@@ -14,7 +14,7 @@ This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-
 
 After installation this project provides a cli `radyolo` with built-in help.
 
-Available commands are `train`, `test`, `predict`, `analyze-dataset`, `create-data-splits`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
+Available commands are `train`, `test`, `predict`, `analyze-dataset`, `propose-model-config`, `create-data-splits`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
@@ -91,7 +91,13 @@ names:
   1: right_kidney
   2: left_kidney
   3: gall_bladder
+normalization:
+  0: CT
+  1: MRPerChannel
+  2: MRPerChannel
 ```
+
+The names map the output channels to the respective classes and the normalization maps the input channels to their respective normalizations. `CT` computes the intensity mean and standard deviation on the training dataset and uses those for zScore-normalization with clipping. `MRPerChannel` applies a zScore-normalization based on each image mean and standard deviation while `MRGlobal` has to be set for all channels and then applies a zScore-normalization where the mean and standard deviation are compted / shared across all channels.
 
 ### Analyze dataset
 
@@ -100,6 +106,16 @@ To automatically analyze the dataset to get statistics about the image sizes, in
 ```
 uv run -m radyolo analyze-dataset <path_to_dataset_folder>
 ```
+
+### Propose model config
+
+To generate a training configuration adapted to a dataset, model scale and GPU RAM budget, call:
+
+```bash
+uv run -m radyolo propose-model-config <path_to_dataset_folder> <model_scale> <gpu_ram_limit_gb>
+```
+
+The command reuses `dataset_fingerprint.json` when present, otherwise it runs `analyze-dataset` first. It then copies the reference training config from `config/config.yaml`, fills in the dataset-specific class count, input channel count, normalization setup, segmentation head setting and a stride-compatible patch size sized against the requested GPU memory budget.
 
 ### Create data splits
 
