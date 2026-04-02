@@ -3,9 +3,13 @@ input_channels: 1 # number of input channels for model
 num_classes: 15   # number of classes to predict
 model_scale: s    # allowed values: (n, s, m, l, x)
 
-# Train settings -------------------------------------------------------------------------------------------------------
+# Data and output Settings
+output_folder_base: "runs" # (str, optional) base folder for experiment outputs
+experiment_name: "default" # (str, optional) experiment name, results saved to 'output_folder_base/experiment_name' directory
 data: "D:/datasets/AMOS22/radyolo_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
 fold: 0 # (int) fold from data splits file to use for training
+
+# Train settings
 epochs: 1000 # (int) number of epochs to train for
 patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
 batch_size: 2 # (int) number of images per batch
@@ -16,8 +20,6 @@ save: True # (bool) save train checkpoints
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 # device: "cpu" # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
 workers: 4 # (int) number of worker threads for data loading
-project: "runs" # (str, optional) project name
-name: "default" # (str, optional) experiment name, results saved to 'project/name' directory
 exist_ok: True # (bool) whether to overwrite existing experiment
 optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
@@ -27,7 +29,7 @@ resume: True # (bool) resume training from last checkpoint
 amp: True # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
 use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
 
-# Val/Test settings ----------------------------------------------------------------------------------------------------
+# Val/Test settings
 val: True # (bool) validate/test during training
 conf: # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
 iou: 0.2 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
@@ -40,12 +42,12 @@ validation_plot_projection: "mean" # (literal) projection reduction for validati
 validation_plot_image_mode: "default" # (literal) source image for validation plots, choices=[default, channel_difference]
 validation_plot_difference_channels: [2, 0] # (list[int]) channels used for difference plots as [minuend, subtrahend]
 
-# Predict settings -----------------------------------------------------------------------------------------------------
+# Predict settings
 source: # (str, optional) source directory for images or videos
 augment: True # (bool) apply image augmentation to prediction sources
 agnostic_nms: False # (bool) class-agnostic NMS
 
-# Hyperparameters ------------------------------------------------------------------------------------------------------
+# Hyperparameters
 lr0: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
 lrf: 0.01 # (float) final learning rate (lr0 * lrf)
 momentum: 0.937 # (float) SGD momentum/Adam beta1

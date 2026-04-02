@@ -16,7 +16,7 @@ def _make_minimal_config(tmp_path: Path, patch_size: object) -> dict[str, object
         "fold": 0,
         "batch_size": 1,
         "patch_size": patch_size,
-        "name": "spatial-test",
+        "experiment_name": "spatial-test",
     }
 
 

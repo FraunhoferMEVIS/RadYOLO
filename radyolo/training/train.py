@@ -57,15 +57,13 @@ class Trainer:
     def __init__(self, cfg: str | Path) -> None:
         self.config_path = Path(cfg)
         self.config = get_cfg(cfg, {})
-        run_dir = Path() / (self.config.project or "runs")
-        if not run_dir.is_dir():
-            msg = f"{run_dir} does not exist or is not a directory!"
-            raise RuntimeError(msg)
+        output_folder_base = Path(self.config.output_folder_base or "runs")
+        output_folder_base.mkdir(parents=True, exist_ok=True)
 
-        self.save_dir = run_dir / str(self.config.name)
+        self.save_dir = output_folder_base / str(self.config.experiment_name)
         self.wdir = self.save_dir / "weights"
-        self.save_dir.mkdir(exist_ok=self.config.exist_ok)
-        self.wdir.mkdir(exist_ok=self.config.exist_ok)
+        self.save_dir.mkdir(parents=True, exist_ok=self.config.exist_ok)
+        self.wdir.mkdir(parents=True, exist_ok=self.config.exist_ok)
         self.last_model_path = self.wdir / "last.pt"
         self.best_model_path = self.wdir / "best.pt"
         self.save_period = self.config.save_period
@@ -112,6 +110,7 @@ class Trainer:
         )
         file_handler.addFilter(YoloFilter())
         logging.root.addHandler(file_handler)
+        LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
 
         # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
         self.ewa_mAP1095 = None

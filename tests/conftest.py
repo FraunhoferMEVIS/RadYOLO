@@ -76,8 +76,8 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
     """
     cfg_dir = tmp_path_factory.mktemp("configs")
     cfg_path = cfg_dir / "train.yaml"
-    project_root = tmp_path_factory.mktemp("runs_root") / "runs"
-    project_root.mkdir(parents=True, exist_ok=True)
+    output_folder_base = tmp_path_factory.mktemp("runs_root") / "runs"
+    output_folder_base.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(
         (
             f"input_channels: 1\n"
@@ -94,8 +94,8 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"normalization: {{type: 'none'}}\n"
             f"device: cpu\n"
             f"workers: 0\n"
-            f"project: {project_root.as_posix()}\n"
-            f"name: e2e\n"
+            f"output_folder_base: {output_folder_base.as_posix()}\n"
+            f"experiment_name: e2e\n"
             f"exist_ok: True\n"
             f"optimizer: Adam\n"
             f"verbose: False\n"
@@ -124,7 +124,7 @@ def trained_run(minimal_train_config: Path) -> Path:
     trainer.train()
     with cfg.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    run_dir = Path(data["project"]) / str(data["name"])
+    run_dir = Path(data["output_folder_base"]) / str(data["experiment_name"])
     weights_dir = run_dir / "weights"
     if not (weights_dir / "last.pt").exists():
         msg_last = "last.pt missing after training"

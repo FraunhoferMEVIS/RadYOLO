@@ -25,7 +25,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> DefaultConfig:
         "fold": 0,
         "batch_size": 1,
         "patch_size": {"x": 8, "y": 8, "z": 8},
-        "name": "test",
+        "experiment_name": "test",
     }
     base_config.update(overrides)
     return DefaultConfig(**base_config)

@@ -13,10 +13,9 @@ def test_train_cli(minimal_train_config: Path, tmp_path: Path) -> None:
     test_config = tmp_path / "train_separate_objectness.yaml"
     with minimal_train_config.open(encoding="utf-8") as file:
         config = yaml.safe_load(file)
-    config["project"] = (tmp_path / "runs").as_posix()
-    config["name"] = "e2e_separate_objectness"
+    config["output_folder_base"] = (tmp_path / "runs").as_posix()
+    config["experiment_name"] = "e2e_separate_objectness"
     config["separate_objectness_head"] = True
-    Path(config["project"]).mkdir(parents=True, exist_ok=True)
     with test_config.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
@@ -25,7 +24,7 @@ def test_train_cli(minimal_train_config: Path, tmp_path: Path) -> None:
     result = runner.invoke(main, ["train", str(test_config)])
 
     assert result.exit_code == 0
-    run_dir = Path(config["project"]) / str(config["name"])
+    run_dir = Path(config["output_folder_base"]) / str(config["experiment_name"])
     best_path = run_dir / "weights" / "best.pt"
     copied_config = run_dir / "train_config.yaml"
     assert best_path.exists(), "best.pt missing"

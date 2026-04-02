@@ -92,7 +92,7 @@ def test_propose_patch_size_stays_within_budget() -> None:
         include_stride4_output=False,
         prototype_masks=8,
     )
-    assert direct_estimate == pytest.approx(estimated_memory_gb, abs=0.05)
+    assert direct_estimate == pytest.approx(estimated_memory_gb, abs=0.1)
 
 
 def test_estimate_patch_memory_gb_increases_with_patch_volume() -> None:

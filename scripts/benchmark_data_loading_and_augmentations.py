@@ -366,7 +366,7 @@ def build_augmentation_config(
         "fold": 0,
         "batch_size": 1,
         "patch_size": {"x": size, "y": size, "z": size},
-        "name": f"benchmark_{augmentation}",
+        "experiment_name": f"benchmark_{augmentation}",
         "normalization": {"type": "none"},
         "augment": True,
         "do_batchgenerators_intensity_augmentation": False,

@@ -186,7 +186,7 @@ def _build_estimation_config(  # noqa: PLR0913
             "segmentation_output": segmentation_output,
             "include_stride4_output": include_stride4_output,
             "prototype_masks": prototype_masks,
-            "name": config_data.get("name", "memory_estimate"),
+            "experiment_name": config_data.get("experiment_name", "memory_estimate"),
         }
     )
     return DefaultConfig.model_validate(config_data)
@@ -940,7 +940,7 @@ def propose_model_config(
             },
             "normalization": runtime_normalization,
             "segmentation_output": has_masks,
-            "name": (
+            "experiment_name": (
                 f"{dataset_path.name}_{model_scale}_{patch_size.x}"
                 f"x{patch_size.y}x{patch_size.z}"
             ),

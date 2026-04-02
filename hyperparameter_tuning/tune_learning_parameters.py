@@ -558,8 +558,8 @@ def _run_trial(
     for dataset in datasets:
         dataset_name = _normalize_name(str(dataset.get("name", Path(str(dataset["data"])).name)))
         dataset_dir = trial_dir / dataset_name
-        project_dir = dataset_dir / "runs"
-        project_dir.mkdir(parents=True, exist_ok=True)
+        output_folder_base = dataset_dir / "runs"
+        output_folder_base.mkdir(parents=True, exist_ok=True)
 
         run_config = _deep_merge(template_config, common_overrides)
         run_config.update(sampled)
@@ -567,8 +567,8 @@ def _run_trial(
 
         run_config["data"] = str(Path(dataset["data"]).resolve())
         run_config["fold"] = int(dataset.get("fold", run_config.get("fold", 0)))
-        run_config["project"] = str(project_dir)
-        run_config["name"] = "train"
+        run_config["output_folder_base"] = str(output_folder_base)
+        run_config["experiment_name"] = "train"
         run_config["exist_ok"] = True
         run_config["resume"] = False
 
@@ -597,7 +597,7 @@ def _run_trial(
             secondary_best_epoch = -1
             report_payload[f"dataset_failed/{dataset_name}"] = 1
         else:
-            csv_path = project_dir / "train" / "results.csv"
+            csv_path = output_folder_base / "train" / "results.csv"
             try:
                 (
                     primary_metric,

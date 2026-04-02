@@ -85,8 +85,8 @@ class DefaultConfig(BaseModel):
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     device: str = ""  # device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
     workers: int = 6  # number of worker threads for data loading (per RANK if DDP)
-    project: str = ""  # project name
-    name: int | str  # experiment name, results saved to 'project/name' directory
+    output_folder_base: str = ""  # base output folder for experiment directories
+    experiment_name: int | str  # experiment name, results saved to 'output_folder_base/experiment_name'
     exist_ok: bool = False  # whether to overwrite existing experiment
     optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
         "auto"  # optimizer to use
@@ -367,9 +367,12 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
             overrides.pop("save_dir", None)
         yaml_config = {**yaml_config, **overrides}
 
-    if yaml_config.get("name") == "model":
-        yaml_config["name"] = yaml_config.get("model", "").split(".")[0]
-        LOGGER.warning("'name=model' automatically updated to 'name=%s'.", yaml_config["name"])
+    if yaml_config.get("experiment_name") == "model":
+        yaml_config["experiment_name"] = yaml_config.get("model", "").split(".")[0]
+        LOGGER.warning(
+            "'experiment_name=model' automatically updated to 'experiment_name=%s'.",
+            yaml_config["experiment_name"],
+        )
 
     return DefaultConfig.model_validate(yaml_config)
 
