@@ -23,17 +23,17 @@ For further details please refer to the respective `--help` invocation.
 To train a model, call
 
 ```
-uv run -m radyolo train <path_to_config_yaml>
+uv run -m radyolo train <path-to-config-yaml>
 ```
 
-where `<path_to_config_yaml>` points to the path of a configuration file for the desired training.
+where `<path-to-config-yaml>` points to the path of a configuration file for the desired training.
 
 ### Test
 
 The `test` command can be used to run a trained on the `test` split of the data (and also the `train` and `val` splits):
 
 ```
-uv run -m radyolo test <path_to_model_checkpoint> <path_to_dataset_folder>
+uv run -m radyolo test <path-to-model-checkpoint> <path-to-dataset-folder>
 ```
 
 ### Predict
@@ -41,10 +41,10 @@ uv run -m radyolo test <path_to_model_checkpoint> <path_to_dataset_folder>
 The `predict` command can be used for model inference. It is called as follows:
 
 ```
-uv run -m radyolo predict <path_to_model_checkpoint> <input_image_folder> <output_folder>
+uv run -m radyolo predict <path-to-model-checkpoint> <input-image-folder> <output-folder>
 ```
 
-Here the `input_image_folder` is a folder of NifTi files, where the predict command expects each file to represent a case to run the model on. The resulting detections and optional segmentation masks are saved to the `output_folder`.
+Here the `input-image-folder` is a folder of NifTi files, where the predict command expects each file to represent a case to run the model on. The resulting detections and optional segmentation masks are saved to the `output-folder`.
 
 ## Dataset Format
 
@@ -104,7 +104,7 @@ The names map the output channels to the respective classes and the normalizatio
 To automatically analyze the dataset to get statistics about the image sizes, intensities and labels, you can call the command:
 
 ```
-uv run -m radyolo analyze-dataset <path_to_dataset_folder>
+uv run -m radyolo analyze-dataset <path-to-dataset-folder>
 ```
 
 ### Propose model config
@@ -112,7 +112,7 @@ uv run -m radyolo analyze-dataset <path_to_dataset_folder>
 To generate a training configuration adapted to a dataset, model scale and GPU RAM budget, call:
 
 ```bash
-uv run -m radyolo propose-model-config <path_to_dataset_folder> <model_scale> <gpu_ram_limit_gb>
+uv run -m radyolo propose-model-config <path-to-dataset-folder> --model-scale m --gpu-ram-limit-gb 11
 ```
 
 The command reuses `dataset_fingerprint.json` when present, otherwise it runs `analyze-dataset` first. It then copies the reference training config from `config/config.yaml`, fills in the dataset-specific class count, input channel count, normalization setup, segmentation head setting and a stride-compatible patch size sized against the requested GPU memory budget.
@@ -122,7 +122,7 @@ The command reuses `dataset_fingerprint.json` when present, otherwise it runs `a
 To automtically create a data split file, you can call:
 
 ```
-uv run -m radyolo create-data-splits <path_to_dataset_folder>
+uv run -m radyolo create-data-splits <path-to-dataset-folder>
 ```
 
 By default it splits the data using a 5-fold cross validation scheme, where each group uses three of the folds as `train` set, one as `val` set and one as `test` set. The `val` set is used to compute the validation metrics during training and select the best model, while the `test` set is left out of the training to serve as independent test data in the end.
@@ -132,7 +132,7 @@ By default it splits the data using a 5-fold cross validation scheme, where each
 To preprocess a dataset in the predefined NIfTI format and store the images as compressed `.b2nd` (blosc2 ndarray) files in a new folder, call:
 
 ```bash
-uv run -m radyolo preprocess-data --image-extent x y z --normalization "{type: zscore}" --image-dtype float16 <path_to_dataset_folder> <path_to_output_folder>
+uv run -m radyolo preprocess-data --image-extent x y z --normalization "{type: zscore}" --image-dtype float16 <path-to-dataset-folder> <path-to-output-folder>
 ```
 
 The command copies labels and dataset metadata and converts all files from `images/*.nii.gz` to `images/*.b2nd` in the output dataset. If `masks/*.nii.gz` are present, they are converted to `masks/*.b2nd` files.
@@ -145,10 +145,10 @@ The dataset can be resampled to a fixed voxel size using `--voxel-size x y z` or
 You can convert a dataset in this repo's format into nnDetection's Task structure:
 
 ```pwsh
-uv run -m radyolo convert-to-nndetection <path-to-radyolo-dataset> --out-root <det_data_root> --task-id 100 --task-name MyDataset --fold 0
+uv run -m radyolo convert-to-nndetection <path-to-radyolo-dataset> --out-root <det-data-root> --task-id 100 --task-name MyDataset --fold 0
 ```
 
-This creates `<det_data_root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, `labelsTr` and optional `imagesTs`, `labelsTs`, plus a `dataset.yaml`.
+This creates `<det-data-root>/Task100_MyDataset/` with `raw_splitted/imagesTr`, `labelsTr` and optional `imagesTs`, `labelsTs`, plus a `dataset.yaml`.
 
 ## Docker Image
 

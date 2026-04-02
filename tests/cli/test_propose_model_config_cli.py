@@ -31,9 +31,9 @@ def test_propose_model_config_cli_autoruns_analysis_and_proposes_ct_config(
         [
             "propose-model-config",
             str(synthetic_dataset),
-            "--model_scale",
+            "--model-scale",
             "s",
-            "--gpu_ram_limit_gb",
+            "--gpu-ram-limit-gb",
             "6",
             "--output",
             str(output_path),
@@ -82,9 +82,9 @@ def test_propose_model_config_cli_uses_global_zscore_for_all_mrglobal(tmp_path) 
         [
             "propose-model-config",
             str(dataset_path),
-            "--model_scale",
+            "--model-scale",
             "n",
-            "--gpu_ram_limit_gb",
+            "--gpu-ram-limit-gb",
             "4",
             "--output",
             str(output_path),

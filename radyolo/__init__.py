@@ -114,6 +114,7 @@ def main(verbose: bool, debug: bool) -> None:
 @main.command("train")
 @click.argument(
     "config",
+    metavar="CONFIG",
     envvar="RADYOLO_TRAIN_CONFIG",
     type=click.Path(
         exists=True,
@@ -142,6 +143,7 @@ def train(config: Path) -> int:
 @main.command("test")
 @click.argument(
     "model_path",
+    metavar="MODEL-PATH",
     type=click.Path(
         exists=True,
         file_okay=True,
@@ -161,7 +163,7 @@ def train(config: Path) -> int:
         resolve_path=True,
         path_type=Path,
     ),
-    metavar="DATASET_CONFIG",
+    metavar="DATASET-FOLDER",
 )
 @click.option("--fold", default=0, help="Fold from dataset splits file to use.")
 @click.option(
@@ -234,6 +236,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
 @main.command("onnx-export")
 @click.argument(
     "model_path",
+    metavar="MODEL-PATH",
     type=click.Path(
         exists=True,
         file_okay=True,
@@ -279,6 +282,7 @@ def onnx_export(model_path: Path, internal_dtype: str) -> int:
 @main.command("plot-results")
 @click.argument(
     "result_path",
+    metavar="RESULT-PATH",
     type=click.Path(
         exists=True,
         file_okay=True,
@@ -305,6 +309,7 @@ def plot_results(result_path: Path) -> int:
 @main.command("create-data-splits")
 @click.argument(
     "dataset_path",
+    metavar="DATASET-PATH",
     type=click.Path(
         exists=True,
         file_okay=False,
@@ -353,6 +358,7 @@ def create_data_splits(
 @main.command("analyze-dataset")
 @click.argument(
     "dataset_path",
+    metavar="DATASET-PATH",
     type=click.Path(
         exists=True,
         file_okay=False,
@@ -386,6 +392,7 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
 @main.command("propose-model-config")
 @click.argument(
     "dataset_path",
+    metavar="DATASET-PATH",
     type=click.Path(
         exists=True,
         file_okay=False,
@@ -396,7 +403,7 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     ),
 )
 @click.option(
-    "--model_scale",
+    "--model-scale",
     type=click.Choice(
         ["n", "s", "m", "l", "x"],
         case_sensitive=False,
@@ -405,7 +412,7 @@ def analyze_dataset(dataset_path: Path, workers: int) -> int:
     help="Scale of the RadYOLO model. Larger models are slower, but potentially more accurate.",
 )
 @click.option(
-    "--gpu_ram_limit_gb",
+    "--gpu-ram-limit-gb",
     type=float,
     default=11,
     help="The GPU RAM that the patch sized should be optimized for.",
@@ -457,6 +464,7 @@ def propose_model_config(
 @main.command("preprocess-data")
 @click.argument(
     "dataset_path",
+    metavar="DATASET-PATH",
     type=click.Path(
         exists=True,
         file_okay=False,
@@ -468,6 +476,7 @@ def propose_model_config(
 )
 @click.argument(
     "output_path",
+    metavar="OUTPUT-PATH",
     type=click.Path(
         exists=False,
         file_okay=False,
@@ -567,6 +576,7 @@ def preprocess_data(
 @main.command("convert-to-nndetection")
 @click.argument(
     "dataset_path",
+    metavar="DATASET-PATH",
     type=click.Path(
         exists=True,
         file_okay=False,
@@ -648,6 +658,7 @@ def convert_to_nndetection(
 @main.command("predict")
 @click.argument(
     "model_path",
+    metavar="MODEL-PATH",
     type=click.Path(
         exists=True,
         file_okay=True,
@@ -659,6 +670,7 @@ def convert_to_nndetection(
 )
 @click.argument(
     "input_dir",
+    metavar="INPUT-DIR",
     type=click.Path(
         exists=True,
         file_okay=False,
@@ -670,6 +682,7 @@ def convert_to_nndetection(
 )
 @click.argument(
     "output_dir",
+    metavar="OUTPUT-DIR",
     type=click.Path(
         file_okay=False,
         dir_okay=True,
