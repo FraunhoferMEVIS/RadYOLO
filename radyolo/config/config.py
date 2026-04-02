@@ -58,98 +58,31 @@ def _validate_normalization_entry(entry: dict) -> dict:
 
 
 class DefaultConfig(BaseModel):
-    input_channels: int
-    num_classes: int
-    model_scale: Literal["n", "s", "m", "l", "x"]
-
-    # Train settings
+    # Data and output settings
     data: Path  # path to data folder containing dataset.yaml
-    fold: int  # fold from data_splits.json to use
-    epochs: int = 1000  # number of epochs to train for
-    patience: int = (
-        100  # epochs to wait for no observable improvement for early stopping of training
-    )
-    batch_size: int = 2  # number of images per batch
-    patch_size: PatchSize  # input patch size as {"x": x, "y": y, "z": z}
-    foreground_oversampling: float = Field(
-        0.0,
-        ge=0.0,
-        lt=1.0,
-    )  # fraction of samples per train epoch that should be extra foreground oversamples
-    # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
-    # applied globally or a list of such dicts for each channel. For ct you have to define
-    # mean, std, clip_min and clip_max in the dict.
-    normalization: dict | list[dict] = {"type": "none"}
-    save: bool = True  # save train checkpoints
-    save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
-    device: str = ""  # device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
-    workers: int = 6  # number of worker threads for data loading (per RANK if DDP)
-    output_folder_base: str = ""  # base output folder for experiment directories
+    fold: int  # fold from data splits file to use for training
+    output_folder_base: str = ""  # base folder for experiment outputs
     experiment_name: int | str  # experiment name, results saved to 'output_folder_base/experiment_name'
-    exist_ok: bool = False  # whether to overwrite existing experiment
-    optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
-        "auto"  # optimizer to use
-    )
-    verbose: bool = True  # whether to print verbose output
-    seed: int = 0  # random seed for reproducibility
-    deterministic: bool = True  # whether to enable deterministic mode
-    resume: bool | FilePath = False  # resume training from last checkpoint
+
+    # General Settings
+    device: str = ""  # device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
     # Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and
     # chooses the best one
     use_cudnn_benchmark: bool = True
+    workers: int = 6  # number of worker threads for data loading
+    save: bool = True  # save train checkpoints
+    save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
+    exist_ok: bool = True  # whether to overwrite existing experiment
+    resume: bool | FilePath = True  # resume training from last checkpoint
+    verbose: bool = True  # whether to print verbose output
+    seed: int = 0  # random seed for reproducibility
+    deterministic: bool = False  # whether to enable deterministic mode
 
-    # Val/Test Settings
-    val: bool = True  # validate/test during training
-    confidence_threshold: float | None = (
-        0.001  # object confidence threshold for detection during validation
-    )
-    nms_iou_threshold: float = 0.2  # intersection over union (IoU) threshold for NMS
-    nms_time_limit: float = 0.5  # time limit per image in seconds before NMS stops processing
-    agnostic_nms: bool = False  # class-agnostic NMS
-    max_det: int = 300  # maximum number of detections per image
-    plots: bool = True  # save plots and images during train/val
-    clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds in val/predict
-    validation_plot_projection: Literal["max", "mean"] = (
-        "max"  # projection reduction used for validation case plots
-    )
-    validation_plot_image_mode: Literal["default", "channel_difference"] = (
-        "default"  # source image used for validation case plots
-    )
-    validation_plot_difference_channels: tuple[NonNegativeInt, NonNegativeInt] = (
-        2,
-        0,
-    )  # channels used for validation difference plots as (minuend, subtrahend)
-
-    # Hyperparameters
-    initial_learning_rate: float = 0.01  # initial learning rate
-    final_learning_rate_ratio: float = 0.01  # final learning rate ratio
-    momentum: float = 0.937  # SGD momentum/Adam beta1
-    weight_decay: float = 5e-4  # optimizer weight decay 5e-4
-    warmup_epochs: float = 3.0  # warmup epochs (fractions ok)
-    warmup_momentum: float = 0.8  # warmup initial momentum
-    warmup_bias_lr: float = 0.1  # warmup initial bias lr
-    objectness_loss: Literal["bce", "focal"] = "bce"  # loss function for objectness loss
-    tal_topk: int = 10  # top-k anchors to keep per gt in task-aligned assigner
-    tal_alpha: float = 0.5  # classification term exponent in task-aligned assigner
-    tal_beta: float = 1.0  # IoU term exponent in task-aligned assigner
-    gamma: float = 2.0  # quality focal loss gamma (used when objectness_loss="focal")
-    grad_clip_max_norm: float = 10.0  # max norm for gradient clipping
-    ema_decay: float = 0.9999  # exponential moving average decay
-    ema_tau: float = 2000.0  # EMA ramp-up factor
-    box_loss_gain: float = 7.5  # box loss gain
-    class_loss_gain: float = 0.5  # classification / objectness loss gain
-    dfl_loss_gain: float = 1.5  # DFL loss gain
-    dfl_reg_max: int = Field(16, ge=1)  # use direct edge regression when set to 1
-    bbox_parametrization: Literal["ltrb", "center_extents"] = (
-        "ltrb"  # bbox prediction format for the detection head
-    )
-    bbox_center_offset_limit: float = Field(
-        4.0, gt=0.5
-    )  # max absolute anchor-relative center offset for center_extents bbox prediction
-    mask_loss_gain: float = 1.0  # mask loss gain
-    class_separate_loss_gain: float = 0.5  # class loss gain for separate softmax classification loss
-    nominal_batch_size: int = 64  # nominal batch size
+    # Model Parameters
+    input_channels: int  # number of input channels for model
+    num_classes: int  # number of classes to predict
+    model_scale: Literal["n", "s", "m", "l", "x"]  # allowed values: (n, s, m, l, x)
 
     # Optional Segmentation Head
     segmentation_output: bool = True  # add segmentation output to model
@@ -157,76 +90,159 @@ class DefaultConfig(BaseModel):
     # use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
     higher_resolution_prototypes: bool = True
 
-    # Detection head options
-    # add separate objectness output, use cross entropy loss for softmax class probabilities
+    # Detection Head Options
+    # if True, add a separate objectness output and use CCE loss for class logits
     separate_objectness_head: bool = False
-    include_stride4_output: bool = False  # add P2 detection head at stride 4
+    include_stride4_output: bool = False  # if True, add a detection head on stride 4 level
+
+    # Hyperparameters
+    epochs: int = 1000  # number of epochs to train for
+    patience: int = (
+        300  # epochs to wait for no observable improvement for early stopping of training
+    )
+    patch_size: PatchSize  # input patch size stored in x, y, z (width, height, depth) order
+    # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
+    # applied globally or a list of such dicts for each channel. For ct you have to define
+    # mean, std, clip_min and clip_max in the dict.
+    normalization: dict | list[dict] = {"type": "none"}
+    foreground_oversampling: float = Field(
+        0.0,
+        ge=0.0,
+        lt=1.0,
+    )  # extra train-epoch sample fraction to draw from foreground cases
+    batch_size: int = 2  # number of images per batch
+    nominal_batch_size: int = 64  # nominal batch size (i.e. samples for gradient accumulation)
+    optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
+        "Adam"  # optimizer to use
+    )
+    initial_learning_rate: float = 0.01  # initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
+    final_learning_rate_ratio: float = 0.01  # final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
+    momentum: float = 0.937  # SGD momentum/Adam beta1
+    weight_decay: float = 5e-4  # optimizer weight decay 5e-4
+    warmup_epochs: float = 3.0  # warmup epochs
+    warmup_momentum: float = 0.8  # warmup initial momentum
+    warmup_bias_lr: float = 0.1  # warmup initial bias learning rate
+    grad_clip_max_norm: float = 10.0  # max norm used for gradient clipping
+    tal_topk: int = 10  # top-k anchors to keep per ground truth for task-aligned assignment
+    tal_alpha: float = 0.5  # class score exponent in task-aligned assignment metric
+    tal_beta: float = 1.0  # IoU exponent in task-aligned assignment metric
+    ema_decay: float = 0.9999  # exponential moving average decay
+    ema_tau: float = 2000.0  # EMA ramp-up factor, iterations until full ema_decay is used
+    objectness_loss: Literal["bce", "focal"] = (
+        "bce"  # can be either "bce" (binary cross entropy) or "focal" (focal loss)
+    )
+    gamma: float = 2.0  # quality focal loss gamma (used when objectness_loss="focal")
+    class_loss_gain: float = 0.5  # classification / objectness loss gain
+    class_separate_loss_gain: float = 0.5  # class loss gain for separate softmax classification
+    mask_loss_gain: float = 1.0  # mask loss gain
+    box_loss_gain: float = 7.5  # box loss gain (based on complete IoU (CIoU) loss)
+    dfl_loss_gain: float = 1.5  # DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
+    dfl_reg_max: int = Field(16, ge=1)  # DFL histogram size; use 1 for direct box edge regression without DFL
+    bbox_center_offset_limit: float = Field(
+        4.0, gt=0.5
+    )  # max absolute anchor-relative center offset for center_extents bbox prediction
+    bbox_parametrization: Literal["ltrb", "center_extents"] = (
+        "ltrb"  # bbox prediction format, choices=[ltrb, center_extents]
+    )
+
+    # Validation settings
+    val: bool = True  # validate/test during training
+    confidence_threshold: float | None = (
+        0.001  # object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
+    )
+    nms_iou_threshold: float = 0.2  # intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+    nms_time_limit: float = 0.5  # maximum time in seconds per image for NMS before early exit
+    agnostic_nms: bool = False  # class-agnostic NMS
+    max_det: int = 300  # maximum number of detections per image
+    clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds during validation/prediction
+
+    # Plot settings
+    plots: bool = True  # save plots and images during train/val
+    validation_plot_projection: Literal["max", "mean"] = (
+        "max"  # projection reduction for validation plots, choices=[max, mean]
+    )
+    validation_plot_image_mode: Literal["default", "channel_difference"] = (
+        "default"  # source image for validation plots, choices=[default, channel_difference]
+    )
+    validation_plot_difference_channels: tuple[NonNegativeInt, NonNegativeInt] = (
+        2,
+        0,
+    )  # channels used for difference plots as [minuend, subtrahend]
 
     # Zoom Augmentation
     max_zoom: float = Field(1.5, ge=0)
     min_zoom: float = Field(0.7, ge=0)
     out_zoom_padding: Literal["constant", "random"] = "constant"
-    prob_zoom: float = Field(0.5, ge=0, le=1.0)
-    zoom_uniform: bool = False
-    zoom_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    prob_zoom: float = Field(0.4, ge=0, le=1.0)
+    zoom_uniform: bool = False  # if false, enable anisotropic per-axis zoom factors
+    zoom_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    # Mirroring Augmentation
+    prob_mirroring: float = Field(0.5, ge=0, le=1.0)
+    mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
+    mirroring_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    # Rotation augmentation
+    prob_rotation: float = Field(0.2, ge=0, le=1.0)
+    rotation_angle_x: tuple[float, float] = (-15.0, 15.0)
+    rotation_angle_y: tuple[float, float] = (-15.0, 15.0)
+    rotation_angle_z: tuple[float, float] = (-15.0, 15.0)
+    rotation_keep_box_volume: bool = True
+    rotation_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
     # Cutout Augmentation
-    prob_cutout: float = Field(0.5, ge=0, le=1.0)
+    prob_cutout: float = Field(0.1, ge=0, le=1.0)
+    cutout_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     cutout_params: list[tuple[float, int]] = Field(
         default_factory=lambda: [
             (0.5, 1),
             (0.25, 2),
             (0.125, 4),
         ]
-    )
-    cutout_augmentation_device: Literal["cpu", "gpu"] = "cpu"
-    prob_mirroring: float = Field(0.5, ge=0, le=1.0)
-    mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
-    mirroring_augmentation_device: Literal["cpu", "gpu"] = "cpu"
-    # Rotation
-    prob_rotation: float = Field(0.0, ge=0, le=1.0)
-    rotation_angle_x: tuple[float, float] = (-20.0, 20.0)
-    rotation_angle_y: tuple[float, float] = (-20.0, 20.0)
-    rotation_angle_z: tuple[float, float] = (-20.0, 20.0)
-    rotation_keep_box_volume: bool = True
-    rotation_augmentation_device: Literal["cpu", "gpu"] = "cpu"
-    # Channel Dropout
-    channel_dropout_probabilities: tuple[float, ...] = Field(default_factory=tuple)
-    channel_dropout_fill_value: float = 0.0
-    channel_dropout_use_mean: bool = False
-    channel_dropout_augmentation_device: Literal["cpu", "gpu"] = "cpu"
-    # Intensity augmentation
+    )  # Cutout params (size_fraction, repeats)
+
+    # Intensity augmentation parameters
     do_batchgenerators_intensity_augmentation: bool = True
     do_intensity_augmentations_per_channel: bool = False
     intensity_noise_prob: float = 0.1
     intensity_noise_variance: tuple[float, float] = (0.0, 0.1)
-    intensity_noise_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_noise_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_blur_prob: float = 0.2
     intensity_blur_sigma: tuple[float, float] = (0.5, 1.0)
-    intensity_blur_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_blur_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_mult_brightness_prob: float = 0.15
     intensity_mult_brightness_range: tuple[float, float] = (0.75, 1.25)
-    intensity_mult_brightness_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_mult_brightness_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_add_brightness_prob: float = 0.15
     intensity_add_brightness_mu: float = 0.0
     intensity_add_brightness_sigma: float = 0.4
-    intensity_add_brightness_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_add_brightness_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_contrast_prob: float = 0.15
     intensity_contrast_range: tuple[float, float] = (0.75, 1.25)
-    intensity_contrast_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_contrast_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_lowres_prob: float = 0.25
     intensity_lowres_scale: tuple[float, float] = (0.5, 1.0)
-    intensity_lowres_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_lowres_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_gamma_prob: float = 0.4
     intensity_gamma_range: tuple[float, float] = (0.7, 1.5)
     intensity_gamma_p_invert: float = 0.25
     intensity_gamma_p_retain_stats: float = 1.0
-    intensity_gamma_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    intensity_gamma_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
     # GIN augmentation
     gin_layers: int = 4
     gin_channels: int = 2
     gin_prob_kernel_size_one: float = 0.8
     gin_prob: float = 0.3
-    gin_augmentation_device: Literal["cpu", "gpu"] = "cpu"
+    gin_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    # Channel dropout augmentation (drop at most one channel)
+    channel_dropout_probabilities: tuple[float, ...] = Field(
+        default_factory=tuple
+    )  # must be empty or match channel count
+    channel_dropout_fill_value: float = 0.0  # ignored if channel_dropout_use_mean=true
+    channel_dropout_use_mean: bool = False  # if true, replace dropped channel with its mean
+    channel_dropout_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
     @model_validator(mode="after")
     def _validate_normalization(self) -> Self:

@@ -146,6 +146,13 @@ def test_apply_configured_image_augmentations_preserves_order_on_same_device(
 ) -> None:
     config = _make_config(
         tmp_path,
+        intensity_noise_augmentation_device="cpu",
+        intensity_blur_augmentation_device="cpu",
+        intensity_mult_brightness_augmentation_device="cpu",
+        intensity_add_brightness_augmentation_device="cpu",
+        intensity_contrast_augmentation_device="cpu",
+        intensity_lowres_augmentation_device="cpu",
+        intensity_gamma_augmentation_device="cpu",
         gin_augmentation_device="cpu",
         channel_dropout_augmentation_device="cpu",
         zoom_augmentation_device="gpu",
@@ -190,6 +197,13 @@ def test_apply_configured_augmentations_runs_spatial_before_image_augmentations(
 ) -> None:
     config = _make_config(
         tmp_path,
+        intensity_noise_augmentation_device="cpu",
+        intensity_blur_augmentation_device="cpu",
+        intensity_mult_brightness_augmentation_device="cpu",
+        intensity_add_brightness_augmentation_device="cpu",
+        intensity_contrast_augmentation_device="cpu",
+        intensity_lowres_augmentation_device="cpu",
+        intensity_gamma_augmentation_device="cpu",
         gin_augmentation_device="cpu",
         channel_dropout_augmentation_device="cpu",
         zoom_augmentation_device="cpu",

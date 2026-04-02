@@ -1,72 +1,26 @@
+# Data and Output Settings
+data: "D:/datasets/AMOS22/radyolo_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
+fold: 0                    # (int) fold from data splits file to use for training
+output_folder_base: "runs" # (str, optional) base folder for experiment outputs
+experiment_name: "default" # (str, optional) experiment name, results saved to 'output_folder_base/experiment_name' directory
+
+# General Settings
+device: ""                # (str) device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
+amp: True                 # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
+use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
+workers: 4                # (int) number of worker threads for data loading
+save: True                # (bool) save train checkpoints
+save_period: -1           # (int) Save checkpoint every x epochs (disabled if < 1)
+exist_ok: True            # (bool) whether to overwrite existing experiment
+resume: True              # (bool) resume training from last checkpoint
+verbose: True             # (bool) whether to print verbose output
+seed: 0                   # (int) random seed for reproducibility
+deterministic: False      # (bool) whether to enable deterministic mode
+
 # Model Parameters
 input_channels: 1 # number of input channels for model
 num_classes: 15   # number of classes to predict
 model_scale: s    # allowed values: (n, s, m, l, x)
-
-# Data and output Settings
-output_folder_base: "runs" # (str, optional) base folder for experiment outputs
-experiment_name: "default" # (str, optional) experiment name, results saved to 'output_folder_base/experiment_name' directory
-data: "D:/datasets/AMOS22/radyolo_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
-fold: 0 # (int) fold from data splits file to use for training
-
-# Train settings
-epochs: 1000 # (int) number of epochs to train for
-patience: 300 # (int) epochs to wait for no observable improvement for early stopping of training
-batch_size: 2 # (int) number of images per batch
-patch_size: {x: 96, y: 96, z: 64} # input patch size stored in x, y, z (width, height, depth) order
-normalization: {type: "none"} # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
-foreground_oversampling: 0.0 # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
-save: True # (bool) save train checkpoints
-save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
-device: "" # (str) device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
-workers: 4 # (int) number of worker threads for data loading
-exist_ok: True # (bool) whether to overwrite existing experiment
-optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
-verbose: True # (bool) whether to print verbose output
-seed: 0 # (int) random seed for reproducibility
-deterministic: False # (bool) whether to enable deterministic mode
-resume: True # (bool) resume training from last checkpoint
-amp: True # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
-use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
-
-# Val/Test settings
-val: True # (bool) validate/test during training
-confidence_threshold: # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
-nms_iou_threshold: 0.2 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
-nms_time_limit: 0.5 # (float) maximum time in seconds per image for NMS before early exit
-agnostic_nms: False # (bool) class-agnostic NMS
-max_det: 300 # (int) maximum number of detections per image
-plots: True # (bool) save plots and images during train/val
-clip_boxes_to_image: True # (bool) clip predicted 3D boxes to image bounds during validation/prediction
-validation_plot_projection: "mean" # (literal) projection reduction for validation plots, choices=[max, mean]
-validation_plot_image_mode: "default" # (literal) source image for validation plots, choices=[default, channel_difference]
-validation_plot_difference_channels: [2, 0] # (list[int]) channels used for difference plots as [minuend, subtrahend]
-
-# Hyperparameters
-initial_learning_rate: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
-final_learning_rate_ratio: 0.01 # (float) final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
-momentum: 0.937 # (float) SGD momentum/Adam beta1
-weight_decay: 0.0005 # (float) optimizer weight decay 5e-4
-warmup_epochs: 3.0 # (float) warmup epochs (fractions ok)
-warmup_momentum: 0.8 # (float) warmup initial momentum
-warmup_bias_lr: 0.1 # (float) warmup initial bias lr
-objectness_loss: "bce" # (literal) can be either "bce" (binary cross entropy) or "focal" (focal loss)
-tal_topk: 10 # (int) top-k anchors to keep per ground truth for task-aligned assignment
-tal_alpha: 0.5 # (float) cls score exponent in task-aligned assignment metric
-tal_beta: 1.0 # (float) IoU exponent in task-aligned assignment metric
-gamma: 2.0 # (float) quality focal loss gamma (used when objectness_loss="focal")
-grad_clip_max_norm: 10.0 # (float) max norm used for gradient clipping
-ema_decay: 0.9999 # (float) exponential moving average decay
-ema_tau: 2000.0 # (float) EMA ramp-up factor
-box_loss_gain: 7.5 # (float) box loss gain
-class_loss_gain: 0.5 # (float) classification / objectness loss gain
-dfl_loss_gain: 100 # (float) DFL loss gain
-dfl_reg_max: 1 # (int) DFL histogram size; use 1 for direct box edge regression without DFL
-bbox_parametrization: "center_extents" # (literal) bbox prediction format, choices=[ltrb, center_extents]; center_extents requires dfl_reg_max=1
-bbox_center_offset_limit: 4 # (float) max absolute anchor-relative center offset for center_extents bbox prediction
-mask_loss_gain: 5 # (float) mask loss gain
-class_separate_loss_gain: 0.5 # (float) class loss gain for separate softmax classification
-nominal_batch_size: 64 # (int) nominal batch size
 
 # Optional Segmentation Head
 segmentation_output: True          # (bool) add segmentation output to model
@@ -74,8 +28,56 @@ prototype_masks: 8                 # (int) number of prototype masks for segment
 higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
 
 # Detection Head Options
-separate_objectness_head: True  # (bool) if True, add a separate objectness output and use CCE loss for class logits
-include_stride4_output: False
+separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits
+include_stride4_output: False  # (bool) if True, add a detection head on stride 4 level (otherwise only on stride levels 8, 16, 32)
+
+# Hyperparameters
+epochs: 1000                      # (int) number of epochs to train for
+patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training
+patch_size: {x: 96, y: 96, z: 64} # input patch size stored in x, y, z (width, height, depth) order
+normalization: {type: "none"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
+foreground_oversampling: 0.0      # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
+batch_size: 2                     # (int) number of images per batch
+nominal_batch_size: 64            # (int) nominal batch size (i.e. samples for gradient accumulation)
+optimizer: Adam                   # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
+initial_learning_rate: 0.01       # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
+final_learning_rate_ratio: 0.01   # (float) final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
+momentum: 0.937                   # (float) SGD momentum/Adam beta1
+weight_decay: 0.0005              # (float) optimizer weight decay 5e-4
+warmup_epochs: 3.0                # (float) warmup epochs
+warmup_momentum: 0.8              # (float) warmup initial momentum
+warmup_bias_lr: 0.1               # (float) warmup initial bias learning rate
+grad_clip_max_norm: 10.0          # (float) max norm used for gradient clipping
+tal_topk: 10                      # (int) top-k anchors to keep per ground truth for task-aligned assignment
+tal_alpha: 0.5                    # (float) class score exponent in task-aligned assignment metric
+tal_beta: 1.0                     # (float) IoU exponent in task-aligned assignment metric
+ema_decay: 0.9999                 # (float) exponential moving average decay
+ema_tau: 2000.0                   # (float) EMA ramp-up factor, iterations until full ema_decay is used
+objectness_loss: "bce"            # (literal) can be either "bce" (binary cross entropy) or "focal" (focal loss)
+gamma: 2.0                        # (float) quality focal loss gamma (used when objectness_loss="focal")
+class_loss_gain: 0.5              # (float) classification / objectness loss gain
+class_separate_loss_gain: 0.5     # (float) class loss gain for separate softmax classification
+mask_loss_gain: 5                 # (float) mask loss gain
+box_loss_gain: 7.5                # (float) box loss gain (based on complete IoU (CIoU) loss)
+dfl_loss_gain: 100                # (float) DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
+dfl_reg_max: 1                    # (int) DFL histogram size; use 1 for direct box edge regression without DFL
+bbox_center_offset_limit: 4       # (float) max absolute anchor-relative center offset for center_extents bbox prediction
+bbox_parametrization: "center_extents" # (literal) bbox prediction format, choices=[ltrb, center_extents]; center_extents requires dfl_reg_max=1
+
+# Validation Settings
+val: True                 # (bool) validate/test during training
+confidence_threshold:     # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
+nms_iou_threshold: 0.2    # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+nms_time_limit: 0.5       # (float) maximum time in seconds per image for NMS before early exit
+agnostic_nms: False       # (bool) class-agnostic NMS
+max_det: 300              # (int) maximum number of detections per image
+clip_boxes_to_image: True # (bool) clip predicted 3D boxes to image bounds during validation/prediction
+
+# Plot Settings
+plots: True                                 # (bool) save plots and images during train/val
+validation_plot_projection: "mean"          # (literal) projection reduction for validation plots, choices=[max, mean]
+validation_plot_image_mode: "default"       # (literal) source image for validation plots, choices=[default, channel_difference]
+validation_plot_difference_channels: [2, 0] # (list[int]) channels used for difference plots as [minuend, subtrahend]
 
 # Zoom Augmentation
 max_zoom: 1.4
@@ -106,7 +108,7 @@ cutout_params:   # Cutout params (size_fraction, repeats)
 - [0.25, 2]
 - [0.125, 4]
 
-# Intensity augmentation parameters
+# Intensity Augmentation Parameters
 do_batchgenerators_intensity_augmentation: True
 do_intensity_augmentations_per_channel: False
 intensity_noise_prob: 0.1
@@ -134,14 +136,14 @@ intensity_gamma_p_invert: 0.25
 intensity_gamma_p_retain_stats: 1.0
 intensity_gamma_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
-# GIN augmentation
+# GIN Augmentation
 gin_layers: 4
 gin_channels: 2
 gin_prob_kernel_size_one: 0.8
 gin_prob: 0.3
 gin_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
-# Channel dropout augmentation (drop at most one channel)
+# Channel Dropout Augmentation (drop at most one channel)
 channel_dropout_probabilities: []      # e.g. [0.6,0.3,0.1] must be empty or match channel count
 channel_dropout_fill_value: 0.0        # ignored if channel_dropout_use_mean=true
 channel_dropout_use_mean: false         # if true, replace dropped channel with its mean
