@@ -49,7 +49,6 @@ class DatasetFingerprint:
     # Box stats per class
     boxes_per_class: dict[str, int]
     box_size_median_vox: dict[str, VoxelSize]
-    box_size_p10_vox: dict[str, VoxelSize]
     # Masks
     n_masks_available: int
 
@@ -63,9 +62,6 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "boxes_per_class": fingerprint.boxes_per_class,
         "box_size_median_vox": {
             cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_vox.items()
-        },
-        "box_size_p10_vox": {
-            cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_p10_vox.items()
         },
         "n_masks_available": fingerprint.n_masks_available,
     }
@@ -513,24 +509,17 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         for cls, lst in label_stats.sizes_by_class_vox.items():
             all_sizes_by_class.setdefault(cls, []).extend(lst)
 
-    # Compute medians and 10th percentiles per class per axis
+    # Compute medians per class per axis
     box_size_median_vox: dict[str, VoxelSize] = {}
-    box_size_p10_vox: dict[str, VoxelSize] = {}
     for cls, lst in all_sizes_by_class.items():
         arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)  # (M,3) x,y,z in vox
         if arr.size == 0:
             continue
         median = np.median(arr, axis=0)
-        p10 = np.percentile(arr, 10, axis=0)
         box_size_median_vox[cls] = VoxelSize(
             x=float(median[0]),
             y=float(median[1]),
             z=float(median[2]),
-        )
-        box_size_p10_vox[cls] = VoxelSize(
-            x=float(p10[0]),
-            y=float(p10[1]),
-            z=float(p10[2]),
         )
 
     finger_print = DatasetFingerprint(
@@ -540,7 +529,6 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         median_resampled_imagesize=median_resampled_imagesize,
         boxes_per_class=total_by_class,
         box_size_median_vox=box_size_median_vox,
-        box_size_p10_vox=box_size_p10_vox,
         n_masks_available=n_masks,
     )
 

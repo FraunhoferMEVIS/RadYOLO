@@ -121,4 +121,4 @@ def test_analyze_dataset_writes_resampled_summary_and_box_sizes(tmp_path: Path) 
     assert fingerprint["median_voxel_size_mm"] == [0.75, 0.75, 0.75]
     assert fingerprint["median_resampled_imagesize"] == [13, 27, 40]
     assert fingerprint["box_size_median_vox"] == {"0": [6.5, 13.5, 20.0]}
-    assert fingerprint["box_size_p10_vox"] == {"0": [6.5, 13.5, 20.0]}
+    assert "box_size_p10_vox" not in fingerprint
