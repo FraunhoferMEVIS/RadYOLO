@@ -49,6 +49,7 @@ class DatasetFingerprint:
     # Box stats per class
     boxes_per_class: dict[str, int]
     box_size_median_vox: dict[str, VoxelSize]
+    box_size_p95_vox: VoxelSize | None
     # Masks
     n_masks_available: int
 
@@ -63,6 +64,11 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "box_size_median_vox": {
             cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_vox.items()
         },
+        "box_size_p95_vox": (
+            list(fingerprint.box_size_p95_vox.get_xyz())
+            if fingerprint.box_size_p95_vox is not None
+            else None
+        ),
         "n_masks_available": fingerprint.n_masks_available,
     }
 
@@ -509,17 +515,28 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         for cls, lst in label_stats.sizes_by_class_vox.items():
             all_sizes_by_class.setdefault(cls, []).extend(lst)
 
-    # Compute medians per class per axis
+    # Compute medians per class per axis and the global p90 across all objects.
     box_size_median_vox: dict[str, VoxelSize] = {}
+    all_box_sizes: list[tuple[float, float, float]] = []
     for cls, lst in all_sizes_by_class.items():
         arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)  # (M,3) x,y,z in vox
         if arr.size == 0:
             continue
+        all_box_sizes.extend([tuple(size.get_xyz()) for size in lst])
         median = np.median(arr, axis=0)
         box_size_median_vox[cls] = VoxelSize(
             x=float(median[0]),
             y=float(median[1]),
             z=float(median[2]),
+        )
+
+    box_size_p95_vox: VoxelSize | None = None
+    if all_box_sizes:
+        p95 = np.percentile(np.array(all_box_sizes, dtype=np.float64), 95, axis=0)
+        box_size_p95_vox = VoxelSize(
+            x=float(p95[0]),
+            y=float(p95[1]),
+            z=float(p95[2]),
         )
 
     finger_print = DatasetFingerprint(
@@ -529,6 +546,7 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         median_resampled_imagesize=median_resampled_imagesize,
         boxes_per_class=total_by_class,
         box_size_median_vox=box_size_median_vox,
+        box_size_p95_vox=box_size_p95_vox,
         n_masks_available=n_masks,
     )
 

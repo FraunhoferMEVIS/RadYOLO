@@ -121,4 +121,37 @@ def test_analyze_dataset_writes_resampled_summary_and_box_sizes(tmp_path: Path) 
     assert fingerprint["median_voxel_size_mm"] == [0.75, 0.75, 0.75]
     assert fingerprint["median_resampled_imagesize"] == [13, 27, 40]
     assert fingerprint["box_size_median_vox"] == {"0": [6.5, 13.5, 20.0]}
+    assert fingerprint["box_size_p90_vox"] == [6.5, 13.5, 20.0]
     assert "box_size_p10_vox" not in fingerprint
+
+
+def test_analyze_dataset_box_size_p90_uses_all_objects_from_all_classes(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset"
+    images_dir = dataset_path / "images"
+    labels_dir = dataset_path / "labels"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir()
+
+    image = np.ones((100, 100, 100), dtype=np.float32)
+    _write_nifti(images_dir / "case1.nii.gz", image, np.diag((1.0, 1.0, 1.0, 1.0)))
+    _write_nifti(images_dir / "case2.nii.gz", image, np.diag((1.0, 1.0, 1.0, 1.0)))
+
+    (labels_dir / "case1.txt").write_text(
+        "0 0.5 0.5 0.5 0.1 0.2 0.3\n"
+        "1 0.5 0.5 0.5 0.4 0.5 0.6\n",
+        encoding="utf-8",
+    )
+    (labels_dir / "case2.txt").write_text(
+        "2 0.5 0.5 0.5 0.7 0.8 0.9\n",
+        encoding="utf-8",
+    )
+
+    fingerprint_path = analyze_dataset(dataset_path, workers=1)
+    fingerprint = json.loads(fingerprint_path.read_text(encoding="utf-8"))
+
+    assert fingerprint["box_size_median_vox"] == {
+        "0": [10.0, 20.0, 30.0],
+        "1": [40.0, 50.0, 60.0],
+        "2": [70.0, 80.0, 90.0],
+    }
+    assert fingerprint["box_size_p90_vox"] == [64.0, 74.0, 84.0]
