@@ -86,7 +86,7 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"data: {synthetic_dataset.as_posix()}\n"
             f"fold: 0\n"
             f"epochs: 2\n"
-            f"nbs: 1\n"
+            f"nominal_batch_size: 1\n"
             f"warmup_epochs: 0.5\n"
             f"patience: 1\n"
             f"batch_size: 1\n"
@@ -243,8 +243,8 @@ def run_prediction_dir(model_path: Path, input_dir: Path, output_dir: Path) -> P
             model_path=model_path,
             input_dir=input_dir,
             output_dir=output_dir,
-            conf=0.1,
-            iou=0.2,
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
             device="cpu",
             clip_boxes_to_image=True,
         )

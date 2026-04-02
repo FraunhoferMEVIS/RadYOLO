@@ -62,9 +62,9 @@ class Validator:
             "target_img": [],
         }
         self.nc: int = len(self.names)
-        if self.config.conf is None:
-            self.config.conf = 0.001
-        self.confusion_matrix: ConfusionMatrix = ConfusionMatrix(self.nc, self.config.conf)
+        if self.config.confidence_threshold is None:
+            self.config.confidence_threshold = 0.001
+        self.confusion_matrix = ConfusionMatrix(self.nc, self.config.confidence_threshold)
         self.predictions_for_saving: dict[str, list[dict[str, Any]]] = {}
         self.save_predictions = save_predictions
 
@@ -166,7 +166,10 @@ class Validator:
     def init_metrics(self) -> None:
         """Initialize evaluation metrics for YOLO."""
         self.metrics.names = self.names
-        self.confusion_matrix = ConfusionMatrix(nc=self.nc, conf=self.config.conf)
+        self.confusion_matrix = ConfusionMatrix(
+            nc=self.nc,
+            conf=self.config.confidence_threshold,
+        )
         self.seen = 0
         self.predictions_for_saving = {}
         self.stats = {
@@ -211,8 +214,8 @@ class Validator:
         model_output: ModelOutput,
     ) -> list[torch.Tensor]:
         postprocess_config = DetectionPostprocessConfig(
-            conf=self.config.conf,
-            iou=self.config.iou,
+            confidence_threshold=self.config.confidence_threshold,
+            nms_iou_threshold=self.config.nms_iou_threshold,
             agnostic_nms=self.config.agnostic_nms,
             max_det=self.config.max_det,
             nms_time_limit=self.config.nms_time_limit,

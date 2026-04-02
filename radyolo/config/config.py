@@ -10,7 +10,6 @@ import torch
 import yaml
 from pydantic import (
     BaseModel,
-    DirectoryPath,
     Field,
     FilePath,
     NonNegativeInt,
@@ -27,8 +26,8 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class DetectionPostprocessConfig:
-    conf: float
-    iou: float
+    confidence_threshold: float
+    nms_iou_threshold: float
     agnostic_nms: bool
     max_det: int
     nms_time_limit: float | None
@@ -83,7 +82,7 @@ class DefaultConfig(BaseModel):
     normalization: dict | list[dict] = {"type": "none"}
     save: bool = True  # save train checkpoints
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
-    device: str = ""  # device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
+    device: str = ""  # device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
     workers: int = 6  # number of worker threads for data loading (per RANK if DDP)
     output_folder_base: str = ""  # base output folder for experiment directories
     experiment_name: int | str  # experiment name, results saved to 'output_folder_base/experiment_name'
@@ -102,11 +101,13 @@ class DefaultConfig(BaseModel):
 
     # Val/Test Settings
     val: bool = True  # validate/test during training
-    conf: float | None = 0.001  # object confidence threshold for detection during validation
-    iou: float = 0.2  # intersection over union (IoU) threshold for NMS
+    confidence_threshold: float | None = (
+        0.001  # object confidence threshold for detection during validation
+    )
+    nms_iou_threshold: float = 0.2  # intersection over union (IoU) threshold for NMS
     nms_time_limit: float = 0.5  # time limit per image in seconds before NMS stops processing
+    agnostic_nms: bool = False  # class-agnostic NMS
     max_det: int = 300  # maximum number of detections per image
-    half: bool = False  # use half precision (FP16)
     plots: bool = True  # save plots and images during train/val
     clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds in val/predict
     validation_plot_projection: Literal["max", "mean"] = (
@@ -120,14 +121,9 @@ class DefaultConfig(BaseModel):
         0,
     )  # channels used for validation difference plots as (minuend, subtrahend)
 
-    # Predict Settings
-    source: DirectoryPath | None = None  # source directory for images or videos
-    augment: bool = False  # apply image augmentation to prediction sources
-    agnostic_nms: bool = False  # class-agnostic NMS
-
     # Hyperparameters
-    lr0: float = 0.01  # initial learning rate
-    lrf: float = 0.01  # final learning rate (lr0*lrf)
+    initial_learning_rate: float = 0.01  # initial learning rate
+    final_learning_rate_ratio: float = 0.01  # final learning rate ratio
     momentum: float = 0.937  # SGD momentum/Adam beta1
     weight_decay: float = 5e-4  # optimizer weight decay 5e-4
     warmup_epochs: float = 3.0  # warmup epochs (fractions ok)
@@ -141,9 +137,9 @@ class DefaultConfig(BaseModel):
     grad_clip_max_norm: float = 10.0  # max norm for gradient clipping
     ema_decay: float = 0.9999  # exponential moving average decay
     ema_tau: float = 2000.0  # EMA ramp-up factor
-    box: float = 7.5  # box loss gain
-    cls: float = 0.5  # cls loss gain (scale with pixels)
-    dfl: float = 1.5  # dfl loss gain
+    box_loss_gain: float = 7.5  # box loss gain
+    class_loss_gain: float = 0.5  # classification / objectness loss gain
+    dfl_loss_gain: float = 1.5  # DFL loss gain
     dfl_reg_max: int = Field(16, ge=1)  # use direct edge regression when set to 1
     bbox_parametrization: Literal["ltrb", "center_extents"] = (
         "ltrb"  # bbox prediction format for the detection head
@@ -151,9 +147,9 @@ class DefaultConfig(BaseModel):
     bbox_center_offset_limit: float = Field(
         4.0, gt=0.5
     )  # max absolute anchor-relative center offset for center_extents bbox prediction
-    mask_gain: float = 1.0  # mask loss gain
-    class_separate_gain: float = 0.5  # class loss gain for separate softmax classification loss
-    nbs: int = 64  # nominal batch size
+    mask_loss_gain: float = 1.0  # mask loss gain
+    class_separate_loss_gain: float = 0.5  # class loss gain for separate softmax classification loss
+    nominal_batch_size: int = 64  # nominal batch size
 
     # Optional Segmentation Head
     segmentation_output: bool = True  # add segmentation output to model
@@ -232,8 +228,6 @@ class DefaultConfig(BaseModel):
     gin_prob: float = 0.3
     gin_augmentation_device: Literal["cpu", "gpu"] = "cpu"
 
-    save_dir: Path | None = None
-
     @model_validator(mode="after")
     def _validate_normalization(self) -> Self:
         normalization = self.normalization
@@ -248,6 +242,14 @@ class DefaultConfig(BaseModel):
         else:
             msg = "normalization must be a dict or a list of dicts"
             raise TypeError(msg)
+        if not self.channel_dropout_probabilities:
+            self.channel_dropout_probabilities = (0.0,) * self.input_channels
+        elif len(self.channel_dropout_probabilities) != self.input_channels:
+            msg = (
+                "channel_dropout_probabilities length must match input_channels, got "
+                f"{len(self.channel_dropout_probabilities)} and {self.input_channels}"
+            )
+            raise ValueError(msg)
         if self.bbox_parametrization == "center_extents" and self.dfl_reg_max > 1:
             msg = "bbox_parametrization='center_extents' requires dfl_reg_max=1"
             raise ValueError(msg)
@@ -363,16 +365,7 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
     with Path(config_path).open() as f:
         yaml_config = yaml.safe_load(f)
     if overrides:
-        if "save_dir" not in yaml_config:
-            overrides.pop("save_dir", None)
         yaml_config = {**yaml_config, **overrides}
-
-    if yaml_config.get("experiment_name") == "model":
-        yaml_config["experiment_name"] = yaml_config.get("model", "").split(".")[0]
-        LOGGER.warning(
-            "'experiment_name=model' automatically updated to 'experiment_name=%s'.",
-            yaml_config["experiment_name"],
-        )
 
     return DefaultConfig.model_validate(yaml_config)
 

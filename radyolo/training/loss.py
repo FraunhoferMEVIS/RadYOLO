@@ -176,8 +176,8 @@ class v8DetectionLoss:  # noqa: N801
         dfl: float,
         dfl_reg_max: int,
         bbox_center_offset_limit: float,
-        mask_gain: float,
-        class_separate_gain: float,
+        mask_loss_gain: float,
+        class_separate_loss_gain: float,
         detect_layer: Detect,
         device: torch.device,
         include_stride4_output: bool,
@@ -200,9 +200,9 @@ class v8DetectionLoss:  # noqa: N801
         self.ce = nn.CrossEntropyLoss(reduction="none")
         self.box_gain = box
         self.classification_gain = cls
-        self.class_separate_gain = class_separate_gain
+        self.class_separate_loss_gain = class_separate_loss_gain
         self.dfl_gain = dfl
-        self.mask_gain = mask_gain
+        self.mask_loss_gain = mask_loss_gain
         self.stride: torch.Tensor = m.stride  # model strides
         self.num_classes: int = m.nc  # number of classes
         self.separate_objectness_head: bool = separate_objectness_head
@@ -440,8 +440,8 @@ class v8DetectionLoss:  # noqa: N801
         loss[0] *= self.box_gain
         loss[1] *= self.classification_gain
         loss[2] *= self.dfl_gain
-        loss[3] *= self.mask_gain
-        loss[4] *= self.class_separate_gain
+        loss[3] *= self.mask_loss_gain
+        loss[4] *= self.class_separate_loss_gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask)
 
@@ -452,13 +452,13 @@ def build_detection_loss_from_config(
     device: torch.device,
 ) -> v8DetectionLoss:
     return v8DetectionLoss(
-        box=train_config.box,
-        cls=train_config.cls,
-        dfl=train_config.dfl,
+        box=train_config.box_loss_gain,
+        cls=train_config.class_loss_gain,
+        dfl=train_config.dfl_loss_gain,
         dfl_reg_max=train_config.dfl_reg_max,
         bbox_center_offset_limit=train_config.bbox_center_offset_limit,
-        mask_gain=train_config.mask_gain,
-        class_separate_gain=train_config.class_separate_gain,
+        mask_loss_gain=train_config.mask_loss_gain,
+        class_separate_loss_gain=train_config.class_separate_loss_gain,
         detect_layer=model.l23,
         device=device,
         include_stride4_output=model.include_stride4_output,

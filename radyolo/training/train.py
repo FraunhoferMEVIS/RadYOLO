@@ -165,7 +165,10 @@ class Trainer:
         self, optimizer: torch.optim.Optimizer
     ) -> tuple[torch.optim.lr_scheduler.LRScheduler, Callable[[int], float]]:
         def lf(x: int) -> float:
-            return max(1 - x / self.epochs, 0) * (1.0 - self.config.lrf) + self.config.lrf
+            return (
+                max(1 - x / self.epochs, 0) * (1.0 - self.config.final_learning_rate_ratio)
+                + self.config.final_learning_rate_ratio
+            )
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lf)
         return scheduler, lf
@@ -225,14 +228,17 @@ class Trainer:
         ema = ModelEMA(model, decay=self.config.ema_decay, tau=self.config.ema_tau)
 
         # Optimizer
-        accumulate = max(round(self.config.nbs / self.config.batch_size), 1)
+        accumulate = max(round(self.config.nominal_batch_size / self.config.batch_size), 1)
         weight_decay = (
-            self.config.weight_decay * self.config.batch_size * accumulate / self.config.nbs
+            self.config.weight_decay
+            * self.config.batch_size
+            * accumulate
+            / self.config.nominal_batch_size
         )
         optimizer = self.build_optimizer(
             model=model,
             name=self.config.optimizer,
-            lr=self.config.lr0,
+            lr=self.config.initial_learning_rate,
             momentum=self.config.momentum,
             decay=weight_decay,
         )
@@ -343,9 +349,7 @@ class Trainer:
                 else nullcontext()
             ):
                 for i, batch in pbar:
-                    run_gpu_augmentations = (
-                        self.config.augment and self.config.uses_gpu_augmentations()
-                    )
+                    run_gpu_augmentations = self.config.uses_gpu_augmentations()
                     # Warmup
                     num_iterations = i + num_batches * self.epoch
                     if num_iterations <= num_warmup_iterations:
@@ -356,7 +360,7 @@ class Trainer:
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [2, self.config.nbs / self.config.batch_size],
+                                    [2, self.config.nominal_batch_size / self.config.batch_size],
                                 ).round()
                             ),
                         )
@@ -596,7 +600,7 @@ class Trainer:
             fold=fold,
             group=mode,
             patch_size=self.config.patch_size,
-            augment=self.config.augment and mode == "train",
+            augment=mode == "train",
             min_stride=get_model_min_stride(model),
             pad=0.0 if mode == "train" else 0.5,
             normalization=self.config.normalization,

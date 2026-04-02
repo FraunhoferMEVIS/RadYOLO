@@ -55,8 +55,8 @@ def postprocess_model_output(
 ) -> list[torch.Tensor]:
     return non_max_suppression(
         model_output,
-        postprocess_config.conf,
-        postprocess_config.iou,
+        postprocess_config.confidence_threshold,
+        postprocess_config.nms_iou_threshold,
         labels=list(labels or []),
         multi_label=postprocess_config.multi_label,
         agnostic=postprocess_config.agnostic_nms,

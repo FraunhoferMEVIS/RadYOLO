@@ -33,8 +33,8 @@ class PredictionConfig:
     model_path: Path
     input_dir: Path
     output_dir: Path
-    conf: float
-    iou: float
+    confidence_threshold: float
+    nms_iou_threshold: float
     device: str
     clip_boxes_to_image: bool
 
@@ -65,8 +65,8 @@ def _postprocess_single(
     detections = ops.postprocess_model_output(
         model_output,
         DetectionPostprocessConfig(
-            conf=prediction_config.conf,
-            iou=prediction_config.iou,
+            confidence_threshold=prediction_config.confidence_threshold,
+            nms_iou_threshold=prediction_config.nms_iou_threshold,
             agnostic_nms=train_config.agnostic_nms,
             max_det=train_config.max_det,
             nms_time_limit=train_config.nms_time_limit,

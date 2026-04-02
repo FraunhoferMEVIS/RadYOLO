@@ -195,12 +195,12 @@ search_space:
     type: choice
     values: [AdamW, SGD]
 
-  lr0:
+  initial_learning_rate:
     type: loguniform
     lower: 1.0e-4
     upper: 1.0e-1
 
-  lrf:
+  final_learning_rate_ratio:
     type: loguniform
     lower: 1.0e-3
     upper: 5.0e-1
@@ -272,7 +272,7 @@ search_space:
     lower: 200.0
     upper: 6000.0
 
-  box:
+  box_loss_gain:
     type: uniform
     lower: 3.0
     upper: 12.0
@@ -282,22 +282,22 @@ search_space:
     lower: 0.2
     upper: 3.0
 
-  cls:
+  class_loss_gain:
     type: uniform
     lower: 0.1
     upper: 1.5
 
-  mask_gain:
+  mask_loss_gain:
     type: uniform
     lower: 0.2
     upper: 8.0
 
-  class_separate_gain:
+  class_separate_loss_gain:
     type: uniform
     lower: 0.1
     upper: 2.0
 
-  nbs:
+  nominal_batch_size:
     type: qrandint
     lower: 4
     upper: 72

@@ -730,8 +730,8 @@ def predict(
                 model_path=model_path,
                 input_dir=input_dir,
                 output_dir=output_dir,
-                conf=conf,
-                iou=iou,
+                confidence_threshold=conf,
+                nms_iou_threshold=iou,
                 device=device,
                 clip_boxes_to_image=clip_boxes_to_image,
             )

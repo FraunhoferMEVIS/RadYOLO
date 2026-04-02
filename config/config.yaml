@@ -18,7 +18,7 @@ normalization: {type: "none"} # Normalization for image intensities. Can be {typ
 foreground_oversampling: 0.0 # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 save: True # (bool) save train checkpoints
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
-# device: "cpu" # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
+device: "" # (str) device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
 workers: 4 # (int) number of worker threads for data loading
 exist_ok: True # (bool) whether to overwrite existing experiment
 optimizer: Adam # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
@@ -31,25 +31,20 @@ use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True whi
 
 # Val/Test settings
 val: True # (bool) validate/test during training
-conf: # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
-iou: 0.2 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+confidence_threshold: # (float, optional) object confidence threshold for detection (defaults: 0.1 plotting, 0.001 validation)
+nms_iou_threshold: 0.2 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
 nms_time_limit: 0.5 # (float) maximum time in seconds per image for NMS before early exit
+agnostic_nms: False # (bool) class-agnostic NMS
 max_det: 300 # (int) maximum number of detections per image
-half: False # (bool) use half precision (FP16)
 plots: True # (bool) save plots and images during train/val
 clip_boxes_to_image: True # (bool) clip predicted 3D boxes to image bounds during validation/prediction
 validation_plot_projection: "mean" # (literal) projection reduction for validation plots, choices=[max, mean]
 validation_plot_image_mode: "default" # (literal) source image for validation plots, choices=[default, channel_difference]
 validation_plot_difference_channels: [2, 0] # (list[int]) channels used for difference plots as [minuend, subtrahend]
 
-# Predict settings
-source: # (str, optional) source directory for images or videos
-augment: True # (bool) apply image augmentation to prediction sources
-agnostic_nms: False # (bool) class-agnostic NMS
-
 # Hyperparameters
-lr0: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
-lrf: 0.01 # (float) final learning rate (lr0 * lrf)
+initial_learning_rate: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
+final_learning_rate_ratio: 0.01 # (float) final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
 momentum: 0.937 # (float) SGD momentum/Adam beta1
 weight_decay: 0.0005 # (float) optimizer weight decay 5e-4
 warmup_epochs: 3.0 # (float) warmup epochs (fractions ok)
@@ -63,15 +58,15 @@ gamma: 2.0 # (float) quality focal loss gamma (used when objectness_loss="focal"
 grad_clip_max_norm: 10.0 # (float) max norm used for gradient clipping
 ema_decay: 0.9999 # (float) exponential moving average decay
 ema_tau: 2000.0 # (float) EMA ramp-up factor
-box: 7.5 # (float) box loss gain
-cls: 0.5 # (float) cls loss gain (scale with pixels)
-dfl: 100 # (float) dfl loss gain
+box_loss_gain: 7.5 # (float) box loss gain
+class_loss_gain: 0.5 # (float) classification / objectness loss gain
+dfl_loss_gain: 100 # (float) DFL loss gain
 dfl_reg_max: 1 # (int) DFL histogram size; use 1 for direct box edge regression without DFL
 bbox_parametrization: "center_extents" # (literal) bbox prediction format, choices=[ltrb, center_extents]; center_extents requires dfl_reg_max=1
 bbox_center_offset_limit: 4 # (float) max absolute anchor-relative center offset for center_extents bbox prediction
-mask_gain: 5 # (float) mask loss gain
-class_separate_gain: 0.5 # (float) class loss gain for separate softmax classification
-nbs: 64 # (int) nominal batch size
+mask_loss_gain: 5 # (float) mask loss gain
+class_separate_loss_gain: 0.5 # (float) class loss gain for separate softmax classification
+nominal_batch_size: 64 # (int) nominal batch size
 
 # Optional Segmentation Head
 segmentation_output: True          # (bool) add segmentation output to model
@@ -147,7 +142,7 @@ gin_prob: 0.3
 gin_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
 # Channel dropout augmentation (drop at most one channel)
-channel_dropout_probabilities: [0.0,]  # e.g. [0.6,0.3,0.1] must match channel count
+channel_dropout_probabilities: []      # e.g. [0.6,0.3,0.1] must be empty or match channel count
 channel_dropout_fill_value: 0.0        # ignored if channel_dropout_use_mean=true
 channel_dropout_use_mean: false         # if true, replace dropped channel with its mean
 channel_dropout_augmentation_device: "gpu"  # set to "cpu" or "gpu"
