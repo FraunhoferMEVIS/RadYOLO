@@ -45,7 +45,11 @@ class DatasetFingerprint:
     foreground_channel_stats: list[dict[str, float]]
     median_image_size: PatchSize
     median_voxel_size_mm: VoxelSize
+    voxel_size_p10_mm: VoxelSize
+    voxel_size_p90_mm: VoxelSize
     median_resampled_imagesize: PatchSize
+    resampled_imagesize_p10_vox: PatchSize
+    resampled_imagesize_p90_vox: PatchSize
     # Box stats per class
     boxes_per_class: dict[str, int]
     box_size_median_vox: dict[str, VoxelSize]
@@ -59,7 +63,11 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "foreground_channel_stats": fingerprint.foreground_channel_stats,
         "median_image_size": list(fingerprint.median_image_size.get_xyz()),
         "median_voxel_size_mm": list(fingerprint.median_voxel_size_mm.get_xyz()),
+        "voxel_size_p10_mm": list(fingerprint.voxel_size_p10_mm.get_xyz()),
+        "voxel_size_p90_mm": list(fingerprint.voxel_size_p90_mm.get_xyz()),
         "median_resampled_imagesize": list(fingerprint.median_resampled_imagesize.get_xyz()),
+        "resampled_imagesize_p10_vox": list(fingerprint.resampled_imagesize_p10_vox.get_xyz()),
+        "resampled_imagesize_p90_vox": list(fingerprint.resampled_imagesize_p90_vox.get_xyz()),
         "boxes_per_class": fingerprint.boxes_per_class,
         "box_size_median_vox": {
             cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_vox.items()
@@ -313,6 +321,14 @@ def _resolve_resampled_image_size(
     )
 
 
+def _patch_size_from_percentile(values_xyz: np.ndarray, percentile: float) -> PatchSize:
+    return PatchSize.from_xyz(np.percentile(values_xyz, percentile, axis=0).astype(int).tolist())
+
+
+def _voxel_size_from_percentile(values_xyz: np.ndarray, percentile: float) -> VoxelSize:
+    return VoxelSize.from_xyz(np.percentile(values_xyz, percentile, axis=0).astype(float).tolist())
+
+
 def _iter_cases(dataset_path: Path) -> Iterable[tuple[str, Path]]:
     images_dir = dataset_path / "images"
     if not images_dir.exists():
@@ -477,6 +493,8 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
     )  # (N,3)
     median_image_size = PatchSize.from_xyz(np.median(images_sizes, axis=0).astype(int).tolist())
     median_voxel_size = VoxelSize.from_xyz(np.median(voxel_sizes, axis=0).astype(float).tolist())
+    voxel_size_p10 = _voxel_size_from_percentile(voxel_sizes, 10)
+    voxel_size_p90 = _voxel_size_from_percentile(voxel_sizes, 90)
 
     resampled_image_sizes = np.array(
         [
@@ -489,9 +507,9 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         ],
         dtype=np.int64,
     )
-    median_resampled_imagesize = PatchSize.from_xyz(
-        np.median(resampled_image_sizes, axis=0).astype(int).tolist()
-    )
+    median_resampled_imagesize = PatchSize.from_xyz(np.median(resampled_image_sizes, axis=0).astype(int).tolist())
+    resampled_imagesize_p10 = _patch_size_from_percentile(resampled_image_sizes, 10)
+    resampled_imagesize_p90 = _patch_size_from_percentile(resampled_image_sizes, 90)
 
     label_stats_results: list[LabelStats] = []
     for label_path, image_size, voxel_size in label_stats_inputs:
@@ -543,7 +561,11 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         foreground_channel_stats=foreground_channel_stats,
         median_image_size=median_image_size,
         median_voxel_size_mm=median_voxel_size,
+        voxel_size_p10_mm=voxel_size_p10,
+        voxel_size_p90_mm=voxel_size_p90,
         median_resampled_imagesize=median_resampled_imagesize,
+        resampled_imagesize_p10_vox=resampled_imagesize_p10,
+        resampled_imagesize_p90_vox=resampled_imagesize_p90,
         boxes_per_class=total_by_class,
         box_size_median_vox=box_size_median_vox,
         box_size_p95_vox=box_size_p95_vox,

@@ -119,9 +119,13 @@ def test_analyze_dataset_writes_resampled_summary_and_box_sizes(tmp_path: Path) 
     fingerprint = json.loads(fingerprint_path.read_text(encoding="utf-8"))
 
     assert fingerprint["median_voxel_size_mm"] == [0.75, 0.75, 0.75]
+    assert fingerprint["voxel_size_p10_mm"] == [0.55, 0.55, 0.55]
+    assert fingerprint["voxel_size_p90_mm"] == [0.95, 0.95, 0.95]
     assert fingerprint["median_resampled_imagesize"] == [13, 27, 40]
+    assert fingerprint["resampled_imagesize_p10_vox"] == [13, 27, 40]
+    assert fingerprint["resampled_imagesize_p90_vox"] == [13, 27, 40]
     assert fingerprint["box_size_median_vox"] == {"0": [6.5, 13.5, 20.0]}
-    assert fingerprint["box_size_p90_vox"] == [6.5, 13.5, 20.0]
+    assert fingerprint["box_size_p95_vox"] == [6.5, 13.5, 20.0]
     assert "box_size_p10_vox" not in fingerprint
 
 
@@ -154,4 +158,4 @@ def test_analyze_dataset_box_size_p90_uses_all_objects_from_all_classes(tmp_path
         "1": [40.0, 50.0, 60.0],
         "2": [70.0, 80.0, 90.0],
     }
-    assert fingerprint["box_size_p90_vox"] == [64.0, 74.0, 84.0]
+    assert fingerprint["box_size_p95_vox"] == [67.0, 77.0, 87.0]
