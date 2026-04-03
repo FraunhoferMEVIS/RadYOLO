@@ -111,6 +111,8 @@ class Trainer:
         file_handler.addFilter(YoloFilter())
         logging.root.addHandler(file_handler)
         LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
+        LOGGER.info("Input config path: %s", self.config_path.resolve())
+        LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
 
         # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
         self.ewa_mAP1095 = None
