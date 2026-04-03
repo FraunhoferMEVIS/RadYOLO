@@ -123,7 +123,6 @@ def _foreground_channel_stats_and_samples(
 
 def _load_nifti(path: Path) -> tuple[np.ndarray, VoxelSize]:
     """Load a NIfTI image and return its array data with spatial voxel size."""
-
     img = nib.loadsave.load(str(path))
     if not isinstance(img, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI at {path}"
@@ -180,7 +179,6 @@ def _labels_to_mask(
 
 def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) -> ImageStats:
     """Compute per-channel foreground statistics for a single image."""
-
     num_only_spatial_dims = 3
     num_spatial_and_channel_dims = 4
     heuristic_max_channel_number = 8
@@ -227,7 +225,6 @@ def _parse_label_line(
     line: str,
 ) -> tuple[int, float, float, float, float, float, float]:
     """Parse one YOLO-style 3D box annotation line."""
-
     expected_line_parts = 7
     parts = line.strip().split()
     if len(parts) != expected_line_parts:
@@ -245,7 +242,6 @@ def _labels_for_case(
     labels_path: Path,
 ) -> list[tuple[int, float, float, float, float, float, float]]:
     """Load all non-empty label entries for one case."""
-
     if not labels_path.exists():
         return []
     label_lines = labels_path.read_text(encoding="utf-8").strip().splitlines()
@@ -270,7 +266,6 @@ def _label_stats_for_case(
     target_voxel_size: VoxelSize,
 ) -> LabelStats:
     """Compute per-class box counts and sizes for one label file."""
-
     entries = _labels_for_case(labels_file)
     n_by_class: dict[str, int] = {}
     sizes_by_class_vox: dict[str, list[VoxelSize]] = {}
@@ -308,7 +303,6 @@ def _resolve_resampled_image_size(
     target_voxel_size: VoxelSize,
 ) -> PatchSize:
     """Project an image size onto a target voxel spacing."""
-
     return PatchSize.from_xyz(
         [
             max(1, round(size * source_spacing / target_spacing))
@@ -332,7 +326,6 @@ def _voxel_size_from_percentile(values_xyz: np.ndarray, percentile: float) -> Vo
 
 def _iter_cases(dataset_path: Path) -> Iterable[tuple[str, Path]]:
     """Yield case ids and image paths for all dataset images."""
-
     images_dir = dataset_path / "images"
     if not images_dir.exists():
         msg = f"Missing images directory at {images_dir}"
@@ -343,8 +336,12 @@ def _iter_cases(dataset_path: Path) -> Iterable[tuple[str, Path]]:
         yield case_id, image_path
 
 
-def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
-    """Compute dataset statistics and save dataset_fingerprint.json in dataset folder.
+def analyze_dataset(
+    dataset_path: Path,
+    workers: int = 0,
+    output_file: Path | None = None,
+) -> Path:
+    """Compute dataset statistics and save dataset_fingerprint.json in the requested location.
 
     Expects subfolders images/ (.nii.gz), labels/ (.txt), optional masks/ (.nii.gz).
     """
@@ -510,7 +507,9 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         ],
         dtype=np.int64,
     )
-    median_resampled_imagesize = PatchSize.from_xyz(np.median(resampled_image_sizes, axis=0).astype(int).tolist())
+    median_resampled_imagesize = PatchSize.from_xyz(
+        np.median(resampled_image_sizes, axis=0).astype(int).tolist()
+    )
     resampled_imagesize_p10 = _patch_size_from_percentile(resampled_image_sizes, 10)
     resampled_imagesize_p90 = _patch_size_from_percentile(resampled_image_sizes, 90)
 
@@ -575,7 +574,10 @@ def analyze_dataset(dataset_path: Path, workers: int = 0) -> Path:
         n_images_without_objects=n_images_without_objects,
     )
 
-    out_path = dataset_path / "dataset_fingerprint.json"
+    out_path = (
+        Path(output_file) if output_file is not None else dataset_path / "dataset_fingerprint.json"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         json.dumps(_serialize_dataset_fingerprint(finger_print), indent=2), encoding="utf-8"
     )

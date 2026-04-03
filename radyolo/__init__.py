@@ -374,13 +374,29 @@ def create_data_splits(
     show_default=True,
     help="Number of parallel workers to use (0 = CPU count).",
 )
-def analyze_dataset(dataset_path: Path, workers: int) -> int:
+@click.option(
+    "--output-file",
+    type=click.Path(
+        file_okay=True,
+        dir_okay=False,
+        writable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+    default=None,
+    help="Optional output path for the dataset fingerprint JSON.",
+)
+def analyze_dataset(dataset_path: Path, workers: int, output_file: Path | None) -> int:
     """Analyze a dataset folder and write dataset_fingerprint.json with summary statistics.
 
     DATASET_PATH should contain images/ (.nii.gz), labels/ (.txt) and optional masks/ (.nii.gz).
     """
     try:
-        out_path = analyze_dataset_fn(dataset_path=dataset_path, workers=workers)
+        out_path = analyze_dataset_fn(
+            dataset_path=dataset_path,
+            workers=workers,
+            output_file=output_file,
+        )
         LOGGER.info("Dataset fingerprint written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to analyze dataset", exc_info=e)
