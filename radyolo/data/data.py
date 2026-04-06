@@ -439,11 +439,10 @@ def _load_split_cases(
 def _get_image_path(
     src_path: Path,
     case_name: str,
-    image_format: Literal["nifti", "numpy", "blosc2"],
+    image_format: Literal["nifti", "blosc2"],
 ) -> Path:
     suffixes = {
         "nifti": ".nii.gz",
-        "numpy": ".npy",
         "blosc2": ".b2nd",
     }
     return src_path / "images" / f"{case_name}{suffixes[image_format]}"
@@ -452,12 +451,11 @@ def _get_image_path(
 def _get_mask_path(
     src_path: Path,
     case_name: str,
-    image_format: Literal["nifti", "numpy", "blosc2"],
+    image_format: Literal["nifti", "blosc2"],
 ) -> Path | None:
     preferred_suffixes = {
-        "nifti": (".nii.gz", ".npz", ".b2nd"),
-        "numpy": (".npz", ".b2nd", ".nii.gz"),
-        "blosc2": (".b2nd", ".npz", ".nii.gz"),
+        "nifti": (".nii.gz", ".b2nd"),
+        "blosc2": (".b2nd", ".nii.gz"),
     }
     masks_dir = src_path / "masks"
     for suffix in preferred_suffixes[image_format]:
@@ -484,7 +482,7 @@ def _array_to_runtime_tensor(array: np.ndarray) -> torch.Tensor:
 def _load_image_array(
     src_path: Path,
     case_name: str,
-    image_format: Literal["nifti", "numpy", "blosc2"],
+    image_format: Literal["nifti", "blosc2"],
 ) -> np.ndarray:
     image_path = _get_image_path(src_path, case_name, image_format)
     if not image_path.exists():
@@ -493,8 +491,6 @@ def _load_image_array(
 
     if image_format == "nifti":
         return _load_nifti_array(image_path)
-    if image_format == "numpy":
-        return np.load(image_path, allow_pickle=False).astype(np.float32, copy=False)
 
     blosc2.set_nthreads(1)
     return np.asarray(blosc2.open(str(image_path), mode="r")[:]).astype(np.float32, copy=False)
@@ -572,7 +568,7 @@ def _sample_patch_center_from_bbox(
 def _load_mask_array(
     src_path: Path,
     case_name: str,
-    image_format: Literal["nifti", "numpy", "blosc2"],
+    image_format: Literal["nifti", "blosc2"],
     *,
     load_masks: bool,
 ) -> np.ndarray | None:
@@ -593,30 +589,24 @@ def _load_mask_array(
         blosc2.set_nthreads(1)
         return np.asarray(blosc2.open(str(mask_path), mode="r")[:]).astype(np.uint8, copy=False)
 
-    with np.load(mask_path) as mask_archive:
-        if "mask" not in mask_archive.files:
-            msg = f"Compressed mask archive missing 'mask' array: {mask_path}"
-            raise KeyError(msg)
-        return np.array(mask_archive["mask"], dtype=np.uint8)
+    msg = f"Unsupported mask format: {mask_path}"
+    raise ValueError(msg)
 
 
 def _detect_image_format(
     src_path: Path,
     cases: list[str],
-) -> Literal["nifti", "numpy", "blosc2"]:
+) -> Literal["nifti", "blosc2"]:
     for case_name in cases:
         nifti_path = src_path / "images" / f"{case_name}.nii.gz"
         if nifti_path.exists():
             return "nifti"
-        numpy_path = src_path / "images" / f"{case_name}.npy"
-        if numpy_path.exists():
-            return "numpy"
         blosc2_path = src_path / "images" / f"{case_name}.b2nd"
         if blosc2_path.exists():
             return "blosc2"
     msg = (
         "Could not detect dataset image format. Expected files in images/ as "
-        "<case>.nii.gz, <case>.npy or <case>.b2nd for the configured split."
+        "<case>.nii.gz or <case>.b2nd for the configured split."
     )
     raise FileNotFoundError(msg)
 
@@ -625,7 +615,7 @@ def _load_case_index(
     src_path: Path,
     fold: int,
     group: Literal["train", "val", "test"],
-) -> tuple[list[str], Literal["nifti", "numpy", "blosc2"]]:
+) -> tuple[list[str], Literal["nifti", "blosc2"]]:
     cases = _load_split_cases(src_path, fold, group)
     return cases, _detect_image_format(src_path, cases)
 
@@ -667,7 +657,7 @@ def _augment_sample(
 def _load_labels_and_masks(
     src_path: Path,
     case_name: str,
-    image_format: Literal["nifti", "numpy", "blosc2"],
+    image_format: Literal["nifti", "blosc2"],
     *,
     load_masks: bool,
     patch_size: PatchSize,
@@ -799,7 +789,7 @@ def _crop_boxes_to_patch(
 def _load_patch_mask(
     src_path: Path,
     case_name: str,
-    image_format: Literal["nifti", "numpy", "blosc2"],
+    image_format: Literal["nifti", "blosc2"],
     patch_origin_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
     *,
@@ -908,7 +898,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
             load_masks=self.load_masks,
         )
 
-    def _detect_image_format(self) -> Literal["nifti", "numpy", "blosc2"]:
+    def _detect_image_format(self) -> Literal["nifti", "blosc2"]:
         return _detect_image_format(self.src_path, self.cases)
 
     def __len__(self) -> int:
@@ -1162,7 +1152,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         case_name, foreground_bbox = self._resolve_sampling_target(index)
         patch_shape_xyz = self.patch_size.get_xyz()
 
-        if self.image_format in {"nifti", "numpy"}:
+        if self.image_format == "nifti":
             image_array = _load_image_array(self.src_path, case_name, self.image_format)
             image_shape_xyz = _get_spatial_shape(tuple(int(dim) for dim in image_array.shape))
             if foreground_bbox is None:

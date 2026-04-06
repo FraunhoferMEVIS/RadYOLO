@@ -20,22 +20,11 @@ def _build_dataset_for_format(
 ) -> tuple[Path, str]:
     if image_format == "nifti":
         return synthetic_dataset, "nifti"
-    if image_format == "numpy":
-        return (
-            preprocess_dataset(
-                dataset_path=synthetic_dataset,
-                output_path=tmp_path / "preprocessed_numpy_dataset",
-                workers=0,
-                image_format="npy",
-            ),
-            "numpy",
-        )
     return (
         preprocess_dataset(
             dataset_path=synthetic_dataset,
             output_path=tmp_path / "preprocessed_blosc2_dataset",
             workers=0,
-            image_format="blosc2",
         ),
         "blosc2",
     )
@@ -50,7 +39,7 @@ def test_patchwise_dataset_extracts_centered_patch_for_all_supported_formats(
     expected_bboxes = torch.tensor([[0.5, 0.5, 0.5, 1.0, 1.0, 1.0]], dtype=torch.float32)
     expected_mask: torch.Tensor | None = None
 
-    for image_format in ("nifti", "numpy", "blosc2"):
+    for image_format in ("nifti", "blosc2"):
         dataset_root, expected_format = _build_dataset_for_format(
             synthetic_dataset,
             tmp_path / image_format,
@@ -159,8 +148,8 @@ def test_patchwise_dataset_centers_oversized_patch_dimensions(
 ) -> None:
     dataset_root, _ = _build_dataset_for_format(
         synthetic_dataset,
-        tmp_path / "oversized_patch_numpy",
-        "numpy",
+        tmp_path / "oversized_patch_blosc2",
+        "blosc2",
     )
     dataset = PatchWiseDataset(
         src_path=dataset_root,

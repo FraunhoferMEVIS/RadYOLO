@@ -60,15 +60,15 @@ def test_preprocess_data_cli_preserves_image_dtype(tmp_path) -> None:
             str(output_dataset),
             "--workers",
             "0",
-            "--image-format",
-            "npy",
             "--image-dtype",
             "int16",
         ],
     )
 
     assert result.exit_code == 0
-    converted_image = np.load(output_dataset / "images" / "case_dtype.npy")
+    converted_image = np.asarray(
+        blosc2.open(str(output_dataset / "images" / "case_dtype.b2nd"), mode="r")[:]
+    )
     assert converted_image.dtype == np.int16
 
 
@@ -87,8 +87,6 @@ def test_preprocess_data_cli_uses_full_image_chunk_for_fixed_extent_blosc2(
             str(output_dataset),
             "--workers",
             "0",
-            "--image-format",
-            "blosc2",
             "--image-extent",
             "20",
             "18",
@@ -135,8 +133,6 @@ def test_preprocess_data_cli_uses_smart_blosc2_chunks_for_voxel_size(tmp_path) -
             str(output_dataset),
             "--workers",
             "0",
-            "--image-format",
-            "blosc2",
             "--voxel-size",
             "2.0",
             "1.5",
@@ -172,8 +168,6 @@ def test_preprocess_data_cli_resamples_to_fixed_extent(synthetic_dataset, tmp_pa
             str(output_dataset),
             "--workers",
             "0",
-            "--image-format",
-            "npy",
             "--image-extent",
             "20",
             "18",
@@ -182,15 +176,14 @@ def test_preprocess_data_cli_resamples_to_fixed_extent(synthetic_dataset, tmp_pa
     )
 
     assert result.exit_code == 0
-    converted_image = np.load(output_dataset / "images" / "case1.npy")
+    converted_image = np.asarray(blosc2.open(str(output_dataset / "images" / "case1.b2nd"), mode="r")[:])
     assert converted_image.shape == (20, 18, 16)
 
-    with np.load(output_dataset / "masks" / "case1.npz") as mask_archive:
-        mask = mask_archive["mask"]
+    mask = np.asarray(blosc2.open(str(output_dataset / "masks" / "case1.b2nd"), mode="r")[:])
     assert mask.shape == (20, 18, 16)
 
 
-def test_preprocess_data_cli_saves_masks_as_blosc2_with_blosc2_image_format(
+def test_preprocess_data_cli_saves_masks_as_blosc2(
     synthetic_dataset,
     tmp_path,
 ) -> None:
@@ -205,8 +198,6 @@ def test_preprocess_data_cli_saves_masks_as_blosc2_with_blosc2_image_format(
             str(output_dataset),
             "--workers",
             "0",
-            "--image-format",
-            "blosc2",
         ],
     )
 
@@ -242,8 +233,6 @@ def test_preprocess_data_cli_resamples_to_fixed_voxel_size_and_normalizes(tmp_pa
             str(output_dataset),
             "--workers",
             "0",
-            "--image-format",
-            "npy",
             "--voxel-size",
             "2.0",
             "1.5",
@@ -256,7 +245,9 @@ def test_preprocess_data_cli_resamples_to_fixed_voxel_size_and_normalizes(tmp_pa
     )
 
     assert result.exit_code == 0
-    converted_image = np.load(output_dataset / "images" / "case_voxel.npy")
+    converted_image = np.asarray(
+        blosc2.open(str(output_dataset / "images" / "case_voxel.b2nd"), mode="r")[:]
+    )
     assert converted_image.dtype == np.float16
     assert converted_image.shape == (4, 10, 24)
     assert abs(float(converted_image.astype(np.float32).mean())) < 0.05

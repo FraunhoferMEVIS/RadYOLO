@@ -41,7 +41,6 @@ def test_save_preprocessed_image_uses_smart_blosc2_chunks_and_blocks(tmp_path) -
         image=image,
         out_images_dir=tmp_path,
         case_id="case_blosc2",
-        image_format="blosc2",
         use_full_image_chunk=False,
     )
 
@@ -57,7 +56,6 @@ def test_save_preprocessed_image_uses_full_image_chunk_for_fixed_extent(tmp_path
         image=image,
         out_images_dir=tmp_path,
         case_id="case_extent",
-        image_format="blosc2",
         use_full_image_chunk=True,
     )
 

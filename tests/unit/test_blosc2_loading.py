@@ -15,7 +15,6 @@ def test_dataset_loads_preprocessed_blosc2_images_and_masks(
         dataset_path=synthetic_dataset,
         output_path=tmp_path / "preprocessed_blosc2_dataset",
         workers=0,
-        image_format="blosc2",
     )
 
     dataset = WholeImageDataset(

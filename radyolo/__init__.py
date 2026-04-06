@@ -539,13 +539,6 @@ def propose_model_config(
     ),
 )
 @click.option(
-    "--image-format",
-    type=click.Choice(["npy", "blosc2"], case_sensitive=False),
-    default="blosc2",
-    show_default=True,
-    help="Storage format for preprocessed images.",
-)
-@click.option(
     "--image-dtype",
     type=click.Choice(["float32", "float16", "int16"], case_sensitive=False),
     default="float32",
@@ -560,10 +553,9 @@ def preprocess_data(
     image_extent: tuple[int, int, int] | None,
     voxel_size: tuple[float, float, float] | None,
     normalization: dict | list[dict],
-    image_format: str,
     image_dtype: str,
 ) -> int:
-    """Preprocess a NIfTI dataset and store images as .npy or .b2nd outputs in OUTPUT_PATH."""
+    """Preprocess a NIfTI dataset and store images as .b2nd outputs in OUTPUT_PATH."""
     try:
         if image_extent is not None and voxel_size is not None:
             msg = "Only one of --image-extent or --voxel-size can be specified."
@@ -578,7 +570,6 @@ def preprocess_data(
             target_image_size=target_image_size,
             target_voxel_size=target_voxel_size,
             normalization=normalization,
-            image_format=image_format.lower(),
             image_dtype=image_dtype.lower(),
         )
         LOGGER.info("Preprocessed dataset written to %s", out_path)

@@ -32,7 +32,6 @@ DEFAULT_L1_CACHE_SIZE_PER_CORE_IN_BYTES = 32768
 DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES = 1441792
 DEFAULT_CACHE_SAFETY_FACTOR = 0.8
 
-type ImageStorageFormat = Literal["npy", "blosc2"]
 type NormalizationSpec = NormalizationConfig | list[NormalizationConfig]
 
 
@@ -42,7 +41,6 @@ class PreprocessCaseConfig:
     target_voxel_size: VoxelSize | None
     normalization: NormalizationSpec
     image_dtype: ImageArrayDType
-    image_format: ImageStorageFormat
 
 
 def _iter_cases(images_dir: Path) -> list[tuple[str, Path]]:
@@ -223,15 +221,10 @@ def _save_preprocessed_image(
     image: np.ndarray,
     out_images_dir: Path,
     case_id: str,
-    image_format: ImageStorageFormat,
     *,
     use_full_image_chunk: bool,
 ) -> None:
     _remove_case_outputs(out_images_dir, case_id, (".npy", ".b2nd"))
-
-    if image_format == "npy":
-        np.save(out_images_dir / f"{case_id}.npy", image, allow_pickle=False)
-        return
 
     _save_preprocessed_blosc2_array(
         image,
@@ -244,15 +237,10 @@ def _save_preprocessed_mask(
     mask: np.ndarray,
     out_masks_dir: Path,
     case_id: str,
-    image_format: ImageStorageFormat,
     *,
     use_full_image_chunk: bool,
 ) -> None:
     _remove_case_outputs(out_masks_dir, case_id, (".npz", ".b2nd"))
-
-    if image_format == "npy":
-        np.savez_compressed(out_masks_dir / f"{case_id}.npz", mask=mask)
-        return
 
     _save_preprocessed_blosc2_array(
         mask,
@@ -271,13 +259,9 @@ def _has_preprocessed_image_outputs(out_images_dir: Path) -> bool:
 def _validate_image_output_options(
     target_image_size: PatchSize | None,
     target_voxel_size: VoxelSize | None,
-    image_format: ImageStorageFormat,
 ) -> None:
     if target_image_size is not None and target_voxel_size is not None:
         msg = "Only one of target_image_size or target_voxel_size can be specified."
-        raise ValueError(msg)
-    if image_format not in {"npy", "blosc2"}:
-        msg = f"Unsupported image format: {image_format}"
         raise ValueError(msg)
 
 
@@ -309,7 +293,7 @@ def _validate_existing_outputs(
         raise FileExistsError(msg)
 
 
-def _convert_case_to_numpy(
+def _convert_case_to_blosc2(
     case_id: str,
     image_path: Path,
     masks_dir: Path,
@@ -333,7 +317,6 @@ def _convert_case_to_numpy(
         ),
         out_images_dir,
         case_id,
-        config.image_format,
         use_full_image_chunk=config.target_image_size is not None,
     )
 
@@ -354,7 +337,6 @@ def _convert_case_to_numpy(
             ),
             out_masks_dir,
             case_id,
-            config.image_format,
             use_full_image_chunk=config.target_image_size is not None,
         )
 
@@ -368,13 +350,11 @@ def preprocess_dataset(  # noqa: PLR0913
     target_voxel_size: VoxelSize | None = None,
     normalization: NormalizationSpec | None = None,
     image_dtype: ImageArrayDType = "float32",
-    image_format: ImageStorageFormat = "blosc2",
 ) -> Path:
     """Convert NIfTI images to array stores in a mirrored dataset folder structure.
 
-    The output dataset keeps labels unchanged and stores images as `.b2nd` arrays by
-    default or `.npy` files when requested. Optional masks mirror that choice as
-    `.b2nd` arrays or compressed `.npz` archives.
+    The output dataset keeps labels unchanged and stores images and optional masks as
+    `.b2nd` arrays.
     """
     dataset_path = Path(dataset_path)
     output_path = Path(output_path)
@@ -383,7 +363,6 @@ def preprocess_dataset(  # noqa: PLR0913
     _validate_image_output_options(
         target_image_size=target_image_size,
         target_voxel_size=target_voxel_size,
-        image_format=image_format,
     )
 
     images_dir = dataset_path / "images"
@@ -429,7 +408,6 @@ def preprocess_dataset(  # noqa: PLR0913
         target_voxel_size=target_voxel_size,
         normalization=normalization,
         image_dtype=image_dtype,
-        image_format=image_format,
     )
 
     LOGGER.info(
@@ -443,7 +421,7 @@ def preprocess_dataset(  # noqa: PLR0913
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
-                _convert_case_to_numpy,
+                _convert_case_to_blosc2,
                 case_id,
                 image_path,
                 masks_dir,
