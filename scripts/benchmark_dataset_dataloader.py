@@ -1,17 +1,44 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import statistics
+import sys
 import time
+import types
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 from tqdm.auto import tqdm
 
-from radyolo.config.spatial import PatchSize
-from radyolo.data.data import WholeImageDataset, build_dataloader
+
+def _ensure_project_root_on_sys_path(script_path: Path | None = None) -> Path:
+    project_root = (script_path or Path(__file__)).resolve().parent.parent
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+    return project_root
+
+
+def _ensure_radyolo_package(script_path: Path | None = None) -> Path:
+    project_root = _ensure_project_root_on_sys_path(script_path)
+    package_root = project_root / "radyolo"
+    if "radyolo" not in sys.modules:
+        package = types.ModuleType("radyolo")
+        package.__file__ = str(package_root / "__init__.py")
+        package.__path__ = [str(package_root)]
+        sys.modules["radyolo"] = package
+    return project_root
+
+
+_ensure_radyolo_package()
+
+PatchSize = importlib.import_module("radyolo.config.spatial").PatchSize
+_data_module = importlib.import_module("radyolo.data.data")
+WholeImageDataset = _data_module.WholeImageDataset
+build_dataloader = _data_module.build_dataloader
 
 LOGGER = logging.getLogger("benchmark_dataset_dataloader")
 
