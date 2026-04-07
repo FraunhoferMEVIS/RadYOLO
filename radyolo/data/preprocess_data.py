@@ -4,9 +4,10 @@ import logging
 import os
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import blosc2
 import nibabel as nib
@@ -341,6 +342,110 @@ def _convert_case_to_blosc2(
         )
 
 
+def _preprocess_cases_serially(
+    cases: list[tuple[str, Path]],
+    masks_dir: Path,
+    out_images_dir: Path,
+    out_masks_dir: Path | None,
+    case_config: PreprocessCaseConfig,
+) -> None:
+    progress_bar = tqdm(total=len(cases), desc="Preprocessing", unit="case")
+    try:
+        for case_id, image_path in cases:
+            try:
+                _convert_case_to_blosc2(
+                    case_id,
+                    image_path,
+                    masks_dir,
+                    out_images_dir,
+                    out_masks_dir,
+                    case_config,
+                )
+            except Exception as exc:
+                msg = f"Failed to preprocess case '{case_id}'"
+                raise RuntimeError(msg) from exc
+            progress_bar.update(1)
+    finally:
+        progress_bar.close()
+
+
+def _preprocess_cases_in_process_pool(
+    cases: list[tuple[str, Path]],
+    masks_dir: Path,
+    out_images_dir: Path,
+    out_masks_dir: Path | None,
+    case_config: PreprocessCaseConfig,
+    max_workers: int,
+) -> None:
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _convert_case_to_blosc2,
+                case_id,
+                image_path,
+                masks_dir,
+                out_images_dir,
+                out_masks_dir,
+                case_config,
+            ): case_id
+            for case_id, image_path in cases
+        }
+        progress_bar = tqdm(total=len(futures), desc="Preprocessing", unit="case")
+        try:
+            for future in as_completed(futures):
+                case_id = futures[future]
+                try:
+                    future.result()
+                except BrokenProcessPool:
+                    raise
+                except Exception as exc:
+                    msg = f"Failed to preprocess case '{case_id}'"
+                    raise RuntimeError(msg) from exc
+                progress_bar.update(1)
+        finally:
+            progress_bar.close()
+
+
+def _preprocess_cases(
+    cases: list[tuple[str, Path]],
+    masks_dir: Path,
+    out_images_dir: Path,
+    out_masks_dir: Path | None,
+    case_config: PreprocessCaseConfig,
+    max_workers: int,
+) -> None:
+    if max_workers <= 1:
+        _preprocess_cases_serially(
+            cases,
+            masks_dir,
+            out_images_dir,
+            out_masks_dir,
+            case_config,
+        )
+        return
+
+    try:
+        _preprocess_cases_in_process_pool(
+            cases,
+            masks_dir,
+            out_images_dir,
+            out_masks_dir,
+            case_config,
+            max_workers,
+        )
+    except BrokenProcessPool:
+        LOGGER.warning(
+            "Process pool preprocessing failed; retrying serially."
+        )
+        _preprocess_cases_serially(
+            cases,
+            masks_dir,
+            out_images_dir,
+            out_masks_dir,
+            case_config,
+        )
+
+
 def preprocess_dataset(  # noqa: PLR0913
     dataset_path: Path,
     output_path: Path,
@@ -418,30 +523,13 @@ def preprocess_dataset(  # noqa: PLR0913
         max_workers,
     )
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(
-                _convert_case_to_blosc2,
-                case_id,
-                image_path,
-                masks_dir,
-                out_images_dir,
-                out_masks_dir,
-                case_config,
-            ): case_id
-            for case_id, image_path in cases
-        }
-        progress_bar = tqdm(total=len(futures), desc="Preprocessing", unit="case")
-        try:
-            for future in as_completed(futures):
-                case_id = futures[future]
-                try:
-                    future.result()
-                except Exception as exc:
-                    msg = f"Failed to preprocess case '{case_id}'"
-                    raise RuntimeError(msg) from exc
-                progress_bar.update(1)
-        finally:
-            progress_bar.close()
+    _preprocess_cases(
+        cases,
+        masks_dir,
+        out_images_dir,
+        out_masks_dir,
+        case_config,
+        max_workers,
+    )
 
     return output_path

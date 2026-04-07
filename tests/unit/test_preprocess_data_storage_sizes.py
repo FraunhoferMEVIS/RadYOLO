@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from concurrent.futures.process import BrokenProcessPool
+
 import blosc2
 import numpy as np
 
+from radyolo.config.spatial import PatchSize
 from radyolo.data.preprocess_data import (
     DEFAULT_CACHE_SAFETY_FACTOR,
     DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES,
     _compute_storage_shapes,
+    preprocess_dataset,
     _save_preprocessed_image,
 )
 
@@ -61,3 +65,48 @@ def test_save_preprocessed_image_uses_full_image_chunk_for_fixed_extent(tmp_path
 
     blosc_array = blosc2.open(str(tmp_path / "case_extent.b2nd"), mode="r")
     assert blosc_array.chunks == image.shape
+
+
+def test_preprocess_dataset_falls_back_to_serial_when_process_pool_breaks(
+    synthetic_dataset,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    output_dataset = tmp_path / "preprocessed_fallback"
+    original_preprocess_cases_serially = None
+
+    def _broken_pool(*_args, **_kwargs) -> None:
+        raise BrokenProcessPool("simulated worker crash")
+
+    def _recording_serial(*args, **kwargs) -> None:
+        nonlocal original_preprocess_cases_serially
+        serial_calls.append((args, kwargs))
+        assert original_preprocess_cases_serially is not None
+        original_preprocess_cases_serially(*args, **kwargs)
+
+    serial_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    import radyolo.data.preprocess_data as preprocess_data_module
+
+    original_preprocess_cases_serially = preprocess_data_module._preprocess_cases_serially
+    monkeypatch.setattr(
+        preprocess_data_module,
+        "_preprocess_cases_in_process_pool",
+        _broken_pool,
+    )
+    monkeypatch.setattr(
+        preprocess_data_module,
+        "_preprocess_cases_serially",
+        _recording_serial,
+    )
+
+    result = preprocess_dataset(
+        dataset_path=synthetic_dataset,
+        output_path=output_dataset,
+        workers=2,
+        target_image_size=PatchSize(x=16, y=16, z=32),
+    )
+
+    assert result == output_dataset
+    assert len(serial_calls) == 1
+    assert (output_dataset / "images" / "case1.b2nd").exists()
+    assert (output_dataset / "masks" / "case1.b2nd").exists()
