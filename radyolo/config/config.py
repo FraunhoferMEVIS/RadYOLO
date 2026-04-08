@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import datetime
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, TypedDict
 
+import numpy as np
 import torch
 import yaml
 from pydantic import (
@@ -337,8 +339,26 @@ class ModelCheckpoint(TypedDict):
     date: datetime.datetime
 
 
+def _sanitize_checkpoint_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, Mapping):
+        items = ((key, _sanitize_checkpoint_value(item)) for key, item in value.items())
+        try:
+            return value.__class__(items)
+        except TypeError:
+            return dict(items)
+    if isinstance(value, list):
+        return [_sanitize_checkpoint_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_checkpoint_value(item) for item in value)
+    return value
+
+
 def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
-    checkpoint = torch.load(checkpoint, map_location="cpu")
+    checkpoint = torch.load(checkpoint, map_location="cpu", weights_only=True)
     return ModelCheckpoint(
         epoch=checkpoint["epoch"],
         best_fitness=checkpoint["best_fitness"],
@@ -375,7 +395,7 @@ def save_model_checkpoint(  # noqa: PLR0913
         date=datetime.datetime.now(tz=datetime.UTC).isoformat(),
     )
     for path in paths:
-        torch.save(checkpoint, path)
+        torch.save(_sanitize_checkpoint_value(checkpoint), path)
 
 
 def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:

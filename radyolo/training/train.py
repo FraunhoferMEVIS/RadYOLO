@@ -153,7 +153,7 @@ class Trainer:
         checkpoint: ModelCheckpoint | None = None
         if self.resume and checkpoint_path.suffix == ".pt" and checkpoint_path.exists():
             checkpoint = load_model_checkpoint(checkpoint_path)
-            self.config = self.config.model_copy(update=checkpoint["train_config"].model_dump())
+            self.config = type(self.config).model_validate(checkpoint["train_config"].model_dump())
             model_state_dict = checkpoint["model_state_dict"]
 
         model = build_model_from_config(
