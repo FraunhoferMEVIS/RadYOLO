@@ -12,7 +12,7 @@ import yaml
 from radyolo.config.config import DatasetConfig, load_model_checkpoint
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
-from radyolo.data.data import WholeImageDataset, build_dataloader
+from radyolo.data.data import PatchWiseDataset, WholeImageDataset, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
@@ -207,7 +207,13 @@ def run_validation(best_model_path: Path, group: str) -> Path:
     with dataset_yaml.open(encoding="utf-8") as f:
         yaml_config = yaml.safe_load(f)
     dataset_config = DatasetConfig.model_validate(yaml_config)
-    dataset = WholeImageDataset(
+    dataset_class = (
+        PatchWiseDataset if train_config.training_mode == "patchwise" else WholeImageDataset
+    )
+    foreground_oversampling = (
+        train_config.foreground_oversampling if train_config.training_mode == "patchwise" else 0.0
+    )
+    dataset = dataset_class(
         src_path=dataset_root,
         fold=train_config.fold,
         group=group,
@@ -216,6 +222,8 @@ def run_validation(best_model_path: Path, group: str) -> Path:
         min_stride=int(model.stride.min().item()) if hasattr(model, "stride") else 8,
         normalization=train_config.normalization,
         load_masks=train_config.segmentation_output,
+        foreground_oversampling=foreground_oversampling,
+        min_box_crop_fraction=train_config.min_box_crop_fraction,
     )
     dataloader = build_dataloader(
         dataset=dataset,

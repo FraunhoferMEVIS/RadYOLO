@@ -55,6 +55,28 @@ def test_default_config_accepts_foreground_oversampling(tmp_path: Path) -> None:
     assert cfg.foreground_oversampling == 0.25
 
 
+def test_default_config_accepts_patchwise_training_mode(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path, {"x": 20, "y": 18, "z": 16}),
+            "training_mode": "patchwise",
+        }
+    )
+
+    assert cfg.training_mode == "patchwise"
+
+
+def test_default_config_accepts_min_box_crop_fraction(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path, {"x": 20, "y": 18, "z": 16}),
+            "min_box_crop_fraction": 0.75,
+        }
+    )
+
+    assert cfg.min_box_crop_fraction == 0.75
+
+
 def test_resolve_target_shape_uses_voxel_sizes_through_named_axes() -> None:
     target_shape = resolve_target_shape(
         (6, 5, 4),

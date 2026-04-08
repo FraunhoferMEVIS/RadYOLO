@@ -764,9 +764,29 @@ def _crop_boxes_to_patch(
     image_shape_xyz: tuple[int, int, int],
     patch_origin_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
+    min_box_crop_fraction: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    cropped_classes, cropped_bboxes, _ = _crop_boxes_to_patch_with_keep(
+        classes,
+        bboxes,
+        image_shape_xyz,
+        patch_origin_xyz,
+        patch_shape_xyz,
+        min_box_crop_fraction=min_box_crop_fraction,
+    )
+    return cropped_classes, cropped_bboxes
+
+
+def _crop_boxes_to_patch_with_keep(
+    classes: torch.Tensor,
+    bboxes: torch.Tensor,
+    image_shape_xyz: tuple[int, int, int],
+    patch_origin_xyz: tuple[int, int, int],
+    patch_shape_xyz: tuple[int, int, int],
+    min_box_crop_fraction: float = 0.5,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if bboxes.numel() == 0:
-        return classes, bboxes
+        return classes, bboxes, torch.zeros((0,), dtype=torch.bool, device=classes.device)
 
     image_scale = bboxes.new_tensor((*image_shape_xyz, *image_shape_xyz))
     patch_scale = bboxes.new_tensor((*patch_shape_xyz, *patch_shape_xyz))
@@ -774,16 +794,35 @@ def _crop_boxes_to_patch(
     patch_upper = bboxes.new_tensor(patch_shape_xyz)
 
     boxes_xyzxyz = xyzwhd2xyzxyz(bboxes * image_scale)
+    original_extents = (boxes_xyzxyz[:, 3:6] - boxes_xyzxyz[:, 0:3]).clamp(min=0)
+    original_volume = torch.prod(original_extents, dim=1)
+
     boxes_xyzxyz = boxes_xyzxyz - patch_origin
     boxes_xyzxyz[:, 0:3] = boxes_xyzxyz[:, 0:3].clamp(min=0)
     boxes_xyzxyz[:, 3:6] = torch.minimum(boxes_xyzxyz[:, 3:6], patch_upper)
 
-    keep = torch.all(boxes_xyzxyz[:, 3:6] > boxes_xyzxyz[:, 0:3], dim=1)
-    if not torch.any(keep):
-        return classes.new_empty((0, 1)), bboxes.new_empty((0, 6))
+    cropped_extents = (boxes_xyzxyz[:, 3:6] - boxes_xyzxyz[:, 0:3]).clamp(min=0)
+    cropped_volume = torch.prod(cropped_extents, dim=1)
+    contained_fraction = cropped_volume / original_volume.clamp_min(torch.finfo(bboxes.dtype).eps)
 
-    cropped_boxes = xyzxyz2xyzwhd(boxes_xyzxyz[keep]) / patch_scale
-    return classes[keep], cropped_boxes
+    keep = torch.all(boxes_xyzxyz[:, 3:6] > boxes_xyzxyz[:, 0:3], dim=1)
+    keep &= contained_fraction >= min_box_crop_fraction
+    if not torch.any(keep):
+        return classes.new_empty((0, 1)), bboxes.new_empty((0, 6)), keep
+
+    cropped_boxes = xyzxyz2xyzwhd(boxes_xyzxyz) / patch_scale
+    return classes[keep], cropped_boxes[keep], keep
+
+
+def _filter_instance_masks(
+    masks: torch.Tensor | None,
+    keep: torch.Tensor,
+) -> torch.Tensor | None:
+    if masks is None:
+        return None
+    if masks.shape[0] != keep.shape[0]:
+        return masks
+    return masks[keep]
 
 
 def _load_patch_mask(
@@ -841,6 +880,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
         load_masks: bool = True,
         foreground_oversampling: float = 0.0,
+        min_box_crop_fraction: float = 0.5,
         config: DefaultConfig | None = None,
     ) -> None:
         super().__init__()
@@ -849,13 +889,13 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.patch_size = patch_size
         self.augment = augment
         self.min_stride = min_stride
-        self.pad = pad
         self.fold = fold
         self.group = group
         self.normalization = _resolve_normalization(normalization)
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
+        self.min_box_crop_fraction = min_box_crop_fraction
         self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
@@ -995,6 +1035,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
         load_masks: bool = True,
         foreground_oversampling: float = 0.33,
+        min_box_crop_fraction: float = 0.5,
         config: DefaultConfig | None = None,
     ) -> None:
         super().__init__()
@@ -1003,13 +1044,13 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.patch_size = patch_size
         self.augment = augment
         self.min_stride = min_stride
-        self.pad = pad
         self.fold = fold
         self.group = group
         self.normalization = _resolve_normalization(normalization)
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
+        self.min_box_crop_fraction = min_box_crop_fraction
         self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
@@ -1131,7 +1172,27 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             image_shape_xyz,
             patch_origin_xyz,
             patch_shape_xyz,
+            min_box_crop_fraction=self.min_box_crop_fraction,
         )
+
+    def _crop_boxes_and_masks_to_patch(
+        self,
+        classes: torch.Tensor,
+        bboxes: torch.Tensor,
+        masks: torch.Tensor | None,
+        image_shape_xyz: tuple[int, int, int],
+        patch_origin_xyz: tuple[int, int, int],
+        patch_shape_xyz: tuple[int, int, int],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        cropped_classes, cropped_bboxes, keep = _crop_boxes_to_patch_with_keep(
+            classes,
+            bboxes,
+            image_shape_xyz,
+            patch_origin_xyz,
+            patch_shape_xyz,
+            min_box_crop_fraction=self.min_box_crop_fraction,
+        )
+        return cropped_classes, cropped_bboxes, _filter_instance_masks(masks, keep)
 
     def _load_patch_mask(
         self,
@@ -1192,14 +1253,15 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             output_dtype=torch.float32,
         )
         classes, bboxes = _load_labels(self.src_path, case_name)
-        classes, bboxes = self._crop_boxes_to_patch(
+        masks = self._load_patch_mask(case_name, patch_origin_xyz, patch_shape_xyz)
+        classes, bboxes, masks = self._crop_boxes_and_masks_to_patch(
             classes,
             bboxes,
+            masks,
             image_shape_xyz,
             patch_origin_xyz,
             patch_shape_xyz,
         )
-        masks = self._load_patch_mask(case_name, patch_origin_xyz, patch_shape_xyz)
 
         original_shape = tuple(reversed(image_shape_xyz))
         ratio = (1.0, 1.0, 1.0)

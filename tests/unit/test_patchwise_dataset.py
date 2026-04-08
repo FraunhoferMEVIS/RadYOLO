@@ -205,6 +205,7 @@ def test_patchwise_dataset_oversampled_indices_sample_from_foreground_boxes(
         patch_size=PatchSize(x=16, y=16, z=32),
         augment=False,
         foreground_oversampling=0.33,
+        min_box_crop_fraction=0.0,
     )
     expected_bounds = [(8, 23), (8, 23), (16, 47)]
     sampled_bounds: list[tuple[int, int]] = []
@@ -227,3 +228,82 @@ def test_patchwise_dataset_oversampled_indices_sample_from_foreground_boxes(
     assert sample["classes"].shape == (1, 1)
     assert sample["bboxes"].shape == (1, 6)
     assert sample["masks"] is not None
+
+
+def test_crop_boxes_to_patch_drops_boxes_below_minimum_containment() -> None:
+    classes = torch.tensor([[0.0], [1.0]], dtype=torch.float32)
+    bboxes = torch.tensor(
+        [
+            [0.25, 0.25, 0.25, 0.2, 0.2, 0.2],
+            [0.45, 0.45, 0.45, 0.4, 0.4, 0.4],
+        ],
+        dtype=torch.float32,
+    )
+
+    kept_classes, kept_bboxes = data_module._crop_boxes_to_patch(
+        classes,
+        bboxes,
+        image_shape_xyz=(100, 100, 100),
+        patch_origin_xyz=(0, 0, 0),
+        patch_shape_xyz=(50, 50, 50),
+        min_box_crop_fraction=0.5,
+    )
+
+    assert torch.equal(kept_classes, classes[:1])
+    assert torch.allclose(
+        kept_bboxes,
+        torch.tensor([[0.5, 0.5, 0.5, 0.4, 0.4, 0.4]], dtype=torch.float32),
+    )
+
+
+def test_crop_boxes_to_patch_keeps_boxes_above_minimum_containment() -> None:
+    classes = torch.tensor([[1.0]], dtype=torch.float32)
+    bboxes = torch.tensor([[0.45, 0.45, 0.45, 0.4, 0.4, 0.4]], dtype=torch.float32)
+
+    kept_classes, kept_bboxes = data_module._crop_boxes_to_patch(
+        classes,
+        bboxes,
+        image_shape_xyz=(100, 100, 100),
+        patch_origin_xyz=(0, 0, 0),
+        patch_shape_xyz=(50, 50, 50),
+        min_box_crop_fraction=0.2,
+    )
+
+    assert torch.equal(kept_classes, classes)
+    assert kept_bboxes.shape == (1, 6)
+
+
+def test_filter_instance_masks_drops_masks_for_removed_boxes() -> None:
+    classes = torch.tensor([[0.0], [1.0]], dtype=torch.float32)
+    bboxes = torch.tensor(
+        [
+            [0.25, 0.25, 0.25, 0.2, 0.2, 0.2],
+            [0.45, 0.45, 0.45, 0.4, 0.4, 0.4],
+        ],
+        dtype=torch.float32,
+    )
+    masks = torch.stack(
+        [
+            torch.ones((4, 4, 4), dtype=torch.uint8),
+            torch.full((4, 4, 4), 2, dtype=torch.uint8),
+        ]
+    )
+
+    kept_classes, kept_bboxes, keep = data_module._crop_boxes_to_patch_with_keep(
+        classes,
+        bboxes,
+        image_shape_xyz=(100, 100, 100),
+        patch_origin_xyz=(0, 0, 0),
+        patch_shape_xyz=(50, 50, 50),
+        min_box_crop_fraction=0.5,
+    )
+    kept_masks = data_module._filter_instance_masks(masks, keep)
+
+    assert torch.equal(kept_classes, classes[:1])
+    assert torch.allclose(
+        kept_bboxes,
+        torch.tensor([[0.5, 0.5, 0.5, 0.4, 0.4, 0.4]], dtype=torch.float32),
+    )
+    assert kept_masks is not None
+    assert kept_masks.shape[0] == 1
+    assert torch.equal(kept_masks[0], masks[0])

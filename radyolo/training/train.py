@@ -25,6 +25,7 @@ from radyolo.config.config import (
     save_model_checkpoint,
 )
 from radyolo.data.data import (
+    PatchWiseDataset,
     WholeImageDataset,
     apply_configured_augmentations_to_batch,
     build_dataloader,
@@ -597,17 +598,25 @@ class Trainer:
         if mode not in {"train", "val"}:
             message = f"get_dataloader() only supports modes train and val, but got {mode}"
             raise ValueError(message)
-        dataset = WholeImageDataset(
+
+        dataset_class = (
+            PatchWiseDataset if self.config.training_mode == "patchwise" else WholeImageDataset
+        )
+        foreground_oversampling = 0.0
+        if mode == "train" or self.config.training_mode == "patchwise":
+            foreground_oversampling = self.config.foreground_oversampling
+
+        dataset = dataset_class(
             src_path=dataset_path,
             fold=fold,
             group=mode,
             patch_size=self.config.patch_size,
             augment=mode == "train",
             min_stride=get_model_min_stride(model),
-            pad=0.0 if mode == "train" else 0.5,
             normalization=self.config.normalization,
             load_masks=self.config.segmentation_output,
-            foreground_oversampling=self.config.foreground_oversampling if mode == "train" else 0.0,
+            foreground_oversampling=foreground_oversampling,
+            min_box_crop_fraction=self.config.min_box_crop_fraction,
             config=self.config,
         )
         shuffle = mode == "train"

@@ -1,5 +1,5 @@
 # Data and Output Settings
-data: "D:/datasets/AMOS22/radyolo_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/AMOS22/radyolo_3p00_3p00_5p00_zscore_float16" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
 experiment_name: "default" # (str, optional) experiment name, results saved to 'output_folder_base/experiment_name' directory
@@ -34,9 +34,11 @@ include_stride4_output: False  # (bool) if True, add a detection head on stride 
 # Hyperparameters
 epochs: 1000                      # (int) number of epochs to train for
 patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training
-patch_size: {x: 96, y: 96, z: 64} # input patch size stored in x, y, z (width, height, depth) order
+training_mode: "patchwise"      # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
+patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
 normalization: {type: "none"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
-foreground_oversampling: 0.0      # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
+foreground_oversampling: 0.33     # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
+min_box_crop_fraction: 0.5        # (float) minimum fraction of a box volume that must stay inside a sampled patch to keep it
 batch_size: 2                     # (int) number of images per batch
 nominal_batch_size: 64            # (int) nominal batch size (i.e. samples for gradient accumulation)
 optimizer: Adam                   # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]

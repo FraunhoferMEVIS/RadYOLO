@@ -16,7 +16,7 @@ from radyolo.config.propose_model_config import propose_model_config as propose_
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
-from radyolo.data.data import WholeImageDataset, build_dataloader
+from radyolo.data.data import PatchWiseDataset, WholeImageDataset, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
@@ -197,7 +197,18 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
         device = loaded_model.device
         ema = ModelEMA(model)
 
-        dataset = WholeImageDataset(
+        dataset_class = (
+            PatchWiseDataset
+            if train_config.training_mode == "patchwise"
+            else WholeImageDataset
+        )
+        foreground_oversampling = (
+            train_config.foreground_oversampling
+            if train_config.training_mode == "patchwise"
+            else 0.0
+        )
+
+        dataset = dataset_class(
             src_path=dataset_folder,
             fold=fold,
             group=group,
@@ -206,7 +217,8 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             min_stride=get_model_min_stride(model),
             normalization=train_config.normalization,
             load_masks=train_config.segmentation_output,
-            foreground_oversampling=0.0,
+            foreground_oversampling=foreground_oversampling,
+            min_box_crop_fraction=train_config.min_box_crop_fraction,
         )
 
         dataloader = build_dataloader(

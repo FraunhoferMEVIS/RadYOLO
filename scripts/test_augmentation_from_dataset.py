@@ -127,7 +127,6 @@ def _build_dataset(
         patch_size=cfg.patch_size,
         augment=True,
         min_stride=8,
-        pad=0.5,
         fold=args.fold if args.fold is not None else cfg.fold,
         group="train",
         normalization=cfg.normalization,

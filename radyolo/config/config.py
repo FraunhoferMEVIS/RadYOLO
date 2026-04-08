@@ -102,6 +102,9 @@ class DefaultConfig(BaseModel):
     patience: int = (
         300  # epochs to wait for no observable improvement for early stopping of training
     )
+    training_mode: Literal["patchwise", "wholeimage"] = (
+        "wholeimage"  # whether training/validation sample image patches or use resized whole images
+    )
     patch_size: PatchSize  # input patch size stored in x, y, z (width, height, depth) order
     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
     # applied globally or a list of such dicts for each channel. For ct you have to define
@@ -112,6 +115,11 @@ class DefaultConfig(BaseModel):
         ge=0.0,
         lt=1.0,
     )  # extra train-epoch sample fraction to draw from foreground cases
+    min_box_crop_fraction: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+    )  # minimum fraction of a box volume that must remain inside a sampled patch to keep it
     batch_size: int = 2  # number of images per batch
     nominal_batch_size: int = 64  # nominal batch size (i.e. samples for gradient accumulation)
     optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
