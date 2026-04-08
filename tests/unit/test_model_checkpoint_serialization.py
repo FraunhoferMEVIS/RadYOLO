@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import datetime
-from pathlib import Path
+import pickle
+from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 import torch
 import yaml
 
@@ -12,8 +14,11 @@ from radyolo.config.spatial import PatchSize
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import Trainer
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_load_model_checkpoint_accepts_legacy_numpy_metadata(
+
+def test_load_model_checkpoint_rejects_legacy_numpy_metadata(
     minimal_train_config: Path,
     tmp_path: Path,
 ) -> None:
@@ -36,11 +41,8 @@ def test_load_model_checkpoint_accepts_legacy_numpy_metadata(
 
     torch.save(legacy_checkpoint, checkpoint_path)
 
-    checkpoint = load_model_checkpoint(checkpoint_path)
-
-    assert checkpoint["epoch"] == 3
-    assert checkpoint["train_config"].experiment_name == config.experiment_name
-    assert checkpoint["train_metrics"]["metrics/mAP-ewa(B)"] == np.float32(0.25)
+    with pytest.raises(pickle.UnpicklingError, match="Weights only load failed"):
+        load_model_checkpoint(checkpoint_path)
 
 
 def test_save_model_checkpoint_writes_weights_only_safe_metadata(

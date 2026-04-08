@@ -55,11 +55,23 @@ def test_plot_results_warns_when_results_png_is_busy(
 
     original_savefig = Figure.savefig
 
+    def non_interactive_subplots(*args: object, **kwargs: object) -> tuple[Figure, object]:
+        fig = Figure(figsize=kwargs.get("figsize"), tight_layout=kwargs.get("tight_layout", False))
+        axes = fig.subplots(
+            *args,
+            sharex=kwargs.get("sharex", False),
+            sharey=kwargs.get("sharey", False),
+            squeeze=kwargs.get("squeeze", True),
+        )
+        return fig, axes
+
     def savefig_with_busy(self: Figure, fname: str | Path, *args: object, **kwargs: object) -> None:
         if Path(fname) == busy_target:
-            raise OSError("Device or resource busy")
+            msg = "Device or resource busy"
+            raise OSError(msg)
         original_savefig(self, fname, *args, **kwargs)
 
+    monkeypatch.setattr(plotting.plt, "subplots", non_interactive_subplots)
     monkeypatch.setattr(Figure, "savefig", savefig_with_busy)
 
     caplog.set_level("WARNING", logger=plotting.LOGGER.name)
