@@ -22,7 +22,27 @@ from radyolo.utils import ops
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+plt.switch_backend("Agg")
+
 LOGGER = logging.getLogger(__name__)
+
+RESULTS_PLOT_COLUMNS = (
+    "train/box_loss",
+    "train/dfl_loss",
+    "train/cls_obj_loss",
+    "train/cls_sep_loss",
+    "train/mask_loss",
+    "val/box_loss",
+    "val/dfl_loss",
+    "val/cls_obj_loss",
+    "val/cls_sep_loss",
+    "val/mask_loss",
+    "metrics/mAP10Agn",
+    "metrics/mAP10",
+    "metrics/mAP10-95Agn",
+    "metrics/mAP10-95",
+    "metrics/dice",
+)
 
 
 class Colors:
@@ -731,23 +751,24 @@ def plot_results(
     """
     save_dir = Path(file).parent if file else Path(directory)
     fig, ax = plt.subplots(3, 5, figsize=(16, 7), tight_layout=True, sharex="col")
-    indices = [2, 3, 4, 5, 6, 12, 13, 14, 15, 16, 7, 8, 9, 10, 11]
 
     ax = ax.ravel()
     files = list(save_dir.glob("results*.csv"))
     assert files, f"No results.csv files found in {save_dir.resolve()}, nothing to plot."
     for f in files:
-        data = pd.read_csv(f)
-        column_names = [name.strip() for name in data.columns]
+        data = pd.read_csv(f).rename(columns=lambda name: name.strip())
         epochs = data.to_numpy()[:, 0]
-        for plot_index, csv_index in enumerate(indices):
+        for plot_index, column_name in enumerate(RESULTS_PLOT_COLUMNS):
             try:
-                y = data.to_numpy()[:, csv_index].astype("float")
+                if column_name not in data.columns:
+                    ax[plot_index].set_visible(False)
+                    continue
+                y = data[column_name].to_numpy(dtype=float)
                 ax[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
-                ax[plot_index].set_ylabel(column_names[csv_index])
-                if "metrics" in column_names[csv_index]:
+                ax[plot_index].set_ylabel(column_name)
+                if "metrics" in column_name:
                     ax[plot_index].set_xlabel("Epochs")
-                if "loss" in column_names[csv_index]:
+                if "loss" in column_name:
                     clean = y[np.isfinite(y)]
                     if clean.size > 0:
                         ax[plot_index].set_ylim(
@@ -755,7 +776,7 @@ def plot_results(
                             np.percentile(clean, 95) * 1.1,
                         )
             except Exception as e:
-                LOGGER.warning(f"WARNING: Plotting error for {f} ({column_names[csv_index]}): {e}")
+                LOGGER.warning("WARNING: Plotting error for %s (%s): %s", f, column_name, e)
         ax[0].legend()
     fname = save_dir / "results.png"
     try:

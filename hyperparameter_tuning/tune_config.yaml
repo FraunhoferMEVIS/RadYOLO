@@ -21,9 +21,9 @@ metrics:
   # Primary metric used for optimization.
   # Per training run: take rolling average over `rolling_window_epochs`, then use
   # the maximum rolling-average value over all valid epoch timestamps.
-  primary_column: metrics/mAP10-95(B)
+  primary_column: metrics/mAP10-95
   # Secondary metric tracked in parallel with the same rolling-window logic.
-  secondary_column: metrics/dice(M)
+  secondary_column: metrics/dice
   # Rolling window size used for both primary and secondary metric extraction.
   rolling_window_epochs: 20
   # How to aggregate per-dataset training metrics into the objective reported to Ray Tune.

@@ -14,6 +14,8 @@ import numpy.typing as npt
 import seaborn as sns
 import torch
 
+plt.switch_backend("Agg")
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -383,6 +385,35 @@ def plot_mc_curve(
     plt.close(fig)
 
 
+def compute_class_agnostic_map(
+    tp: npt.NDArray[np.floating],
+    fp: npt.NDArray[np.floating],
+    conf: npt.NDArray[np.floating],
+    target_cls: npt.NDArray[np.integer | np.floating],
+    save_dir: Path = Path(),
+) -> tuple[float, float]:
+    """Compute class-agnostic mAP@0.1 and mAP@0.1:0.95."""
+    if tp.size == 0 or fp.size == 0 or target_cls.size == 0:
+        return 0.0, 0.0
+
+    agnostic_target_cls = np.zeros(target_cls.shape, dtype=np.int64)
+    agnostic_pred_cls = np.zeros(conf.shape[0], dtype=np.int64)
+    agnostic_results = ap_per_class(
+        tp,
+        fp,
+        conf,
+        agnostic_pred_cls,
+        agnostic_target_cls,
+        plot=False,
+        save_dir=save_dir,
+        names={0: "all"},
+    )
+    agnostic_ap = agnostic_results[5]
+    if not agnostic_ap.size:
+        return 0.0, 0.0
+    return float(agnostic_ap[:, 0].mean()), float(agnostic_ap.mean())
+
+
 def compute_ap(
     recall: list[float], precision: list[float]
 ) -> tuple[float, npt.NDArray[np.floating], npt.NDArray[np.floating]]:
@@ -475,13 +506,32 @@ def ap_per_class(
 
     unique_classes, counts = np.unique(target_cls, return_counts=True)
     # If objects without class (class = -1) are present, don't compute mAP for class -1
-    if unique_classes[0] == -1:
+    if unique_classes.size and unique_classes[0] == -1:
         unique_classes = unique_classes[1:]
         counts = counts[1:]
     nc: int = unique_classes.shape[0]  # number of classes, number of detections
 
     # Create Precision-Recall curve and compute AP for each class
     x, prec_values = np.linspace(0, 1, 1000), []
+
+    if nc == 0:
+        empty_curve = np.zeros((0, 1000), dtype=np.float32)
+        empty_ap = np.zeros((0, tp.shape[1]), dtype=np.float32)
+        empty_scalar = np.zeros((0,), dtype=np.float32)
+        return (
+            empty_scalar,
+            empty_scalar,
+            empty_scalar,
+            empty_scalar,
+            empty_scalar,
+            empty_ap,
+            unique_classes.astype(int),
+            empty_curve,
+            empty_curve,
+            empty_curve,
+            x,
+            empty_curve,
+        )
 
     # Average precision, precision and recall curves
     ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
@@ -586,13 +636,15 @@ class Metric:
     """
 
     def __init__(self) -> None:
-        """Initializes a Metric instance for computing evaluation metrics for the YOLOv8 model."""
+        """Initializes a Metric instance for computing evaluation metrics."""
         self.p: npt.NDArray | list = []  # (nc, )
         self.r: npt.NDArray | list = []  # (nc, )
         self.f1: npt.NDArray | list = []  # (nc, )
         self.all_ap: npt.NDArray | list = []  # (nc, 18)
         self.ap_class_index: npt.NDArray | list[int] = []  # (nc, )
         self.nc: int = 0
+        self.map10_agnostic_value: float = 0.0
+        self.map_agnostic_value: float = 0.0
 
     @property
     def ap10(self) -> npt.NDArray | list:
@@ -621,7 +673,7 @@ class Metric:
         Returns:
             (float): The mean precision of all classes.
         """
-        return self.p.mean() if isinstance(self.p, np.ndarray) else 0.0
+        return self.p.mean() if isinstance(self.p, np.ndarray) and self.p.size else 0.0
 
     @property
     def mr(self) -> float:
@@ -630,7 +682,7 @@ class Metric:
         Returns:
             (float): The mean recall of all classes.
         """
-        return self.r.mean() if isinstance(self.r, np.ndarray) else 0.0
+        return self.r.mean() if isinstance(self.r, np.ndarray) and self.r.size else 0.0
 
     @property
     def map10(self) -> float:
@@ -639,7 +691,11 @@ class Metric:
         Returns:
             (float): The mAP at an IoU threshold of 0.1.
         """
-        return self.all_ap[:, 0].mean() if isinstance(self.all_ap, np.ndarray) else 0.0
+        return (
+            self.all_ap[:, 0].mean()
+            if isinstance(self.all_ap, np.ndarray) and self.all_ap.size
+            else 0.0
+        )
 
     @property
     def map(self) -> float:
@@ -648,11 +704,21 @@ class Metric:
         Returns:
             (float): The mAP over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
         """
-        return self.all_ap.mean() if isinstance(self.all_ap, np.ndarray) else 0.0
+        return self.all_ap.mean() if isinstance(self.all_ap, np.ndarray) and self.all_ap.size else 0.0
+
+    @property
+    def map_agnostic(self) -> float:
+        """Returns class-agnostic mAP over IoU thresholds of 0.1 - 0.95."""
+        return self.map_agnostic_value
+
+    @property
+    def map10_agnostic(self) -> float:
+        """Returns class-agnostic mAP at an IoU threshold of 0.1."""
+        return self.map10_agnostic_value
 
     def mean_results(self) -> list[float]:
-        """Mean of results, return mp, mr, map10, map."""
-        return [self.mp, self.mr, self.map10, self.map]
+        """Mean of results, return mp, mr, map10, map, and agnostic map."""
+        return [self.mp, self.mr, self.map10, self.map10_agnostic, self.map, self.map_agnostic]
 
     def class_result(
         self, i: int
@@ -681,6 +747,8 @@ class Metric:
             npt.NDArray,
             npt.NDArray,
             list,
+            float,
+            float,
         ],
     ) -> None:
         """Updates the evaluation metrics of the model with a new set of results.
@@ -708,6 +776,8 @@ class Metric:
             self.f1_curve,
             self.px,
             self.prec_values,
+            self.map10_agnostic_value,
+            self.map_agnostic_value,
         ) = results
 
     @property
@@ -770,12 +840,14 @@ class DetMetrics:
         self,
         tp: npt.NDArray[np.floating],
         fp: npt.NDArray[np.floating],
+        tp_agnostic: npt.NDArray[np.floating],
+        fp_agnostic: npt.NDArray[np.floating],
         conf: npt.NDArray[np.floating],
         pred_cls: npt.NDArray[np.integer],
         target_cls: npt.NDArray[np.integer],
     ) -> None:
         """Process predicted results for object detection and update metrics."""
-        results = ap_per_class(
+        class_sensitive_results = ap_per_class(
             tp,
             fp,
             conf,
@@ -784,7 +856,15 @@ class DetMetrics:
             plot=self.plot,
             save_dir=self.save_dir,
             names=self.names,
-        )[2:]
+        )
+        map10_agnostic, map_agnostic = compute_class_agnostic_map(
+            tp_agnostic,
+            fp_agnostic,
+            conf,
+            target_cls,
+            save_dir=self.save_dir,
+        )
+        results = (*class_sensitive_results[2:], map10_agnostic, map_agnostic)
         self.box.nc = len(self.names)
         self.box.update(results)
 
@@ -792,15 +872,31 @@ class DetMetrics:
     def keys(self) -> list[str]:
         """Returns a list of keys for accessing specific metrics."""
         return [
-            "metrics/precision(B)",
-            "metrics/recall(B)",
-            "metrics/mAP10(B)",
-            "metrics/mAP10-95(B)",
+            "metrics/precision",
+            "metrics/recall",
+            "metrics/mAP10",
+            "metrics/mAP10Agn",
+            "metrics/mAP10-95",
+            "metrics/mAP10-95Agn",
         ]
 
     def mean_results(self) -> list[float]:
-        """Calculate mean of detected objects & return precision, recall, mAP10, and mAP10-95."""
+        """Calculate mean detection metrics including class-agnostic mAP10-95."""
         return self.box.mean_results()
+
+    @property
+    def summary_keys(self) -> list[str]:
+        """Returns metric keys used for terminal summaries only."""
+        return [
+            "metrics/precision",
+            "metrics/recall",
+            "metrics/mAP10",
+            "metrics/mAP10-95",
+        ]
+
+    def summary_mean_results(self) -> list[float]:
+        """Calculate mean detection metrics shown in the terminal summary."""
+        return [self.box.mp, self.box.mr, self.box.map10, self.box.map]
 
     def class_result(self, i: int) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
         """Return performance of an object detection model on a specific class."""
@@ -825,10 +921,10 @@ class DetMetrics:
     def curves(self) -> list[str]:
         """Returns a list of curves for accessing specific metrics curves."""
         return [
-            "Precision-Recall(B)",
-            "F1-Confidence(B)",
-            "Precision-Confidence(B)",
-            "Recall-Confidence(B)",
+            "Precision-Recall",
+            "F1-Confidence",
+            "Precision-Confidence",
+            "Recall-Confidence",
         ]
 
     @property

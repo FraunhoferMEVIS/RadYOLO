@@ -541,8 +541,8 @@ def _run_trial(
     common_overrides = tune_settings.get("common_train_overrides", {})
     failure_metric = float(metrics_cfg.get("failure_metric", 0.0))
 
-    primary_metric_column = str(metrics_cfg.get("primary_column", "metrics/mAP10-95(B)"))
-    secondary_metric_column = str(metrics_cfg.get("secondary_column", "metrics/dice(M)"))
+    primary_metric_column = str(metrics_cfg.get("primary_column", "metrics/mAP10-95"))
+    secondary_metric_column = str(metrics_cfg.get("secondary_column", "metrics/dice"))
     rolling_window_epochs = int(metrics_cfg.get("rolling_window_epochs", 20))
     if rolling_window_epochs <= 0:
         msg = "metrics.rolling_window_epochs must be a positive integer"

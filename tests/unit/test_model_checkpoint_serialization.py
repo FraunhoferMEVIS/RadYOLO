@@ -35,7 +35,7 @@ def test_load_model_checkpoint_rejects_legacy_numpy_metadata(
         "optimizer_state_dict": optimizer.state_dict(),
         "scaler_state_dict": scaler.state_dict(),
         "train_config": config.model_dump_json(),
-        "train_metrics": {"metrics/mAP-ewa(B)": np.float32(0.25)},
+        "train_metrics": {"metrics/mAP-ewa": np.float32(0.25)},
         "date": datetime.datetime.now(tz=datetime.UTC).isoformat(),
     }
 
@@ -66,14 +66,14 @@ def test_save_model_checkpoint_writes_weights_only_safe_metadata(
         optimizer=optimizer,
         scaler=scaler,
         train_config=config,
-        train_metrics={"metrics/mAP-ewa(B)": np.float32(0.5)},
+        train_metrics={"metrics/mAP-ewa": np.float32(0.5)},
     )
 
     raw_checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     checkpoint = load_model_checkpoint(checkpoint_path)
 
     assert isinstance(raw_checkpoint["optimizer_state_dict"]["param_groups"][0]["lr"], float)
-    assert isinstance(raw_checkpoint["train_metrics"]["metrics/mAP-ewa(B)"], float)
+    assert isinstance(raw_checkpoint["train_metrics"]["metrics/mAP-ewa"], float)
     assert checkpoint["epoch"] == 2
     assert checkpoint["train_config"].experiment_name == config.experiment_name
 
@@ -100,7 +100,7 @@ def test_resume_preserves_typed_patch_size(
         optimizer=optimizer,
         scaler=scaler,
         train_config=config,
-        train_metrics={"metrics/mAP-ewa(B)": 0.25},
+        train_metrics={"metrics/mAP-ewa": 0.25},
     )
 
     resume_config_path = tmp_path / "resume_train.yaml"

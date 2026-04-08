@@ -11,6 +11,10 @@ from radyolo.validation import plotting
 from radyolo.validation.plotting import plot_validation_case
 
 
+def test_plotting_uses_non_interactive_backend() -> None:
+    assert "agg" in plotting.plt.get_backend().lower()
+
+
 @pytest.mark.filterwarnings(
     "ignore:constrained_layout not applied because axes sizes collapsed to zero.*:UserWarning"
 )
@@ -43,9 +47,25 @@ def test_plot_results_warns_when_results_png_is_busy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     results_csv = tmp_path / "results.csv"
-    columns = ["epoch", "train/a", "train/b", "train/c", "train/d", "train/e", "train/f"]
-    columns += ["val/a", "val/b", "val/c", "val/d", "val/e", "metric/a", "metric/b"]
-    columns += ["metric/c", "metric/d", "metric/e"]
+    columns = [
+        "epoch",
+        "train/box_loss",
+        "train/cls_obj_loss",
+        "train/dfl_loss",
+        "train/mask_loss",
+        "train/cls_sep_loss",
+        "val/box_loss",
+        "val/cls_obj_loss",
+        "val/dfl_loss",
+        "val/mask_loss",
+        "val/cls_sep_loss",
+        "metrics/precision",
+        "metrics/mAP10Agn",
+        "metrics/mAP10",
+        "metrics/mAP10-95",
+        "metrics/mAP10-95Agn",
+        "metrics/dice",
+    ]
     pd.DataFrame([[0, *range(1, 17)], [1, *range(2, 18)]], columns=columns).to_csv(
         results_csv,
         index=False,

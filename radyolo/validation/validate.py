@@ -56,6 +56,8 @@ class Validator:
         self.stats: dict[str, list[torch.Tensor]] = {
             "tp": [],
             "fp": [],
+            "tp_agnostic": [],
+            "fp_agnostic": [],
             "conf": [],
             "pred_cls": [],
             "target_cls": [],
@@ -176,6 +178,8 @@ class Validator:
         self.stats = {
             "tp": [],
             "fp": [],
+            "tp_agnostic": [],
+            "fp_agnostic": [],
             "conf": [],
             "pred_cls": [],
             "target_cls": [],
@@ -190,11 +194,11 @@ class Validator:
             "Class",
             "Images",
             "Instances",
-            "Box(P",
-            "R",
+            "Prec",
+            "Rec",
             "mAP10",
-            "mAP10-95)",
-            "Dice(M)",
+            "mAP10-95",
+            "Dice",
         )
 
     def preprocess(self, batch: Batch) -> Batch:
@@ -281,6 +285,12 @@ class Validator:
                 "pred_cls": torch.zeros(0, device=self.device),
                 "tp": torch.zeros(num_predictions, self.niou, dtype=torch.bool, device=self.device),
                 "fp": torch.zeros(num_predictions, self.niou, dtype=torch.bool, device=self.device),
+                "tp_agnostic": torch.zeros(
+                    num_predictions, self.niou, dtype=torch.bool, device=self.device
+                ),
+                "fp_agnostic": torch.zeros(
+                    num_predictions, self.niou, dtype=torch.bool, device=self.device
+                ),
             }
             prepared_batch = self._prepare_batch(sample_index, batch)
             classes, bboxes = prepared_batch.pop("cls"), prepared_batch.pop("bboxes")
@@ -306,6 +316,9 @@ class Validator:
             # Evaluate
             if num_labels:
                 stat["tp"], stat["fp"] = self._process_batch(predn, bboxes, classes)
+                stat["tp_agnostic"], stat["fp_agnostic"] = self._process_batch_class_agnostic(
+                    predn, bboxes, classes
+                )
                 # Compute Dice for matched instances if masks are available
                 if prototype_masks is not None:
                     # Use possibly filtered masks aligned to classes/bboxes
@@ -363,6 +376,19 @@ class Validator:
         """
         iou = box_iou(gt_bboxes, detections[:, :6])
         true_positives, false_positives = self.match_predictions(detections[:, 7], gt_cls, iou)
+        return true_positives, false_positives
+
+    def _process_batch_class_agnostic(
+        self, detections: torch.Tensor, gt_bboxes: torch.Tensor, gt_cls: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return correct prediction matrices using IoU-only matching."""
+        iou = box_iou(gt_bboxes, detections[:, :6])
+        true_positives, false_positives = self.match_predictions(
+            detections[:, 7],
+            gt_cls,
+            iou,
+            class_agnostic=True,
+        )
         return true_positives, false_positives
 
     def _get_matches(
@@ -450,6 +476,7 @@ class Validator:
         pred_classes: torch.Tensor,
         true_classes: torch.Tensor,
         iou: torch.Tensor,
+        class_agnostic: bool = False,
     ) -> torch.Tensor:
         """Matches predictions to ground truth objects (pred_classes, true_classes) using IoU.
 
@@ -458,6 +485,8 @@ class Validator:
             true_classes (torch.Tensor): Target class indices of shape(T,).
             iou (torch.Tensor): An PxT tensor containing the pairwise IoU values for prediction and
                 ground truth bounding boxes
+            class_agnostic (bool): If True, match by IoU only and treat every target, including
+                class -1, as a valid true object.
 
         Returns:
             (torch.Tensor): True positive tensor of shape(P, 18) for 18 IoU thresholds.
@@ -469,10 +498,14 @@ class Validator:
             bool
         )
         # shape(T, P) T: true class, P: predicted
-        correct_class = true_classes[:, None] == pred_classes
-        missing_class = torch.logical_and(
-            true_classes[:, None] != pred_classes, true_classes[:, None] == -1
-        )  # calculate false positives for class -1 (missing class label)
+        if class_agnostic:
+            correct_class = torch.ones_like(iou, dtype=torch.bool)
+            missing_class = torch.zeros_like(iou, dtype=torch.bool)
+        else:
+            correct_class = true_classes[:, None] == pred_classes
+            missing_class = torch.logical_and(
+                true_classes[:, None] != pred_classes, true_classes[:, None] == -1
+            )  # calculate false positives for class -1 (missing class label)
         iou_tp = iou * correct_class  # shape(T, P) zero out the wrong classes
         iou_missing_class = iou * missing_class  # shape(T, P) zero out the non-missing classes
         iou_tp_np = iou_tp.cpu().numpy()  # shape(T, P)
@@ -538,23 +571,34 @@ class Validator:
         else:
             self.nt_per_image = np.zeros(self.nc, dtype=np.int64)
         stats.pop("target_img", None)
-        if stats and stats["tp"].any():
-            self.metrics.process(**stats)
+        if stats and (stats["tp"].any() or stats["tp_agnostic"].any()):
+            self.metrics.process(
+                tp=stats["tp"],
+                fp=stats["fp"],
+                tp_agnostic=stats["tp_agnostic"],
+                fp_agnostic=stats["fp_agnostic"],
+                conf=stats["conf"],
+                pred_cls=stats["pred_cls"],
+                target_cls=stats["target_cls"],
+            )
         # Add Dice metric
         dice_avg = self._get_dice_average()
-        return {**self.metrics.results_dict, "metrics/dice(M)": dice_avg}
+        return {
+            **self.metrics.results_dict,
+            "metrics/dice": dice_avg,
+        }
 
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
         LOGGER.info(self.get_desc())
         dice_avg = self._get_dice_average()
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.keys) + 1)  # print format
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.summary_keys) + 1)
         LOGGER.info(
             pf,
             "all",
             self.seen,
             self.nt_per_class.sum(),
-            *self.metrics.mean_results(),
+            *self.metrics.summary_mean_results(),
             dice_avg,
         )
         if self.nt_per_class.sum() == 0:

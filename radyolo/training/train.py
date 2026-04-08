@@ -644,7 +644,7 @@ class Trainer:
             self.config,
             {
                 **metrics,
-                "metrics/mAP-ewa(B)": float(self.ewa_mAP1095)
+                "metrics/mAP-ewa": float(self.ewa_mAP1095)
                 if self.ewa_mAP1095 is not None
                 else 0.0,
             },
@@ -671,7 +671,7 @@ class Trainer:
         best_fitness: float | None,
     ) -> tuple[dict[str, float], float, float]:
         metrics = validator(self, ema=ema)
-        map_val = metrics.get("metrics/mAP10-95(B)")
+        map_val = metrics.get("metrics/mAP10-95")
         if map_val is not None:
             if self.ewa_mAP1095 is None:
                 self.ewa_mAP1095 = float(map_val)
@@ -679,7 +679,7 @@ class Trainer:
                 self.ewa_mAP1095 = self.ewa_alpha * float(self.ewa_mAP1095) + (
                     1.0 - self.ewa_alpha
                 ) * float(map_val)
-            metrics["metrics/mAP-ewa(B)"] = float(self.ewa_mAP1095)
+            metrics["metrics/mAP-ewa"] = float(self.ewa_mAP1095)
         fitness = float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0
         if not best_fitness or best_fitness < fitness:
             best_fitness = fitness
@@ -719,7 +719,7 @@ class Trainer:
         scaler.load_state_dict(checkpoint["scaler_state_dict"])
         ema.ema.load_state_dict(checkpoint["model_state_dict"])
         ema.updates = checkpoint["ema_updates"]
-        self.ewa_mAP1095 = checkpoint.get("train_metrics", {}).get("metrics/mAP-ewa(B)")
+        self.ewa_mAP1095 = checkpoint.get("train_metrics", {}).get("metrics/mAP-ewa")
 
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",
