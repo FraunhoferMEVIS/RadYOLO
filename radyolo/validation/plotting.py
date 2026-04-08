@@ -728,13 +728,6 @@ def plot_results(
             'path/to/results.csv'.
         directory (str, optional): Directory where CSV file is located if 'file' is not provided.
             Defaults to ''.
-
-    Example:
-        ```python
-        from ultralytics.utils.plotting import plot_results
-
-        plot_results("path/to/results.csv", segment=True)
-        ```
     """
     save_dir = Path(file).parent if file else Path(directory)
     fig, ax = plt.subplots(3, 5, figsize=(16, 7), tight_layout=True, sharex="col")
@@ -764,9 +757,12 @@ def plot_results(
             except Exception as e:
                 LOGGER.warning(f"WARNING: Plotting error for {f} ({column_names[csv_index]}): {e}")
         ax[0].legend()
-        fname = save_dir / "results.png"
+    fname = save_dir / "results.png"
+    try:
         fig.savefig(fname, dpi=200)
-        plt.close()
+    except OSError as e:
+        LOGGER.warning("Could not save plot %s: %s", fname, e)
+    plt.close(fig)
 
 
 def output_to_target(
