@@ -230,6 +230,45 @@ def test_patchwise_dataset_oversampled_indices_sample_from_foreground_boxes(
     assert sample["masks"] is not None
 
 
+def test_patchwise_validation_sampling_is_deterministic_per_index(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    dataset_root = tmp_path / "deterministic_val_dataset"
+    shutil.copytree(synthetic_dataset, dataset_root)
+    (dataset_root / "data_splits.json").write_text(
+        json.dumps([
+            {"train": ["case1"], "val": ["case2", "case3"], "test": ["case4"]}
+        ]),
+        encoding="utf-8",
+    )
+
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        group="val",
+        foreground_oversampling=0.5,
+        sampling_seed=17,
+    )
+
+    repeated_base_samples = [dataset[0], dataset[0]]
+    repeated_oversampled_samples = [dataset[len(dataset.cases)], dataset[len(dataset.cases)]]
+
+    for first, second in (
+        repeated_base_samples,
+        repeated_oversampled_samples,
+    ):
+        assert first["case_name"] == second["case_name"]
+        assert first["ratio_pad"] == second["ratio_pad"]
+        assert torch.equal(first["image"], second["image"])
+        assert torch.equal(first["classes"], second["classes"])
+        assert torch.equal(first["bboxes"], second["bboxes"])
+        assert first["masks"] is not None
+        assert second["masks"] is not None
+        assert torch.equal(first["masks"], second["masks"])
+
+
 def test_crop_boxes_to_patch_drops_boxes_below_minimum_containment() -> None:
     classes = torch.tensor([[0.0], [1.0]], dtype=torch.float32)
     bboxes = torch.tensor(

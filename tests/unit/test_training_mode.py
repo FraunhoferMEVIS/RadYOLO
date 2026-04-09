@@ -43,6 +43,8 @@ def test_trainer_uses_patchwise_dataset_for_training_and_validation(
     assert isinstance(val_loader.dataset, PatchWiseDataset)
     assert train_loader.dataset.foreground_oversampling == 0.25
     assert val_loader.dataset.foreground_oversampling == 0.25
+    assert train_loader.dataset.deterministic_sampling is False
+    assert val_loader.dataset.deterministic_sampling is True
     assert train_loader.dataset.min_box_crop_fraction == 0.5
     assert val_loader.dataset.min_box_crop_fraction == 0.5
 

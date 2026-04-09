@@ -544,10 +544,12 @@ def _validate_foreground_oversampling(foreground_oversampling: float) -> None:
 def _sample_patch_center_from_bbox(
     bbox: torch.Tensor,
     image_shape_xyz: tuple[int, int, int],
+    rng: random.Random | None = None,
 ) -> tuple[int, int, int]:
     bbox_tensor = bbox.to(dtype=torch.float32).unsqueeze(0)
     image_scale = bbox_tensor.new_tensor((*image_shape_xyz, *image_shape_xyz))
     box_xyzxyz = xyzwhd2xyzxyz(bbox_tensor * image_scale)[0]
+    random_generator = random if rng is None else rng
 
     center_xyz = []
     for axis, image_dim in enumerate(image_shape_xyz):
@@ -559,7 +561,7 @@ def _sample_patch_center_from_bbox(
         if upper_idx < lower_idx:
             sampled_position = round((lower + upper) / 2.0)
         else:
-            sampled_position = random.randint(lower_idx, upper_idx)
+            sampled_position = random_generator.randint(lower_idx, upper_idx)
         center_xyz.append(min(max(sampled_position, 0), image_dim - 1))
 
     return tuple(center_xyz)
@@ -694,22 +696,28 @@ def _collate_samples(batch: list[Sample]) -> Batch:
         }
 
 
-def _sample_patch_center_for_axis(image_dim: int, patch_dim: int) -> int:
+def _sample_patch_center_for_axis(
+    image_dim: int,
+    patch_dim: int,
+    rng: random.Random | None = None,
+) -> int:
     if patch_dim >= image_dim:
         return image_dim // 2
 
     max_overhang = int(patch_dim * 0.2)
     lower_center = (patch_dim // 2) - max_overhang
     upper_center = image_dim - (patch_dim - (patch_dim // 2)) + max_overhang
-    return random.randint(lower_center, upper_center)
+    random_generator = random if rng is None else rng
+    return random_generator.randint(lower_center, upper_center)
 
 
 def _sample_patch_center(
     image_shape_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
+    rng: random.Random | None = None,
 ) -> tuple[int, int, int]:
     return tuple(
-        _sample_patch_center_for_axis(image_dim, patch_dim)
+        _sample_patch_center_for_axis(image_dim, patch_dim, rng)
         for image_dim, patch_dim in zip(image_shape_xyz, patch_shape_xyz, strict=True)
     )
 
@@ -1029,7 +1037,6 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_size: PatchSize,
         augment: bool = False,
         min_stride: int = 8,
-        pad: float = 0.5,
         fold: int = 0,
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
@@ -1037,6 +1044,8 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         foreground_oversampling: float = 0.33,
         min_box_crop_fraction: float = 0.5,
         config: DefaultConfig | None = None,
+        deterministic_sampling: bool | None = None,
+        sampling_seed: int | None = None,
     ) -> None:
         super().__init__()
         _validate_foreground_oversampling(foreground_oversampling)
@@ -1051,6 +1060,16 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
         self.min_box_crop_fraction = min_box_crop_fraction
+        self.deterministic_sampling = (
+            group != "train" and not augment
+            if deterministic_sampling is None
+            else deterministic_sampling
+        )
+        self.sampling_seed = (
+            int(config.seed)
+            if sampling_seed is None and config is not None
+            else int(sampling_seed or 0)
+        )
         self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
@@ -1088,29 +1107,52 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self,
         image_shape_xyz: tuple[int, int, int],
         patch_shape_xyz: tuple[int, int, int],
+        rng: random.Random | None = None,
     ) -> tuple[int, int, int]:
-        return _sample_patch_center(image_shape_xyz, patch_shape_xyz)
+        return _sample_patch_center(image_shape_xyz, patch_shape_xyz, rng)
 
     @staticmethod
     def _sample_patch_center_from_bbox(
         bbox: torch.Tensor,
         image_shape_xyz: tuple[int, int, int],
+        rng: random.Random | None = None,
     ) -> tuple[int, int, int]:
-        return _sample_patch_center_from_bbox(bbox, image_shape_xyz)
+        return _sample_patch_center_from_bbox(bbox, image_shape_xyz, rng)
 
-    def _sample_foreground_case_and_bbox(self) -> tuple[str, torch.Tensor]:
-        case_name = random.choice(self.foreground_cases)
+    def _get_index_rng(self, index: int) -> random.Random | None:
+        if not self.deterministic_sampling:
+            return None
+
+        group_offsets = {"train": 0, "val": 1, "test": 2}
+        seed = (
+            self.sampling_seed
+            + (self.fold * 1_000_003)
+            + (group_offsets[self.group] * 10_000_019)
+            + (index * 1_000_000_007)
+        )
+        return random.Random(seed)
+
+    def _sample_foreground_case_and_bbox(
+        self,
+        rng: random.Random | None = None,
+    ) -> tuple[str, torch.Tensor]:
+        random_generator = random if rng is None else rng
+        case_name = random_generator.choice(self.foreground_cases)
         case_bboxes = self.foreground_case_bboxes[case_name]
-        bbox_index = random.randrange(case_bboxes.shape[0])
+        bbox_index = random_generator.randrange(case_bboxes.shape[0])
         return case_name, case_bboxes[bbox_index]
 
-    def _resolve_sampling_target(self, index: int) -> tuple[str, torch.Tensor | None]:
+    def _resolve_sampling_target(
+        self,
+        index: int,
+        rng: random.Random | None = None,
+    ) -> tuple[str, torch.Tensor | None]:
         dataset_length = len(self)
         if index < 0 or index >= dataset_length:
             raise IndexError(index)
         if index < len(self.cases):
             return self.cases[index], None
-        return self._sample_foreground_case_and_bbox()
+        return self._sample_foreground_case_and_bbox(rng)
 
     def _get_chunked_image_shape(self, case_name: str) -> tuple[int, int, int]:
         return _get_chunked_blosc2_shape(
@@ -1210,18 +1252,24 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         )
 
     def load_image_label_and_mask(self, index: int) -> Sample:
-        case_name, foreground_bbox = self._resolve_sampling_target(index)
+        rng = self._get_index_rng(index)
+        case_name, foreground_bbox = self._resolve_sampling_target(index, rng)
         patch_shape_xyz = self.patch_size.get_xyz()
 
         if self.image_format == "nifti":
             image_array = _load_image_array(self.src_path, case_name, self.image_format)
             image_shape_xyz = _get_spatial_shape(tuple(int(dim) for dim in image_array.shape))
             if foreground_bbox is None:
-                patch_center_xyz = self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+                patch_center_xyz = self._sample_patch_center(
+                    image_shape_xyz,
+                    patch_shape_xyz,
+                    rng,
+                )
             else:
                 patch_center_xyz = self._sample_patch_center_from_bbox(
                     foreground_bbox,
                     image_shape_xyz,
+                    rng,
                 )
             patch_origin_xyz = _compute_patch_origin(patch_center_xyz, patch_shape_xyz)
             image_patch = _extract_patch_from_array(
@@ -1233,11 +1281,16 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         else:
             image_shape_xyz = self._get_chunked_image_shape(case_name)
             if foreground_bbox is None:
-                patch_center_xyz = self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+                patch_center_xyz = self._sample_patch_center(
+                    image_shape_xyz,
+                    patch_shape_xyz,
+                    rng,
+                )
             else:
                 patch_center_xyz = self._sample_patch_center_from_bbox(
                     foreground_bbox,
                     image_shape_xyz,
+                    rng,
                 )
             patch_origin_xyz = _compute_patch_origin(patch_center_xyz, patch_shape_xyz)
             image_patch = self._load_chunked_image_patch(
