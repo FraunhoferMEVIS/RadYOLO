@@ -339,7 +339,10 @@ class Trainer:
                 "Size",
             )
             pbar = tqdm(
-                enumerate(train_loader), total=num_batches, bar_format="{l_bar}{bar:10}{r_bar}"
+                enumerate(train_loader),
+                total=num_batches,
+                bar_format="{l_bar}{bar:10}{r_bar}",
+                smoothing=0.05,
             )
             tloss: torch.Tensor | None = torch.zeros(5, dtype=torch.float64)
             loss_length: int = 1
@@ -653,9 +656,7 @@ class Trainer:
             self.config,
             {
                 **metrics,
-                "metrics/mAP-ewa": float(self.ewa_mAP1095)
-                if self.ewa_mAP1095 is not None
-                else 0.0,
+                "metrics/mAP-ewa": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0,
             },
         )
 

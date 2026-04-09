@@ -139,7 +139,9 @@ def benchmark_dataloader_iteration(dataloader: torch.utils.data.DataLoader) -> B
 
     total_start = time.perf_counter()
     dataloader_iterator = iter(dataloader)
-    with tqdm(total=len(dataloader), desc="Benchmarking", unit="batch") as progress_bar:
+    with tqdm(
+        total=len(dataloader), desc="Benchmarking", unit="batch", smoothing=0.05
+    ) as progress_bar:
         while True:
             batch_start = time.perf_counter()
             try:

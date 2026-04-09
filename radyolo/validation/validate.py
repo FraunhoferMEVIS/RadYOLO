@@ -121,7 +121,9 @@ class Validator:
             self.device = model.device
         model.eval()
 
-        bar = tqdm(self.dataloader, desc=self.get_desc(), total=len(self.dataloader))
+        bar = tqdm(
+            self.dataloader, desc=self.get_desc(), total=len(self.dataloader), smoothing=0.05
+        )
         self.init_metrics()
         self.predictions_for_saving = {}
         for batch_i, raw_batch in enumerate(bar):

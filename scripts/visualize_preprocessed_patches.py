@@ -493,7 +493,9 @@ def main() -> int:
 
     num_written = 0
     difference_channels = tuple(args.difference_channels)
-    with tqdm(total=args.num_samples, desc="Visualizing", unit="sample") as progress_bar:
+    with tqdm(
+        total=args.num_samples, desc="Visualizing", unit="sample", smoothing=0.05
+    ) as progress_bar:
         for batch in dataloader:
             images: torch.Tensor = batch["img"]
             masks_tuple = batch["masks"]

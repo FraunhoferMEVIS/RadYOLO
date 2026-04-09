@@ -349,7 +349,7 @@ def _preprocess_cases_serially(
     out_masks_dir: Path | None,
     case_config: PreprocessCaseConfig,
 ) -> None:
-    progress_bar = tqdm(total=len(cases), desc="Preprocessing", unit="case")
+    progress_bar = tqdm(total=len(cases), desc="Preprocessing", unit="case", smoothing=0.05)
     try:
         for case_id, image_path in cases:
             try:
@@ -390,7 +390,7 @@ def _preprocess_cases_in_process_pool(
             ): case_id
             for case_id, image_path in cases
         }
-        progress_bar = tqdm(total=len(futures), desc="Preprocessing", unit="case")
+        progress_bar = tqdm(total=len(futures), desc="Preprocessing", unit="case", smoothing=0.05)
         try:
             for future in as_completed(futures):
                 case_id = futures[future]

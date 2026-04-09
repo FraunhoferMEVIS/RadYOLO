@@ -377,7 +377,7 @@ def analyze_dataset(
     executor = ProcessPoolExecutor(max_workers=max_workers)
     futures = {}
     processed = 0
-    pbar = tqdm(total=total_cases, desc="Analyzing", unit="case")
+    pbar = tqdm(total=total_cases, desc="Analyzing", unit="case", smoothing=0.05)
     try:
         for case_id, image_path in cases:
             label_path = labels_dir / f"{case_id}.txt"

@@ -285,7 +285,7 @@ def convert_dataset_to_nndetection(
     processed_test = 0
     mapping_rows: list[dict[str, str]] = []
     if total_cases > 0:
-        pbar = tqdm(total=total_cases, desc="Converting", unit="case")
+        pbar = tqdm(total=total_cases, desc="Converting", unit="case", smoothing=0.05)
         executor = ProcessPoolExecutor(max_workers=max_workers)
         try:
             futures = {}
