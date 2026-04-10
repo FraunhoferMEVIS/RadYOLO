@@ -153,7 +153,7 @@ def test_extract_patch_from_array_uses_zero_for_mask_padding() -> None:
     assert patch[1:, 1:, 1:].min() == 1
 
 
-def test_load_chunked_blosc2_patch_uses_store_min_for_image_padding(monkeypatch) -> None:
+def test_load_chunked_blosc2_patch_uses_loaded_patch_min_for_image_padding(monkeypatch) -> None:
     class FakeChunkedArray:
         def __init__(self, dtype: np.dtype) -> None:
             self.shape = (4, 4, 4)
@@ -167,7 +167,7 @@ def test_load_chunked_blosc2_patch_uses_store_min_for_image_padding(monkeypatch)
             )
 
         def min(self) -> float:
-            return 3.0
+            raise AssertionError("store.min() should not be called for image padding")
 
     monkeypatch.setattr(data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.float32))
 
@@ -179,7 +179,7 @@ def test_load_chunked_blosc2_patch_uses_store_min_for_image_padding(monkeypatch)
     )
 
     assert patch.shape == (3, 3, 3)
-    assert patch[0, 0, 0] == 3.0
+    assert patch[0, 0, 0] == 7.0
     assert patch[1:, 1:, 1:].min() == 7.0
 
 
