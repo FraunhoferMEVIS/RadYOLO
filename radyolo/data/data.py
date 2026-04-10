@@ -14,6 +14,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from radyolo.config.spatial import PatchSize
 from radyolo.data.augmentations import (
     batch_generators_intensity_augmentations,
     ensure_non_zero_box_extents,
@@ -31,10 +32,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from radyolo.config.config import DefaultConfig
-    from radyolo.config.spatial import PatchSize
     from radyolo.data.normalization import NormalizationConfig
 
 LOGGER = logging.getLogger(__name__)
+PATCHWISE_TRAIN_EXTRACTION_SCALE = 1.2
 
 
 def _has_intensity_augmentations_on_device(
@@ -129,6 +130,90 @@ def _has_spatial_augmentations_on_device(
         )
     )
 
+def _get_other_augmentation_placement(
+    placement: Literal["cpu", "gpu"],
+) -> Literal["cpu", "gpu"]:
+    return "gpu" if placement == "cpu" else "cpu"
+
+
+def _get_tensor_spatial_shape_xyz(tensor: torch.Tensor) -> tuple[int, int, int]:
+    return tuple(int(dim) for dim in reversed(tensor.shape[-3:]))
+
+
+def _center_crop_tensor_spatial(
+    tensor: torch.Tensor,
+    crop_origin_xyz: tuple[int, int, int],
+    crop_shape_xyz: tuple[int, int, int],
+) -> torch.Tensor:
+    crop_origin_zyx = tuple(reversed(crop_origin_xyz))
+    crop_shape_zyx = tuple(reversed(crop_shape_xyz))
+    slices = [slice(None)] * tensor.ndim
+    for axis, (origin, size) in enumerate(zip(crop_origin_zyx, crop_shape_zyx, strict=True)):
+        slices[tensor.ndim - 3 + axis] = slice(origin, origin + size)
+    return tensor[tuple(slices)]
+
+
+def _center_crop_sample_to_patch(
+    image: torch.Tensor,
+    classes: torch.Tensor,
+    bboxes: torch.Tensor,
+    masks: torch.Tensor | None,
+    target_patch_shape_xyz: tuple[int, int, int],
+    *,
+    min_box_crop_fraction: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    current_patch_shape_xyz = _get_tensor_spatial_shape_xyz(image)
+    if current_patch_shape_xyz == target_patch_shape_xyz:
+        return image, classes, bboxes, masks
+
+    if any(
+        target_dim > current_dim
+        for target_dim, current_dim in zip(
+            target_patch_shape_xyz,
+            current_patch_shape_xyz,
+            strict=True,
+        )
+    ):
+        msg = (
+            "Center crop target patch size must not exceed current patch size, got "
+            f"current={current_patch_shape_xyz} and target={target_patch_shape_xyz}."
+        )
+        raise ValueError(msg)
+
+    crop_origin_xyz = tuple(
+        (current_dim - target_dim) // 2
+        for current_dim, target_dim in zip(
+            current_patch_shape_xyz,
+            target_patch_shape_xyz,
+            strict=True,
+        )
+    )
+    image = _center_crop_tensor_spatial(image, crop_origin_xyz, target_patch_shape_xyz)
+    if masks is not None:
+        masks = _center_crop_tensor_spatial(masks, crop_origin_xyz, target_patch_shape_xyz)
+
+    classes, bboxes, keep = _crop_boxes_to_patch_with_keep(
+        classes,
+        bboxes,
+        current_patch_shape_xyz,
+        crop_origin_xyz,
+        target_patch_shape_xyz,
+        min_box_crop_fraction=min_box_crop_fraction,
+    )
+    masks = _filter_instance_masks(masks, keep)
+    return image, classes, bboxes, masks
+
+
+def _should_center_crop_after_augmentations(
+    config: DefaultConfig,
+    placement: Literal["cpu", "gpu"],
+) -> bool:
+    if placement == "gpu":
+        return True
+    return not _has_spatial_augmentations_on_device(
+        config,
+        _get_other_augmentation_placement(placement),
+    )
 
 def _apply_configured_augmentations_to_sample(
     image: torch.Tensor,
@@ -148,6 +233,15 @@ def _apply_configured_augmentations_to_sample(
             config,
             patch_size,
             placement,
+        )
+    if _should_center_crop_after_augmentations(config, placement):
+        image, classes, bboxes, masks = _center_crop_sample_to_patch(
+            image,
+            classes,
+            bboxes,
+            masks,
+            patch_size.get_xyz(),
+            min_box_crop_fraction=config.min_box_crop_fraction,
         )
     image = _apply_configured_image_augmentations(image, config, placement)
     return image, classes, bboxes, masks
@@ -237,19 +331,23 @@ def apply_configured_augmentations_to_batch(
 ) -> Batch:
     images = batch["img"]
     batch_device = images.device
+    images_out: list[torch.Tensor] = []
     classes_out: list[torch.Tensor] = []
     bboxes_out: list[torch.Tensor] = []
     batch_idx_out: list[torch.Tensor] = []
     masks_out: list[torch.Tensor | None] = []
+    shapes_out: list[tuple[int, int, int]] = []
+    ratio_pad_out: list[tuple[tuple[float, float, float], tuple[int, int, int]] | None] = []
 
     for sample_idx in range(images.shape[0]):
+        image_in = images[sample_idx]
         sample_mask = batch["batch_idx"] == sample_idx
         sample_classes = batch["cls"][sample_mask]
         sample_bboxes = batch["bboxes"][sample_mask]
         sample_masks = batch["masks"][sample_idx]
 
         image_aug, classes_aug, bboxes_aug, masks_aug = _apply_configured_augmentations_to_sample(
-            images[sample_idx],
+            image_in,
             sample_classes,
             sample_bboxes,
             sample_masks,
@@ -262,8 +360,31 @@ def apply_configured_augmentations_to_batch(
         bboxes_aug = bboxes_aug.to(device=batch_device)
         if masks_aug is not None:
             masks_aug = masks_aug.to(device=batch_device)
-        images[sample_idx] = image_aug
+        images_out.append(image_aug)
         masks_out.append(masks_aug)
+        shapes_out.append(tuple(int(dim) for dim in image_aug.shape[-3:]))
+
+        ratio_pad = batch["ratio_pad"][sample_idx]
+        if ratio_pad is not None:
+            input_patch_shape_xyz = _get_tensor_spatial_shape_xyz(image_in)
+            output_patch_shape_xyz = _get_tensor_spatial_shape_xyz(image_aug)
+            crop_origin_xyz = tuple(
+                (input_dim - output_dim) // 2
+                for input_dim, output_dim in zip(
+                    input_patch_shape_xyz,
+                    output_patch_shape_xyz,
+                    strict=True,
+                )
+            )
+            ratio, pad = ratio_pad
+            ratio_pad = (
+                ratio,
+                tuple(
+                    int(axis_pad) - crop
+                    for axis_pad, crop in zip(pad, crop_origin_xyz, strict=True)
+                ),
+            )
+        ratio_pad_out.append(ratio_pad)
 
         if classes_aug.shape[0]:
             classes_out.append(classes_aug)
@@ -277,7 +398,9 @@ def apply_configured_augmentations_to_batch(
                 )
             )
 
-    batch["img"] = images
+    batch["img"] = torch.stack(images_out)
+    batch["shape"] = tuple(shapes_out)
+    batch["ratio_pad"] = tuple(ratio_pad_out)
     batch["masks"] = tuple(masks_out)
     if classes_out:
         batch["cls"] = torch.cat(classes_out, 0)
@@ -387,7 +510,7 @@ def _extract_patch_from_array(
     patch_origin_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
     *,
-    fill_value: float = 0,
+    fill_value: float | None = None,
 ) -> np.ndarray:
     array_shape = tuple(int(dim) for dim in array.shape)
     spatial_axis_offset = _get_spatial_axis_offset(array_shape)
@@ -395,6 +518,8 @@ def _extract_patch_from_array(
     source_start_xyz, source_end_xyz, destination_start_xyz, destination_end_xyz = (
         _compute_patch_layout(patch_origin_xyz, patch_shape_xyz, image_shape_xyz)
     )
+    if fill_value is None:
+        fill_value = float(array.min())
 
     patch_shape = list(array_shape)
     patch_shape[spatial_axis_offset : spatial_axis_offset + 3] = list(patch_shape_xyz)
@@ -632,6 +757,7 @@ def _augment_sample(
     if not augment:
         return sample
 
+    original_patch_shape_xyz = _get_tensor_spatial_shape_xyz(sample["image"])
     image, classes, bboxes, masks = (
         sample["image"],
         sample["classes"],
@@ -653,6 +779,25 @@ def _augment_sample(
     sample["classes"] = classes
     sample["bboxes"] = bboxes
     sample["masks"] = masks
+    sample["shape"] = tuple(int(dim) for dim in image.shape[-3:])
+    if sample["ratio_pad"] is not None:
+        ratio, pad = sample["ratio_pad"]
+        cropped_patch_shape_xyz = _get_tensor_spatial_shape_xyz(image)
+        crop_origin_xyz = tuple(
+            (input_dim - output_dim) // 2
+            for input_dim, output_dim in zip(
+                original_patch_shape_xyz,
+                cropped_patch_shape_xyz,
+                strict=True,
+            )
+        )
+        sample["ratio_pad"] = (
+            ratio,
+            tuple(
+                int(axis_pad) - crop
+                for axis_pad, crop in zip(pad, crop_origin_xyz, strict=True)
+            ),
+        )
     return sample
 
 
@@ -700,13 +845,27 @@ def _sample_patch_center_for_axis(
     image_dim: int,
     patch_dim: int,
     rng: random.Random | None = None,
+    crop_dim: int | None = None,
+    allow_overhang: bool = False,
 ) -> int:
     if patch_dim >= image_dim:
         return image_dim // 2
 
-    max_overhang = int(patch_dim * 0.2)
-    lower_center = (patch_dim // 2) - max_overhang
-    upper_center = image_dim - (patch_dim - (patch_dim // 2)) + max_overhang
+    if allow_overhang:
+        if crop_dim is None:
+            msg = "crop_dim must be provided when allow_overhang=True"
+            raise ValueError(msg)
+        if crop_dim > patch_dim:
+            msg = f"crop_dim must be <= patch_dim, got crop_dim={crop_dim}, patch_dim={patch_dim}"
+            raise ValueError(msg)
+
+        lower_overhang = (patch_dim - crop_dim) // 2
+        upper_overhang = patch_dim - crop_dim - lower_overhang
+        lower_center = (patch_dim // 2) - lower_overhang
+        upper_center = image_dim - (patch_dim - (patch_dim // 2)) + upper_overhang
+    else:
+        lower_center = patch_dim // 2
+        upper_center = image_dim - (patch_dim - (patch_dim // 2))
     random_generator = random if rng is None else rng
     return random_generator.randint(lower_center, upper_center)
 
@@ -715,10 +874,24 @@ def _sample_patch_center(
     image_shape_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
     rng: random.Random | None = None,
+    crop_shape_xyz: tuple[int, int, int] | None = None,
+    allow_overhang: bool = False,
 ) -> tuple[int, int, int]:
+    if allow_overhang and crop_shape_xyz is None:
+        msg = "crop_shape_xyz must be provided when allow_overhang=True"
+        raise ValueError(msg)
+
     return tuple(
-        _sample_patch_center_for_axis(image_dim, patch_dim, rng)
-        for image_dim, patch_dim in zip(image_shape_xyz, patch_shape_xyz, strict=True)
+        _sample_patch_center_for_axis(
+            image_dim,
+            patch_dim,
+            rng,
+            crop_dim=None if crop_shape_xyz is None else crop_shape_xyz[axis],
+            allow_overhang=allow_overhang,
+        )
+        for axis, (image_dim, patch_dim) in enumerate(
+            zip(image_shape_xyz, patch_shape_xyz, strict=True)
+        )
     )
 
 
@@ -729,12 +902,21 @@ def _get_chunked_blosc2_shape(store_path: Path) -> tuple[int, int, int]:
     )
 
 
+def _get_patchwise_training_extraction_size(patch_size: PatchSize) -> PatchSize:
+    return PatchSize(
+        x=math.ceil(patch_size.x * PATCHWISE_TRAIN_EXTRACTION_SCALE),
+        y=math.ceil(patch_size.y * PATCHWISE_TRAIN_EXTRACTION_SCALE),
+        z=math.ceil(patch_size.z * PATCHWISE_TRAIN_EXTRACTION_SCALE),
+    )
+
+
 def _load_chunked_blosc2_patch(
     store_path: Path,
     patch_origin_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
     *,
     dtype: np.dtype,
+    fill_value: float | None = None,
 ) -> np.ndarray:
     blosc2.set_nthreads(1)
     store = blosc2.open(str(store_path), mode="r")
@@ -748,7 +930,6 @@ def _load_chunked_blosc2_patch(
 
     patch_shape = list(store_shape)
     patch_shape[spatial_axis_offset : spatial_axis_offset + 3] = list(patch_shape_xyz)
-    patch = np.zeros(tuple(patch_shape), dtype=dtype)
 
     source_slices = [slice(None)] * len(store_shape)
     destination_slices = [slice(None)] * len(patch_shape)
@@ -762,7 +943,12 @@ def _load_chunked_blosc2_patch(
             destination_end_xyz[axis],
         )
 
-    patch[tuple(destination_slices)] = np.asarray(store[tuple(source_slices)], dtype=dtype)
+    source_array = np.asarray(store[tuple(source_slices)], dtype=dtype)
+    if fill_value is None:
+        fill_value = float(source_array.min())
+    patch = np.full(tuple(patch_shape), fill_value=fill_value, dtype=dtype)
+
+    patch[tuple(destination_slices)] = source_array
     return patch
 
 
@@ -1062,6 +1248,11 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
         self.min_box_crop_fraction = min_box_crop_fraction
+        self.extraction_patch_size = (
+            _get_patchwise_training_extraction_size(self.patch_size)
+            if self.augment
+            else self.patch_size
+        )
         self.deterministic_sampling = (
             group != "train" and not augment
             if deterministic_sampling is None
@@ -1111,7 +1302,13 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_shape_xyz: tuple[int, int, int],
         rng: random.Random | None = None,
     ) -> tuple[int, int, int]:
-        return _sample_patch_center(image_shape_xyz, patch_shape_xyz, rng)
+        return _sample_patch_center(
+            image_shape_xyz,
+            patch_shape_xyz,
+            rng,
+            crop_shape_xyz=self.patch_size.get_xyz(),
+            allow_overhang=self.augment,
+        )
 
     @staticmethod
     def _sample_patch_center_from_bbox(
@@ -1194,6 +1391,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             patch_origin_xyz,
             patch_shape_xyz,
             dtype=dtype,
+            fill_value=None if np.issubdtype(dtype, np.floating) else 0,
         )
 
     def _load_chunked_image_patch(
@@ -1220,6 +1418,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             patch_origin_xyz,
             patch_shape_xyz,
             dtype=np.uint8,
+            fill_value=0,
         )
 
     def _crop_boxes_to_patch(
@@ -1276,7 +1475,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
     def load_image_label_and_mask(self, index: int) -> Sample:
         rng = self._get_index_rng(index)
         case_name, foreground_bbox = self._resolve_sampling_target(index, rng)
-        patch_shape_xyz = self.patch_size.get_xyz()
+        patch_shape_xyz = self.extraction_patch_size.get_xyz()
 
         if self.image_format == "nifti":
             image_array = _load_image_array(self.src_path, case_name, self.image_format)
@@ -1298,7 +1497,6 @@ class PatchWiseDataset(Dataset[Sample], Sized):
                 image_array,
                 patch_origin_xyz,
                 patch_shape_xyz,
-                fill_value=0,
             )
         else:
             image_shape_xyz = self._get_chunked_image_shape(case_name)

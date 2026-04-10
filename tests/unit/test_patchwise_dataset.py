@@ -124,21 +124,204 @@ def test_patchwise_dataset_requests_only_patch_region_from_blosc2(
     assert sample["masks"].shape == (1, 32, 16, 16)
 
 
-def test_sample_patch_center_allows_up_to_twenty_percent_overhang_when_patch_fits() -> None:
+def test_extract_patch_from_array_uses_array_min_for_image_padding() -> None:
+    image = np.arange(1, 9, dtype=np.float32).reshape((2, 2, 2))
+
+    patch = data_module._extract_patch_from_array(
+        image,
+        patch_origin_xyz=(-1, -1, -1),
+        patch_shape_xyz=(3, 3, 3),
+    )
+
+    assert patch.shape == (3, 3, 3)
+    assert patch.min() == image.min()
+    assert patch[0, 0, 0] == image.min()
+
+
+def test_extract_patch_from_array_uses_zero_for_mask_padding() -> None:
+    mask = np.ones((2, 2, 2), dtype=np.uint8)
+
+    patch = data_module._extract_patch_from_array(
+        mask,
+        patch_origin_xyz=(-1, -1, -1),
+        patch_shape_xyz=(3, 3, 3),
+        fill_value=0,
+    )
+
+    assert patch.shape == (3, 3, 3)
+    assert patch[0, 0, 0] == 0
+    assert patch[1:, 1:, 1:].min() == 1
+
+
+def test_load_chunked_blosc2_patch_uses_store_min_for_image_padding(monkeypatch) -> None:
+    class FakeChunkedArray:
+        def __init__(self, dtype: np.dtype) -> None:
+            self.shape = (4, 4, 4)
+            self.dtype = dtype
+
+        def __getitem__(self, item: tuple[slice, slice, slice]) -> np.ndarray:
+            return np.full(
+                tuple(slice_.stop - slice_.start for slice_ in item),
+                7,
+                dtype=self.dtype,
+            )
+
+        def min(self) -> float:
+            return 3.0
+
+    monkeypatch.setattr(data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.float32))
+
+    patch = data_module._load_chunked_blosc2_patch(
+        Path("fake.b2nd"),
+        patch_origin_xyz=(-1, -1, -1),
+        patch_shape_xyz=(3, 3, 3),
+        dtype=np.float32,
+    )
+
+    assert patch.shape == (3, 3, 3)
+    assert patch[0, 0, 0] == 3.0
+    assert patch[1:, 1:, 1:].min() == 7.0
+
+
+def test_load_chunked_blosc2_patch_uses_zero_for_mask_padding(monkeypatch) -> None:
+    class FakeChunkedArray:
+        def __init__(self, dtype: np.dtype) -> None:
+            self.shape = (4, 4, 4)
+            self.dtype = dtype
+
+        def __getitem__(self, item: tuple[slice, slice, slice]) -> np.ndarray:
+            return np.ones(
+                tuple(slice_.stop - slice_.start for slice_ in item),
+                dtype=self.dtype,
+            )
+
+        def min(self) -> int:
+            return 9
+
+    monkeypatch.setattr(data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.uint8))
+
+    patch = data_module._load_chunked_blosc2_patch(
+        Path("fake_mask.b2nd"),
+        patch_origin_xyz=(-1, -1, -1),
+        patch_shape_xyz=(3, 3, 3),
+        dtype=np.uint8,
+        fill_value=0,
+    )
+
+    assert patch.shape == (3, 3, 3)
+    assert patch[0, 0, 0] == 0
+    assert patch[1:, 1:, 1:].min() == 1
+
+
+def test_sample_patch_center_keeps_patch_inside_image_when_patch_fits() -> None:
     patch_shape_xyz = (16, 16, 32)
-    max_overhang_xyz = tuple(int(dim * 0.2) for dim in patch_shape_xyz)
     image_shape_xyz = (32, 32, 64)
 
     for _ in range(200):
         center_xyz = data_module._sample_patch_center(image_shape_xyz, patch_shape_xyz)
         origin_xyz = data_module._compute_patch_origin(center_xyz, patch_shape_xyz)
 
-        assert origin_xyz[0] >= -max_overhang_xyz[0]
-        assert origin_xyz[1] >= -max_overhang_xyz[1]
-        assert origin_xyz[2] >= -max_overhang_xyz[2]
-        assert origin_xyz[0] + patch_shape_xyz[0] <= image_shape_xyz[0] + max_overhang_xyz[0]
-        assert origin_xyz[1] + patch_shape_xyz[1] <= image_shape_xyz[1] + max_overhang_xyz[1]
-        assert origin_xyz[2] + patch_shape_xyz[2] <= image_shape_xyz[2] + max_overhang_xyz[2]
+        assert origin_xyz[0] >= 0
+        assert origin_xyz[1] >= 0
+        assert origin_xyz[2] >= 0
+        assert origin_xyz[0] + patch_shape_xyz[0] <= image_shape_xyz[0]
+        assert origin_xyz[1] + patch_shape_xyz[1] <= image_shape_xyz[1]
+        assert origin_xyz[2] + patch_shape_xyz[2] <= image_shape_xyz[2]
+
+
+def test_sample_patch_center_allows_overhang_when_requested() -> None:
+    crop_shape_xyz = (16, 16, 32)
+    patch_shape_xyz = (20, 20, 39)
+    lower_overhang_xyz = tuple(
+        (patch_dim - crop_dim) // 2
+        for patch_dim, crop_dim in zip(patch_shape_xyz, crop_shape_xyz, strict=True)
+    )
+    upper_overhang_xyz = tuple(
+        patch_dim - crop_dim - lower_overhang
+        for patch_dim, crop_dim, lower_overhang in zip(
+            patch_shape_xyz,
+            crop_shape_xyz,
+            lower_overhang_xyz,
+            strict=True,
+        )
+    )
+    image_shape_xyz = (32, 32, 64)
+
+    saw_negative_origin = False
+    saw_upper_overhang = False
+
+    for _ in range(400):
+        center_xyz = data_module._sample_patch_center(
+            image_shape_xyz,
+            patch_shape_xyz,
+            crop_shape_xyz=crop_shape_xyz,
+            allow_overhang=True,
+        )
+        origin_xyz = data_module._compute_patch_origin(center_xyz, patch_shape_xyz)
+
+        assert origin_xyz[0] >= -lower_overhang_xyz[0]
+        assert origin_xyz[1] >= -lower_overhang_xyz[1]
+        assert origin_xyz[2] >= -lower_overhang_xyz[2]
+        assert origin_xyz[0] + patch_shape_xyz[0] <= image_shape_xyz[0] + upper_overhang_xyz[0]
+        assert origin_xyz[1] + patch_shape_xyz[1] <= image_shape_xyz[1] + upper_overhang_xyz[1]
+        assert origin_xyz[2] + patch_shape_xyz[2] <= image_shape_xyz[2] + upper_overhang_xyz[2]
+
+        saw_negative_origin |= any(origin < 0 for origin in origin_xyz)
+        saw_upper_overhang |= any(
+            origin + patch_dim > image_dim
+            for origin, patch_dim, image_dim in zip(
+                origin_xyz,
+                patch_shape_xyz,
+                image_shape_xyz,
+                strict=True,
+            )
+        )
+
+    assert saw_negative_origin
+    assert saw_upper_overhang
+
+
+def test_patchwise_training_load_uses_enlarged_extraction_patch(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    dataset_root, _ = _build_dataset_for_format(
+        synthetic_dataset,
+        tmp_path / "augmented_extract_blosc2",
+        "blosc2",
+    )
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=True,
+    )
+    monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
+
+    sample = dataset.load_image_label_and_mask(0)
+
+    assert sample["image"].shape == (1, 39, 20, 20)
+    assert sample["shape"] == (39, 20, 20)
+    assert sample["ratio_pad"] == ((1.0, 1.0, 1.0), (-6, -6, -13))
+
+
+def test_patchwise_dataset_uses_larger_extraction_size_only_for_augmented_training(
+    synthetic_dataset: Path,
+) -> None:
+    train_dataset = PatchWiseDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=True,
+    )
+    val_dataset = PatchWiseDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        group="val",
+    )
+
+    assert train_dataset.extraction_patch_size == PatchSize(x=20, y=20, z=39)
+    assert val_dataset.extraction_patch_size == PatchSize(x=16, y=16, z=32)
 
 
 def test_patchwise_dataset_centers_oversized_patch_dimensions(

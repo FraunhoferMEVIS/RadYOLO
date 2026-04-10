@@ -12,9 +12,14 @@ import torch
 from PIL import Image
 from tqdm.auto import tqdm
 
-from radyolo.config.config import get_dataset_cfg
+from radyolo.config.config import DefaultConfig, get_cfg, get_dataset_cfg
 from radyolo.config.spatial import PatchSize
-from radyolo.data.data import PatchWiseDataset, WholeImageDataset, build_dataloader
+from radyolo.data.data import (
+    PatchWiseDataset,
+    WholeImageDataset,
+    apply_configured_augmentations_to_batch,
+    build_dataloader,
+)
 from radyolo.utils.ops import xyzwhd2xyzxyz
 from radyolo.validation.plotting import (
     Annotator,
@@ -41,6 +46,11 @@ def parse_args() -> argparse.Namespace:
         "dataset_path",
         type=Path,
         help="Path to the dataset root containing images/, labels/ and data_splits.json.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Optional training config used to match augmentation and normalization settings.",
     )
     parser.add_argument(
         "--dataset-type",
@@ -99,6 +109,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Shuffle the dataloader order before visualization.",
     )
+    augment_group = parser.add_mutually_exclusive_group()
+    augment_group.add_argument(
+        "--augment",
+        dest="augment",
+        action="store_true",
+        help="Enable dataset augmentations. Requires --config to reproduce training settings.",
+    )
+    augment_group.add_argument(
+        "--no-augment",
+        dest="augment",
+        action="store_false",
+        help="Disable dataset augmentations.",
+    )
+    parser.set_defaults(augment=False)
     parser.add_argument(
         "--load-masks",
         action=argparse.BooleanOptionalAction,
@@ -155,25 +179,54 @@ def _load_class_names(dataset_path: Path) -> dict[int, str] | None:
 
 
 def _build_dataset(
-    dataset_path: Path,
-    dataset_type: DatasetType,
-    patch_size_xyz: tuple[int, int, int],
-    fold: int,
-    group: str,
-    load_masks: bool,
+    args: argparse.Namespace,
+    config: DefaultConfig | None,
 ) -> WholeImageDataset | PatchWiseDataset:
+    patch_size = PatchSize.from_xyz(tuple(args.patch_size))
+    if config is not None and config.patch_size != patch_size:
+        LOGGER.warning(
+            "CLI patch size %s differs from config patch size %s; using config patch size.",
+            patch_size.get_xyz(),
+            config.patch_size.get_xyz(),
+        )
+        patch_size = config.patch_size
+
     dataset_kwargs = {
-        "src_path": dataset_path,
-        "patch_size": PatchSize.from_xyz(patch_size_xyz),
-        "augment": False,
-        "fold": fold,
-        "group": group,
-        "normalization": {"type": "none"},
-        "load_masks": load_masks,
+        "src_path": args.dataset_path,
+        "patch_size": patch_size,
+        "augment": bool(args.augment),
+        "fold": args.fold,
+        "group": args.group,
+        "normalization": {"type": "none"} if config is None else config.normalization,
+        "load_masks": args.load_masks,
+        "config": config,
     }
-    if dataset_type == "whole-image":
+    if args.dataset_type == "whole-image":
         return WholeImageDataset(**dataset_kwargs)
+    if config is not None:
+        dataset_kwargs["foreground_oversampling"] = (
+            config.foreground_oversampling if args.group == "train" else 0.0
+        )
+        dataset_kwargs["min_box_crop_fraction"] = config.min_box_crop_fraction
     return PatchWiseDataset(**dataset_kwargs)
+
+
+def _apply_remaining_batch_augmentations(
+    batch: dict,
+    config: DefaultConfig | None,
+    *,
+    augment: bool,
+) -> dict:
+    if config is None or not augment or not config.uses_gpu_augmentations():
+        return batch
+
+    apply_configured_augmentations_to_batch(
+        batch,
+        config,
+        config.patch_size,
+        placement="gpu",
+    )
+    return batch
 
 
 def _denormalize_boxes_xyzxyz(image: torch.Tensor, bboxes_xyzwhd: torch.Tensor) -> torch.Tensor:
@@ -465,23 +518,28 @@ def _save_slice_visualizations(  # noqa: PLR0913
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
+    if args.augment and args.config is None:
+        LOGGER.error("--augment requires --config so the training augmentation settings are known.")
+        return 2
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    config = get_cfg(args.config, overrides=None) if args.config is not None else None
     names = _load_class_names(args.dataset_path)
-    dataset = _build_dataset(
-        dataset_path=args.dataset_path,
-        dataset_type=args.dataset_type,
-        patch_size_xyz=tuple(args.patch_size),
-        fold=args.fold,
-        group=args.group,
-        load_masks=args.load_masks,
-    )
+    dataset = _build_dataset(args, config)
     if len(dataset) == 0:
         LOGGER.error("The selected dataset split is empty.")
         return 1
+
+    LOGGER.info(
+        "Visualizing %s samples from %s using %s (augment=%s)",
+        args.num_samples,
+        args.group,
+        type(dataset).__name__,
+        dataset.augment,
+    )
 
     dataloader = build_dataloader(
         dataset=dataset,
@@ -497,12 +555,17 @@ def main() -> int:
         total=args.num_samples, desc="Visualizing", unit="sample", smoothing=0.05
     ) as progress_bar:
         for batch in dataloader:
-            images: torch.Tensor = batch["img"]
-            masks_tuple = batch["masks"]
-            case_names = batch["case_names"]
-            batch_indices: torch.Tensor = batch["batch_idx"]
-            batch_classes: torch.Tensor = batch["cls"].view(-1)
-            batch_boxes: torch.Tensor = batch["bboxes"]
+            prepared_batch = _apply_remaining_batch_augmentations(
+                batch,
+                config,
+                augment=bool(dataset.augment),
+            )
+            images: torch.Tensor = prepared_batch["img"]
+            masks_tuple = prepared_batch["masks"]
+            case_names = prepared_batch["case_names"]
+            batch_indices: torch.Tensor = prepared_batch["batch_idx"]
+            batch_classes: torch.Tensor = prepared_batch["cls"].view(-1)
+            batch_boxes: torch.Tensor = prepared_batch["bboxes"]
 
             for sample_index in range(images.shape[0]):
                 if num_written >= args.num_samples:

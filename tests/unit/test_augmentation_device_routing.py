@@ -344,6 +344,73 @@ def test_apply_configured_augmentations_routes_only_matching_device(
     assert call_order == ["zoom", "cutout", "gin"]
 
 
+def test_apply_configured_augmentations_center_crops_after_gpu_spatial_stage(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _make_config(
+        tmp_path,
+        zoom_augmentation_device="gpu",
+        rotation_augmentation_device="gpu",
+        cutout_augmentation_device="gpu",
+        mirroring_augmentation_device="gpu",
+        do_batchgenerators_intensity_augmentation=False,
+        gin_augmentation_device="cpu",
+        channel_dropout_augmentation_device="cpu",
+        min_box_crop_fraction=0.0,
+    )
+
+    monkeypatch.setattr(
+        data_module,
+        "random_zoom",
+        _record_spatial_call([], "zoom"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_rotation",
+        _record_spatial_call([], "rotation"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "tensor_cutout",
+        _record_spatial_call([], "cutout"),
+    )
+    monkeypatch.setattr(
+        data_module,
+        "random_mirroring",
+        _record_spatial_call([], "mirror"),
+    )
+
+    batch: data_module.Batch = {
+        "img": torch.ones((1, 1, 10, 10, 10), dtype=torch.float32),
+        "ori_shape": ((10, 10, 10),),
+        "ratio_pad": (((1.0, 1.0, 1.0), (0, 0, 0)),),
+        "shape": ((10, 10, 10),),
+        "cls": torch.tensor([[0.0]], dtype=torch.float32),
+        "bboxes": torch.tensor([[0.5, 0.5, 0.5, 1.0, 1.0, 1.0]], dtype=torch.float32),
+        "batch_idx": torch.tensor([0], dtype=torch.int64),
+        "masks": (torch.ones((1, 10, 10, 10), dtype=torch.uint8),),
+        "case_names": ("test-case",),
+    }
+
+    data_module.apply_configured_augmentations_to_batch(
+        batch,
+        config,
+        PatchSize(x=8, y=8, z=8),
+        placement="gpu",
+    )
+
+    assert batch["img"].shape == (1, 1, 8, 8, 8)
+    assert batch["shape"] == ((8, 8, 8),)
+    assert batch["ratio_pad"] == (((1.0, 1.0, 1.0), (-1, -1, -1)),)
+    assert torch.allclose(
+        batch["bboxes"],
+        torch.tensor([[0.5, 0.5, 0.5, 1.0, 1.0, 1.0]], dtype=torch.float32),
+    )
+    assert batch["masks"][0] is not None
+    assert batch["masks"][0].shape == (1, 8, 8, 8)
+
+
 def test_dataset_augmentation_applies_configured_sample_augmentations(
     synthetic_dataset: Path,
     monkeypatch: MonkeyPatch,

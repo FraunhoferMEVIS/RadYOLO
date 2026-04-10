@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from radyolo.config.spatial import PatchSize
 from radyolo.data.data import PatchWiseDataset, WholeImageDataset
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import Trainer
@@ -45,6 +46,12 @@ def test_trainer_uses_patchwise_dataset_for_training_and_validation(
     assert val_loader.dataset.foreground_oversampling == 0.25
     assert train_loader.dataset.deterministic_sampling is False
     assert val_loader.dataset.deterministic_sampling is True
+    assert train_loader.dataset.extraction_patch_size == PatchSize(
+        x=39,
+        y=39,
+        z=77,
+    )
+    assert val_loader.dataset.extraction_patch_size == trainer.config.patch_size
     assert train_loader.dataset.min_box_crop_fraction == 0.5
     assert val_loader.dataset.min_box_crop_fraction == 0.5
 
