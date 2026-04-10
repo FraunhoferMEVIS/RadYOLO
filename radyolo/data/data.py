@@ -830,7 +830,10 @@ def _filter_instance_masks(
         return None
     if masks.shape[0] != keep.shape[0]:
         return masks
-    return masks[keep]
+    filtered_masks = masks[keep]
+    if filtered_masks.shape[0] == 0:
+        return None
+    return filtered_masks
 
 
 def _load_patch_mask(
@@ -882,7 +885,6 @@ class WholeImageDataset(Dataset[Sample], Sized):
         patch_size: PatchSize,
         augment: bool = False,
         min_stride: int = 8,
-        pad: float = 0.5,
         fold: int = 0,
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
@@ -1154,6 +1156,26 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             return self.cases[index], None
         return self._sample_foreground_case_and_bbox(rng)
 
+    def _sample_patch_center_for_index(
+        self,
+        image_shape_xyz: tuple[int, int, int],
+        patch_shape_xyz: tuple[int, int, int],
+        rng: random.Random | None,
+    ) -> tuple[int, int, int]:
+        if rng is None:
+            return self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
+        return self._sample_patch_center(image_shape_xyz, patch_shape_xyz, rng)
+
+    def _sample_patch_center_from_bbox_for_index(
+        self,
+        bbox: torch.Tensor,
+        image_shape_xyz: tuple[int, int, int],
+        rng: random.Random | None,
+    ) -> tuple[int, int, int]:
+        if rng is None:
+            return self._sample_patch_center_from_bbox(bbox, image_shape_xyz)
+        return self._sample_patch_center_from_bbox(bbox, image_shape_xyz, rng)
+
     def _get_chunked_image_shape(self, case_name: str) -> tuple[int, int, int]:
         return _get_chunked_blosc2_shape(
             _get_image_path(self.src_path, case_name, self.image_format)
@@ -1260,13 +1282,13 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             image_array = _load_image_array(self.src_path, case_name, self.image_format)
             image_shape_xyz = _get_spatial_shape(tuple(int(dim) for dim in image_array.shape))
             if foreground_bbox is None:
-                patch_center_xyz = self._sample_patch_center(
+                patch_center_xyz = self._sample_patch_center_for_index(
                     image_shape_xyz,
                     patch_shape_xyz,
                     rng,
                 )
             else:
-                patch_center_xyz = self._sample_patch_center_from_bbox(
+                patch_center_xyz = self._sample_patch_center_from_bbox_for_index(
                     foreground_bbox,
                     image_shape_xyz,
                     rng,
@@ -1281,13 +1303,13 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         else:
             image_shape_xyz = self._get_chunked_image_shape(case_name)
             if foreground_bbox is None:
-                patch_center_xyz = self._sample_patch_center(
+                patch_center_xyz = self._sample_patch_center_for_index(
                     image_shape_xyz,
                     patch_shape_xyz,
                     rng,
                 )
             else:
-                patch_center_xyz = self._sample_patch_center_from_bbox(
+                patch_center_xyz = self._sample_patch_center_from_bbox_for_index(
                     foreground_bbox,
                     image_shape_xyz,
                     rng,

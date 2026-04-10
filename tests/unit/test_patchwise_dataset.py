@@ -264,9 +264,10 @@ def test_patchwise_validation_sampling_is_deterministic_per_index(
         assert torch.equal(first["image"], second["image"])
         assert torch.equal(first["classes"], second["classes"])
         assert torch.equal(first["bboxes"], second["bboxes"])
-        assert first["masks"] is not None
-        assert second["masks"] is not None
-        assert torch.equal(first["masks"], second["masks"])
+        assert (first["masks"] is None) == (second["masks"] is None)
+        if first["masks"] is not None:
+            assert second["masks"] is not None
+            assert torch.equal(first["masks"], second["masks"])
 
 
 def test_crop_boxes_to_patch_drops_boxes_below_minimum_containment() -> None:
@@ -346,3 +347,12 @@ def test_filter_instance_masks_drops_masks_for_removed_boxes() -> None:
     assert kept_masks is not None
     assert kept_masks.shape[0] == 1
     assert torch.equal(kept_masks[0], masks[0])
+
+
+def test_filter_instance_masks_returns_none_when_all_masks_are_removed() -> None:
+    keep = torch.tensor([False], dtype=torch.bool)
+    masks = torch.ones((1, 4, 4, 4), dtype=torch.uint8)
+
+    kept_masks = data_module._filter_instance_masks(masks, keep)
+
+    assert kept_masks is None
