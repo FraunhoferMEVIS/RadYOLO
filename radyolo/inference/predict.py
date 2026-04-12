@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-MASK_THRESHOLD = 0.5
-
 
 @dataclass
 class PredictionConfig:
@@ -109,7 +107,7 @@ def _reconstruct_and_save_mask(
     mask_up = F.interpolate(
         mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
     )[0, 0].permute(2, 1, 0) # (W, H, D)
-    mask_bin = (mask_up >= MASK_THRESHOLD).cpu().numpy().astype("uint8")
+    mask_bin = (mask_up >= 0.5).cpu().numpy().astype("uint8")
     mask_affine = nifti_img.affine
     mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
     mask_dir.mkdir(exist_ok=True)
