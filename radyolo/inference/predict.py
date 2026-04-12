@@ -106,7 +106,7 @@ def _reconstruct_and_save_mask(
     mask_prob_r = mask_prob.unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
     mask_up = F.interpolate(
         mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
-    )[0, 0].permute(2, 1, 0) # (W, H, D)
+    )[0, 0].permute(2, 1, 0)  # (W, H, D)
     mask_bin = (mask_up >= 0.5).cpu().numpy().astype("uint8")
     mask_affine = nifti_img.affine
     mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
@@ -115,60 +115,6 @@ def _reconstruct_and_save_mask(
     mask_path = mask_dir / mask_filename
     nib.save(mask_img, str(mask_path))
     return mask_filename
-
-
-BOX_COORDS_LEN = 6
-NDIM_3D = 3
-
-
-def _box_image_to_world(
-    box_image_xyzxyz: torch.Tensor,
-    affine: (torch.Tensor | list[list[float]] | tuple[tuple[float, ...], ...]),
-) -> torch.Tensor:
-    """Convert an axis-aligned image-space 3D box to world-space using the NIfTI affine.
-
-    The input box is (x1,y1,z1,x2,y2,z2) in voxel coordinates matching the original
-    NIfTI indexing order (i=X, j=Y, k=Z). Because an affine can include rotation and
-    shear, an axis-aligned box in voxel space may not remain axis-aligned in world
-    space. We therefore transform all 8 voxel-space box corners and then take the
-    min/max along each world axis to obtain the tightest axis-aligned world-space
-    bounding box that encloses the transformed shape.
-
-    Args:
-        box_image_xyzxyz: torch.Tensor with shape (6,).
-        affine: 4x4 array-like affine from the loaded NIfTI (nifti_img.affine).
-
-    Returns:
-        torch.Tensor: (x1,y1,z1,x2,y2,z2) in world coordinates (float32).
-    """
-    if box_image_xyzxyz.numel() != BOX_COORDS_LEN:
-        msg = f"Expected box tensor of shape ({BOX_COORDS_LEN},)"
-        raise ValueError(msg)
-
-    # Extract coordinates
-    x1, y1, z1, x2, y2, z2 = box_image_xyzxyz.tolist()
-    # Generate 8 corners in voxel space
-    corners = torch.tensor(
-        [[xi, yi, zi] for xi in (x1, x2) for yi in (y1, y2) for zi in (z1, z2)],
-        dtype=torch.float32,
-    )  # (8,3)
-    ones = torch.ones((corners.shape[0], 1), dtype=corners.dtype)
-    ijk_h = torch.cat([corners, ones], dim=1)  # (8,4)
-    aff = torch.as_tensor(affine, dtype=corners.dtype)
-    world = (ijk_h @ aff.T)[:, :3]  # (8,3)
-    min_xyz = world.min(dim=0).values
-    max_xyz = world.max(dim=0).values
-    world_box = torch.stack(
-        [
-            min_xyz[0],
-            min_xyz[1],
-            min_xyz[2],
-            max_xyz[0],
-            max_xyz[1],
-            max_xyz[2],
-        ]
-    )
-    return world_box.to(dtype=box_image_xyzxyz.dtype)
 
 
 def run_prediction(prediction_cfg: PredictionConfig) -> int:
@@ -217,7 +163,9 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
                 for det_i, det in enumerate(detections):
                     box_image_xyzxyz = det[:6]
                     try:
-                        box_world_xyzxyz = _box_image_to_world(box_image_xyzxyz, nifti_img.affine)
+                        box_world_xyzxyz = ops.box_image_to_world(
+                            box_image_xyzxyz, nifti_img.affine
+                        )
                     except (RuntimeError, ValueError, TypeError):  # pragma: no cover
                         box_world_xyzxyz = box_image_xyzxyz
                     entry: dict[str, object] = {

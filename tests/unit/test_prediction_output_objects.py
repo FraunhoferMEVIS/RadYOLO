@@ -5,9 +5,14 @@ import numpy as np
 import torch
 
 from radyolo.inference import predict as predict_module
-from radyolo.inference.predict import _box_image_to_world, _reconstruct_and_save_mask, _relative_box
+from radyolo.inference.predict import _reconstruct_and_save_mask, _relative_box
 from radyolo.models.layers import ModelOutput
-from radyolo.utils.ops import non_max_suppression, prepare_model_output_for_nms, scale_boxes
+from radyolo.utils.ops import (
+    box_image_to_world,
+    non_max_suppression,
+    prepare_model_output_for_nms,
+    scale_boxes,
+)
 
 
 def test_model_output_converts_to_prediction_components() -> None:
@@ -127,7 +132,7 @@ def test_box_image_to_world_applies_affine_to_all_box_corners() -> None:
         dtype=torch.float32,
     )
 
-    world_box = _box_image_to_world(box, affine)
+    world_box = box_image_to_world(box, affine)
 
     expected = torch.tensor([12.0, 26.0, 42.0, 18.0, 35.0, 54.0], dtype=torch.float32)
     assert torch.equal(world_box, expected)
