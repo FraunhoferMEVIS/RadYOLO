@@ -141,30 +141,22 @@ def scale_boxes(
 
 
 def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
-    order = torch.argsort(-scores)
+    sorted_indices = torch.argsort(-scores)
     keep = []
 
-    iter_count = 0
-    num_indices = len(order)
-    while len(order) > 0 and iter_count < num_indices:
-        idx = order[0]
-
-        keep.append(idx)
-
-        order = order[1:]
+    while len(sorted_indices) > 0:
+        current_max_index = sorted_indices[0]
+        keep.append(current_max_index)
+        sorted_indices = sorted_indices[1:]
 
         # sanity check
-        if len(order) == 0:
+        if len(sorted_indices) == 0:
             break
 
-        # sanity check
-        if iter_count > num_indices:
-            break
-
-        iou = bbox_iou(boxes[idx], boxes[order], xyzwhd=False).squeeze(-1)
+        iou = bbox_iou(boxes[current_max_index], boxes[sorted_indices], xyzwhd=False).squeeze(-1)
 
         mask = iou <= iou_threshold
-        order = order[mask]
+        sorted_indices = sorted_indices[mask]
 
     return torch.stack(keep, 0)
 
