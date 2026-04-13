@@ -3,14 +3,17 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import multiprocessing as mp
+import queue
+import traceback
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
+from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DefaultConfig, DetectionPostprocessConfig
 from radyolo.data.preprocessing import preprocess_image
@@ -23,8 +26,36 @@ if TYPE_CHECKING:
 
     from radyolo.config.spatial import PatchSize
     from radyolo.models.layers import ModelOutput
+    from radyolo.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
+
+_SENTINEL = None
+
+
+@dataclass(slots=True)
+class _LoadedImageTask:
+    case_name: str
+    affine: np.ndarray
+    image: np.ndarray
+
+
+@dataclass(slots=True)
+class _WriteTask:
+    case_name: str
+    image_results: list[dict[str, object]]
+    affine: np.ndarray
+    original_shape: tuple[int, int, int]
+    prototype_masks: torch.Tensor | None
+    mask_detections: list[torch.Tensor]
+
+
+@dataclass(slots=True)
+class _WorkerFailure:
+    stage: str
+    case_name: str | None
+    error: str
+    traceback_text: str
 
 
 @dataclass
@@ -38,6 +69,8 @@ class PredictionConfig:
     clip_boxes_to_image: bool
     overwrite_patch_size: PatchSize | None = None
     overwrite_normalization: dict | list[dict] | None = None
+    num_load_workers: int = 2
+    num_write_workers: int = 2
 
 
 def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
@@ -51,6 +84,10 @@ def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, 
 
 def _iter_nifti(input_dir: Path) -> Iterable[Path]:
     return sorted(p for p in input_dir.glob("*.nii.gz") if p.is_file())
+
+
+def _case_name_from_path(img_path: Path) -> str:
+    return img_path.stem.replace(".nii", "")
 
 
 def _postprocess_single(
@@ -96,7 +133,7 @@ def _reconstruct_and_save_mask(
     det: torch.Tensor,
     proto: torch.Tensor,
     original_shape: tuple[int, int, int],
-    nifti_img: nib.Nifti1Image,
+    mask_affine: np.ndarray,
     mask_dir: Path,
     det_index: int,
     case_name: str,
@@ -111,7 +148,6 @@ def _reconstruct_and_save_mask(
         mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
     )[0, 0].permute(2, 1, 0)  # (W, H, D)
     mask_bin = (mask_up >= 0.5).cpu().numpy().astype("uint8")
-    mask_affine = nifti_img.affine
     mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
     mask_dir.mkdir(exist_ok=True)
     mask_filename = f"{case_name}_det{det_index}.nii.gz"
@@ -120,94 +156,380 @@ def _reconstruct_and_save_mask(
     return mask_filename
 
 
+def _predict_loaded_image(
+    loaded_image: _LoadedImageTask,
+    *,
+    model: HardcodedModel,
+    train_config: DefaultConfig,
+    names: dict[int, str],
+    prediction_config: PredictionConfig,
+ ) -> _WriteTask:
+    img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
+        *reversed(range(loaded_image.image.ndim))
+    )
+    normalization = (
+        prediction_config.overwrite_normalization
+        if prediction_config.overwrite_normalization is not None
+        else train_config.normalization
+    )
+    patch_size = (
+        prediction_config.overwrite_patch_size
+        if prediction_config.overwrite_patch_size is not None
+        else train_config.patch_size
+    )
+    img_preprocessed, original_shape, inference_shape = preprocess_image(
+        img_tensor,
+        normalization,
+        target_shape=patch_size,
+        apply_resampling=True,
+        apply_normalization=True,
+        output_dtype=torch.float32,
+    )
+
+    device = model.device
+    autocast_ctx = (
+        torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
+    )
+    with torch.no_grad(), autocast_ctx:
+        model_output: ModelOutput = model(img_preprocessed.unsqueeze(0).to(device))
+    detections, proto_masks = _postprocess_single(
+        model_output,
+        train_config,
+        prediction_config,
+        len(names),
+    )
+    image_results: list[dict[str, object]] = []
+    mask_detections: list[torch.Tensor] = []
+    prototype_masks: torch.Tensor | None = None
+    if detections.numel():
+        ops.scale_boxes(
+            inference_shape,
+            detections[:, :6],
+            original_shape,
+            ratio_pad=None,
+            clip=prediction_config.clip_boxes_to_image,
+        )
+        for det_i, det in enumerate(detections):
+            box_image_xyzxyz = det[:6]
+            try:
+                box_world_xyzxyz = ops.box_image_to_world(
+                    box_image_xyzxyz, np.asarray(loaded_image.affine, dtype=np.float32)
+                )
+            except (RuntimeError, ValueError, TypeError):  # pragma: no cover
+                box_world_xyzxyz = box_image_xyzxyz
+            entry: dict[str, object] = {
+                "class": int(det[7].item()),
+                "class_name": names.get(int(det[7].item()), str(int(det[7].item()))),
+                "confidence": round(float(det[6].item()), 6),
+                "box_image_xyzxyz": [round(float(x), 2) for x in box_image_xyzxyz.tolist()],
+                "box_world_xyzxyz": [round(float(x), 2) for x in box_world_xyzxyz.tolist()],
+                "box_relative_xyzxyz": _relative_box(box_image_xyzxyz, original_shape),
+            }
+            if model_output.mask_coefficients is not None and proto_masks is not None:
+                entry["mask_path"] = f"{loaded_image.case_name}_det{det_i}.nii.gz"
+                mask_detections.append(det.detach().to(dtype=torch.float32).clone())
+            image_results.append(entry)
+        if mask_detections and proto_masks is not None:
+            prototype_masks = (
+                proto_masks[0].detach().to(device="cpu", dtype=torch.float32).contiguous()
+            )
+    return _WriteTask(
+        case_name=loaded_image.case_name,
+        image_results=image_results,
+        affine=loaded_image.affine,
+        original_shape=original_shape,
+        prototype_masks=prototype_masks,
+        mask_detections=mask_detections,
+    )
+
+
+def _write_prediction_result(output_dir: Path, write_task: _WriteTask) -> None:
+    if write_task.prototype_masks is not None:
+        mask_affine = np.asarray(write_task.affine, dtype=np.float32)
+        for det_i, det_tensor in enumerate(write_task.mask_detections):
+            _reconstruct_and_save_mask(
+                det_tensor,
+                write_task.prototype_masks,
+                write_task.original_shape,
+                mask_affine,
+                output_dir / "masks",
+                det_i,
+                write_task.case_name,
+            )
+
+    out_json = output_dir / f"{write_task.case_name}.json"
+    with out_json.open("w", encoding="utf-8") as jf:
+        json.dump(write_task.image_results, jf, indent=2)
+
+
+def _fail_worker(
+    error_queue: mp.queues.Queue[_WorkerFailure],
+    *,
+    stage: str,
+    case_name: str | None,
+) -> None:
+    error_queue.put(
+        _WorkerFailure(
+            stage=stage,
+            case_name=case_name,
+            error="Worker crashed",
+            traceback_text=traceback.format_exc(),
+        )
+    )
+
+
+def _loader_worker(
+    load_queue: mp.queues.Queue[Path | None],
+    inference_queue: mp.queues.Queue[_LoadedImageTask | None],
+    error_queue: mp.queues.Queue[_WorkerFailure],
+) -> None:
+    current_case: str | None = None
+    try:
+        while True:
+            img_path = load_queue.get()
+            if img_path is _SENTINEL:
+                inference_queue.put(_SENTINEL)
+                return
+            current_case = _case_name_from_path(img_path)
+            nifti_img = nib.load(str(img_path))
+            img_np = np.asarray(nifti_img.dataobj, dtype=np.float32)
+            inference_queue.put(
+                _LoadedImageTask(
+                    case_name=current_case,
+                    affine=np.asarray(nifti_img.affine, dtype=np.float32),
+                    image=np.ascontiguousarray(img_np),
+                )
+            )
+    except Exception:  # pragma: no cover - exercised via process supervision
+        _fail_worker(error_queue, stage="loader", case_name=current_case)
+        raise
+
+
+def _inference_worker(
+    prediction_cfg: PredictionConfig,
+    inference_queue: mp.queues.Queue[_LoadedImageTask | None],
+    write_queue: mp.queues.Queue[_WriteTask | None],
+    error_queue: mp.queues.Queue[_WorkerFailure],
+) -> None:
+    current_case: str | None = None
+    try:
+        model, train_config, names = _load_model(prediction_cfg)
+        finished_loaders = 0
+        while finished_loaders < prediction_cfg.num_load_workers:
+            loaded_image = inference_queue.get()
+            if loaded_image is _SENTINEL:
+                finished_loaders += 1
+                continue
+            current_case = loaded_image.case_name
+            write_queue.put(
+                _predict_loaded_image(
+                loaded_image,
+                model=model,
+                train_config=train_config,
+                names=names,
+                prediction_config=prediction_cfg,
+                )
+            )
+            current_case = None
+        for _ in range(prediction_cfg.num_write_workers):
+            write_queue.put(_SENTINEL)
+    except Exception:  # pragma: no cover - exercised via process supervision
+        _fail_worker(error_queue, stage="inference", case_name=current_case)
+        raise
+
+
+def _writer_worker(
+    output_dir: Path,
+    write_queue: mp.queues.Queue[_WriteTask | None],
+    error_queue: mp.queues.Queue[_WorkerFailure],
+) -> None:
+    current_case: str | None = None
+    try:
+        while True:
+            write_task = write_queue.get()
+            if write_task is _SENTINEL:
+                return
+            current_case = write_task.case_name
+            _write_prediction_result(output_dir, write_task)
+            current_case = None
+    except Exception:  # pragma: no cover - exercised via process supervision
+        _fail_worker(error_queue, stage="writer", case_name=current_case)
+        raise
+def _terminate_processes(processes: list[mp.Process]) -> None:
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+    for process in processes:
+        process.join(timeout=5)
+
+
+def _log_worker_failure(failure: _WorkerFailure) -> None:
+    LOGGER.error(
+        "Prediction %s worker failed%s: %s\n%s",
+        failure.stage,
+        f" for {failure.case_name}" if failure.case_name is not None else "",
+        failure.error,
+        failure.traceback_text,
+    )
+
+
+def _get_worker_failure(
+    error_queue: mp.queues.Queue[_WorkerFailure],
+) -> _WorkerFailure | None:
+    try:
+        return error_queue.get_nowait()
+    except queue.Empty:
+        return None
+
+
+def _get_failed_processes(processes: list[mp.Process]) -> list[mp.Process]:
+    return [
+        process
+        for process in processes
+        if process.exitcode is not None and process.exitcode != 0
+    ]
+
+
+def _all_processes_succeeded(processes: list[mp.Process]) -> bool:
+    return all(process.exitcode == 0 for process in processes)
+
+
+def _log_failed_processes(processes: list[mp.Process]) -> None:
+    for process in processes:
+        LOGGER.error(
+            "Prediction worker %s exited with code %s",
+            process.name,
+            process.exitcode,
+        )
+
+
+def _update_progress_from_load_queue(
+    load_queue: mp.queues.Queue[Path | None],
+    progress_bar: tqdm,
+    total_files: int,
+) -> None:
+    try:
+        remaining = load_queue.qsize()
+    except (AttributeError, NotImplementedError):
+        return
+    completed = max(0, min(total_files - remaining, total_files))
+    if completed > progress_bar.n:
+        progress_bar.update(completed - progress_bar.n)
+
+
+def _monitor_prediction_processes(
+    *,
+    prediction_cfg: PredictionConfig,
+    load_queue: mp.queues.Queue[Path | None],
+    error_queue: mp.queues.Queue[_WorkerFailure],
+    processes: list[mp.Process],
+    progress_bar: tqdm,
+    total_files: int,
+) -> int:
+    sent_sentinels = False
+    while True:
+        _update_progress_from_load_queue(load_queue, progress_bar, total_files)
+        if not sent_sentinels and progress_bar.n >= total_files:
+            for _ in range(prediction_cfg.num_load_workers):
+                load_queue.put(_SENTINEL)
+            sent_sentinels = True
+
+        failure = _get_worker_failure(error_queue)
+        if failure is not None:
+            _log_worker_failure(failure)
+            _terminate_processes(processes)
+            return 1
+
+        failed_processes = _get_failed_processes(processes)
+        if failed_processes:
+            _log_failed_processes(failed_processes)
+            _terminate_processes(processes)
+            return 1
+
+        if _all_processes_succeeded(processes):
+            _update_progress_from_load_queue(load_queue, progress_bar, total_files)
+            return 0
+
+        for process in processes:
+            process.join(timeout=0.1)
+
+
+def _run_prediction_pipeline(prediction_cfg: PredictionConfig, files: list[Path]) -> int:
+    if prediction_cfg.num_load_workers < 1:
+        msg = "num_load_workers must be at least 1"
+        raise ValueError(msg)
+    if prediction_cfg.num_write_workers < 1:
+        msg = "num_write_workers must be at least 1"
+        raise ValueError(msg)
+
+    ctx = mp.get_context("spawn")
+    load_queue: mp.queues.Queue[Path | None] = ctx.Queue()
+    inference_queue: mp.queues.Queue[_LoadedImageTask | None] = ctx.Queue(
+        maxsize=max(prediction_cfg.num_load_workers, 2)
+    )
+    write_queue: mp.queues.Queue[_WriteTask | None] = ctx.Queue(
+        maxsize=max(prediction_cfg.num_write_workers, 2)
+    )
+    error_queue: mp.queues.Queue[_WorkerFailure] = ctx.Queue()
+    loaders = [
+        ctx.Process(
+            target=_loader_worker,
+            args=(load_queue, inference_queue, error_queue),
+            name=f"predict-loader-{index}",
+        )
+        for index in range(prediction_cfg.num_load_workers)
+    ]
+    inference_process = ctx.Process(
+        target=_inference_worker,
+        args=(prediction_cfg, inference_queue, write_queue, error_queue),
+        name="predict-inference",
+    )
+    writers = [
+        ctx.Process(
+            target=_writer_worker,
+            args=(prediction_cfg.output_dir, write_queue, error_queue),
+            name=f"predict-writer-{index}",
+        )
+        for index in range(prediction_cfg.num_write_workers)
+    ]
+    processes = [*loaders, inference_process, *writers]
+
+    try:
+        with tqdm(total=len(files), desc="Predicting", unit="case", smoothing=0.05) as pbar:
+            for process in processes:
+                process.start()
+            for file_path in files:
+                load_queue.put(file_path)
+            return _monitor_prediction_processes(
+                prediction_cfg=prediction_cfg,
+                load_queue=load_queue,
+                error_queue=error_queue,
+                processes=processes,
+                progress_bar=pbar,
+                total_files=len(files),
+            )
+    finally:
+        for queue_ in (
+            load_queue,
+            inference_queue,
+            write_queue,
+            error_queue,
+        ):
+            queue_.close()
+            queue_.join_thread()
+
+
 def run_prediction(prediction_cfg: PredictionConfig) -> int:
     try:
         if not prediction_cfg.output_dir.exists():
             prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
-        model, train_config, names = _load_model(prediction_cfg)
-        clip_boxes_to_image = prediction_cfg.clip_boxes_to_image
         files = list(_iter_nifti(prediction_cfg.input_dir))
         if not files:
             LOGGER.error("No .nii.gz files found in %s", prediction_cfg.input_dir)
             return 1
-        for img_path in files:
-            case_name = img_path.stem.replace(".nii", "")
-            nifti_img = nib.load(str(img_path))
-            img_np = np.asanyarray(nifti_img.dataobj, dtype=np.float32)
-            img_tensor = torch.from_numpy(img_np).permute(*reversed(range(img_np.ndim)))
-            normalization = (
-                prediction_cfg.overwrite_normalization
-                if prediction_cfg.overwrite_normalization is not None
-                else train_config.normalization
-            )
-            patch_size = (
-                prediction_cfg.overwrite_patch_size
-                if prediction_cfg.overwrite_patch_size is not None
-                else train_config.patch_size
-            )
-            img_preprocessed, original_shape, inference_shape = preprocess_image(
-                img_tensor,
-                normalization,
-                target_shape=patch_size,
-                apply_resampling=True,
-                apply_normalization=True,
-                output_dtype=torch.float32,
-            )
-            device = model.device
-            autocast_ctx = (
-                torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
-            )
-            with torch.no_grad(), autocast_ctx:
-                model_output: ModelOutput = model(img_preprocessed.unsqueeze(0).to(device))
-            detections, proto_masks = _postprocess_single(
-                model_output,
-                train_config,
-                prediction_cfg,
-                len(names),
-            )
-            image_results: list[dict[str, object]] = []
-            if detections.numel():
-                ops.scale_boxes(
-                    inference_shape,
-                    detections[:, :6],
-                    original_shape,
-                    ratio_pad=None,
-                    clip=clip_boxes_to_image,
-                )
-                for det_i, det in enumerate(detections):
-                    box_image_xyzxyz = det[:6]
-                    try:
-                        box_world_xyzxyz = ops.box_image_to_world(
-                            box_image_xyzxyz, nifti_img.affine
-                        )
-                    except (RuntimeError, ValueError, TypeError):  # pragma: no cover
-                        box_world_xyzxyz = box_image_xyzxyz
-                    entry: dict[str, object] = {
-                        "class": int(det[7].item()),
-                        "class_name": names.get(int(det[7].item()), str(int(det[7].item()))),
-                        "confidence": round(float(det[6].item()), 6),
-                        "box_image_xyzxyz": [round(float(x), 2) for x in box_image_xyzxyz.tolist()],
-                        "box_world_xyzxyz": [round(float(x), 2) for x in box_world_xyzxyz.tolist()],
-                        "box_relative_xyzxyz": _relative_box(box_image_xyzxyz, original_shape),
-                    }
-                    if model_output.mask_coefficients is not None and proto_masks is not None:
-                        proto = proto_masks[0]
-                        mask_filename = _reconstruct_and_save_mask(
-                            det,
-                            proto,
-                            original_shape,
-                            nifti_img,
-                            prediction_cfg.output_dir / "masks",
-                            det_i,
-                            case_name,
-                        )
-                        if mask_filename:
-                            entry["mask_path"] = mask_filename
-                    image_results.append(entry)
-            # Write per-image JSON
-            out_json = prediction_cfg.output_dir / f"{case_name}.json"
-            with out_json.open("w") as jf:
-                json.dump(image_results, jf, indent=2)
+        result = _run_prediction_pipeline(prediction_cfg, files)
+        if result != 0:
+            return result
         LOGGER.info("Saved predictions for %d volumes to %s", len(files), prediction_cfg.output_dir)
     except Exception as e:  # pragma: no cover - defensive
         LOGGER.exception("Prediction failed", exc_info=e)

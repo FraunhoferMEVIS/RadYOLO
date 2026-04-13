@@ -258,6 +258,8 @@ def run_prediction_dir(model_path: Path, input_dir: Path, output_dir: Path) -> P
             clip_boxes_to_image=True,
             overwrite_patch_size=None,
             overwrite_normalization=None,
+            num_load_workers=1,
+            num_write_workers=1,
         )
     )
     if result != 0:

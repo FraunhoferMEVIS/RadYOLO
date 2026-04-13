@@ -755,6 +755,20 @@ def convert_to_nndetection(
         "'{type: zscore}' or '{type: ct, mean: 0, std: 1, clip_min: -1024, clip_max: 3071}'."
     ),
 )
+@click.option(
+    "--num-load-workers",
+    default=2,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help="Number of loader processes that read input volumes.",
+)
+@click.option(
+    "--num-write-workers",
+    default=2,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help="Number of writer processes that export JSON and masks.",
+)
 def predict(
     model_path: Path,
     input_dir: Path,
@@ -765,6 +779,8 @@ def predict(
     clip_boxes_to_image: bool,
     overwrite_patch_size: tuple[int, int, int] | None,
     overwrite_normalization: dict | list[dict] | None,
+    num_load_workers: int,
+    num_write_workers: int,
 ) -> int:
     """Run inference on .nii.gz images in INPUT_DIR and write JSON (and masks) to OUTPUT_DIR."""
     try:
@@ -783,6 +799,8 @@ def predict(
                     else None
                 ),
                 overwrite_normalization=overwrite_normalization,
+                num_load_workers=num_load_workers,
+                num_write_workers=num_write_workers,
             )
         )
     except Exception as e:  # pragma: no cover

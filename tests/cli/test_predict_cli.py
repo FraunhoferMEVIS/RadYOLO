@@ -47,6 +47,8 @@ def test_predict_cli_passes_clip_override(monkeypatch, tmp_path: Path) -> None:
     assert captured["config"].device == "0"
     assert captured["config"].overwrite_patch_size is None
     assert captured["config"].overwrite_normalization is None
+    assert captured["config"].num_load_workers == 2
+    assert captured["config"].num_write_workers == 2
 
 
 def test_predict_cli_uses_current_defaults(
@@ -76,6 +78,8 @@ def test_predict_cli_uses_current_defaults(
     assert captured["config"].clip_boxes_to_image is False
     assert captured["config"].overwrite_patch_size is None
     assert captured["config"].overwrite_normalization is None
+    assert captured["config"].num_load_workers == 2
+    assert captured["config"].num_write_workers == 2
 
 
 def test_predict_cli_passes_patch_size_and_normalization_overrides(
@@ -115,6 +119,43 @@ def test_predict_cli_passes_patch_size_and_normalization_overrides(
     assert result.exit_code == 0
     assert captured["config"].overwrite_patch_size == PatchSize(x=24, y=32, z=40)
     assert captured["config"].overwrite_normalization == {"type": "zscore"}
+
+
+def test_predict_cli_passes_worker_counts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    model_path = tmp_path / "model.pt"
+    model_path.write_bytes(b"checkpoint")
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    captured: dict[str, PredictionConfig] = {}
+
+    def fake_run_prediction(config: PredictionConfig) -> int:
+        captured["config"] = config
+        return 0
+
+    monkeypatch.setattr("radyolo.run_prediction", fake_run_prediction)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "predict",
+            str(model_path),
+            str(input_dir),
+            str(output_dir),
+            "--num-load-workers",
+            "3",
+            "--num-write-workers",
+            "4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["config"].num_load_workers == 3
+    assert captured["config"].num_write_workers == 4
 
 
 def test_predict_cli_uses_shared_preprocessing(

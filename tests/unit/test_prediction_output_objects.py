@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import nibabel as nib
 import numpy as np
 import torch
 
 from radyolo.inference import predict as predict_module
-from radyolo.inference.predict import PredictionConfig, _reconstruct_and_save_mask, _relative_box
+from radyolo.inference.predict import (
+    PredictionConfig,
+    _LoadedImageTask,
+    _predict_loaded_image,
+    _reconstruct_and_save_mask,
+    _relative_box,
+    _write_prediction_result,
+)
 from radyolo.config.spatial import PatchSize
 from radyolo.models.layers import ModelOutput
 from radyolo.utils.ops import (
@@ -161,7 +170,7 @@ def test_reconstruct_and_save_mask_writes_thresholded_nifti_mask(tmp_path, monke
         det,
         proto,
         original_shape=(2, 2, 2),
-        nifti_img=nifti_img,
+        mask_affine=nifti_img.affine,
         mask_dir=tmp_path / "masks",
         det_index=3,
         case_name="caseA",
@@ -178,31 +187,40 @@ def test_reconstruct_and_save_mask_writes_thresholded_nifti_mask(tmp_path, monke
     assert int(saved_data.sum()) == 4
 
 
-def test_run_prediction_uses_prediction_overrides(monkeypatch, tmp_path) -> None:
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    output_dir = tmp_path / "output"
-    image_path = input_dir / "case1.nii.gz"
-    nib.save(nib.Nifti1Image(np.zeros((4, 5, 6), dtype=np.float32), affine=np.eye(4)), image_path)
+@dataclass
+class _DummyTrainConfig:
+    normalization: dict[str, str] = None  # type: ignore[assignment]
+    patch_size: PatchSize = None  # type: ignore[assignment]
+    num_classes: int = 1
+    agnostic_nms: bool = False
+    max_det: int = 300
+    nms_time_limit: float = 0.0
 
-    class DummyModel:
-        device = torch.device("cpu")
+    def __post_init__(self) -> None:
+        if self.normalization is None:
+            self.normalization = {"type": "none"}
+        if self.patch_size is None:
+            self.patch_size = PatchSize(x=10, y=11, z=12)
 
-        def __call__(self, image: torch.Tensor) -> ModelOutput:
-            return ModelOutput(
-                decoded_boxes=torch.zeros((1, 6, 0), dtype=torch.float32),
-                class_probabilities=torch.zeros((1, 1, 0), dtype=torch.float32),
-            )
 
-    class DummyTrainConfig:
-        normalization = {"type": "none"}
-        patch_size = PatchSize(x=10, y=11, z=12)
-        num_classes = 1
-        agnostic_nms = False
-        max_det = 300
-        nms_time_limit = 0.0
+class _DummyModel:
+    device = torch.device("cpu")
 
+    def __call__(self, image: torch.Tensor) -> ModelOutput:
+        return ModelOutput(
+            decoded_boxes=torch.zeros((1, 6, 0), dtype=torch.float32),
+            class_probabilities=torch.zeros((1, 1, 0), dtype=torch.float32),
+        )
+
+
+def test_predict_loaded_image_uses_prediction_overrides(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
+    image_np = np.zeros((4, 5, 6), dtype=np.float32)
+    loaded_image = _LoadedImageTask(
+        case_name="case1",
+        affine=np.eye(4, dtype=np.float32),
+        image=image_np,
+    )
 
     def fake_preprocess_image(
         image: torch.Tensor,
@@ -220,11 +238,6 @@ def test_run_prediction_uses_prediction_overrides(monkeypatch, tmp_path) -> None
         captured["output_dtype"] = output_dtype
         return image.to(dtype=output_dtype), (6, 5, 4), (6, 5, 4)
 
-    monkeypatch.setattr(
-        predict_module,
-        "_load_model",
-        lambda cfg: (DummyModel(), DummyTrainConfig(), {0: "class_0"}),
-    )
     monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
     monkeypatch.setattr(
         predict_module,
@@ -235,24 +248,79 @@ def test_run_prediction_uses_prediction_overrides(monkeypatch, tmp_path) -> None
         ),
     )
 
-    result = predict_module.run_prediction(
-        PredictionConfig(
+    write_task = _predict_loaded_image(
+        loaded_image,
+        model=_DummyModel(),
+        train_config=_DummyTrainConfig(),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
             model_path=tmp_path / "model.pt",
-            input_dir=input_dir,
-            output_dir=output_dir,
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
             confidence_threshold=0.1,
             nms_iou_threshold=0.2,
             device="cpu",
             clip_boxes_to_image=False,
             overwrite_patch_size=PatchSize(x=20, y=21, z=22),
             overwrite_normalization={"type": "zscore"},
-        )
+        ),
     )
 
-    assert result == 0
     assert captured["normalization"] == {"type": "zscore"}
     assert captured["target_shape"] == PatchSize(x=20, y=21, z=22)
     assert captured["apply_resampling"] is True
     assert captured["apply_normalization"] is True
     assert captured["output_dtype"] == torch.float32
-    assert (output_dir / "case1.json").exists()
+    assert write_task.image_results == []
+    assert write_task.case_name == "case1"
+    assert write_task.prototype_masks is None
+    assert write_task.mask_detections == []
+
+
+def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> None:
+    proto = torch.ones((2, 2, 2), dtype=torch.float32)
+    write_task = predict_module._WriteTask(
+        case_name="case2",
+        image_results=[{"class": 0, "mask_path": "case2_det0.nii.gz"}],
+        affine=np.eye(4, dtype=np.float32),
+        original_shape=(2, 2, 2),
+        prototype_masks=proto,
+        mask_detections=[
+            torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 0.9, 0.0, 0.25, 0.75], dtype=torch.float32)
+        ],
+    )
+    captured: dict[str, object] = {}
+
+    def fake_reconstruct_and_save_mask(
+        det: torch.Tensor,
+        proto_tensor: torch.Tensor,
+        original_shape: tuple[int, int, int],
+        mask_affine: np.ndarray,
+        mask_dir,
+        det_index: int,
+        case_name: str,
+    ) -> str | None:
+        captured["det"] = det
+        captured["proto_shape"] = tuple(proto_tensor.shape)
+        captured["original_shape"] = original_shape
+        captured["mask_affine"] = mask_affine
+        captured["mask_dir"] = mask_dir
+        captured["det_index"] = det_index
+        captured["case_name"] = case_name
+        mask_dir.mkdir(exist_ok=True)
+        output_path = mask_dir / f"{case_name}_det{det_index}.nii.gz"
+        output_path.write_bytes(b"mask")
+        return output_path.name
+
+    monkeypatch.setattr(
+        predict_module,
+        "_reconstruct_and_save_mask",
+        fake_reconstruct_and_save_mask,
+    )
+
+    _write_prediction_result(tmp_path, write_task)
+
+    assert (tmp_path / "case2.json").exists()
+    assert (tmp_path / "masks" / "case2_det0.nii.gz").exists()
+    assert tuple(captured["proto_shape"]) == (2, 2, 2)
+    assert captured["original_shape"] == (2, 2, 2)
