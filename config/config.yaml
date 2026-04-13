@@ -37,6 +37,7 @@ patience: 300                     # (int) epochs to wait for no observable impro
 training_mode: "patchwise"      # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
 patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
 normalization: {type: "none"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
+apply_preprocessing: True         # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
 foreground_oversampling: 0.33     # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 min_box_crop_fraction: 0.5        # (float) minimum fraction of a box volume that must stay inside a sampled patch to keep it
 batch_size: 2                     # (int) number of images per batch

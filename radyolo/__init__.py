@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ from radyolo.models.model import (
 )
 from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA
+from radyolo.validation.evaluate_predictions import evaluate_prediction_folder
 from radyolo.validation.plotting import plot_results as plot_results_
 from radyolo.validation.validate import Validator
 
@@ -37,12 +39,15 @@ LOGGER = logging.getLogger(__name__)
 def _parse_normalization_option(
     _ctx: click.Context,
     _param: click.Parameter,
-    value: str,
-) -> dict | list[dict]:
+    value: str | None,
+) -> dict | list[dict] | None:
+    if value is None:
+        return None
     try:
         parsed_value = yaml.safe_load(value)
     except yaml.YAMLError as exc:
-        raise click.BadParameter(f"Invalid normalization config: {exc}") from exc
+        msg = f"Invalid normalization config: {exc}"
+        raise click.BadParameter(msg) from exc
     if not isinstance(parsed_value, (dict, list)):
         msg = "Normalization must parse to a dict or list of dicts."
         raise click.BadParameter(msg)
@@ -216,6 +221,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             augment=False,
             min_stride=get_model_min_stride(model),
             normalization=train_config.normalization,
+            apply_preprocessing=train_config.apply_preprocessing,
             load_masks=train_config.segmentation_output,
             foreground_oversampling=foreground_oversampling,
             min_box_crop_fraction=train_config.min_box_crop_fraction,
@@ -733,6 +739,22 @@ def convert_to_nndetection(
     default=False,
     help="Override whether predicted 3D boxes are clipped to image bounds before export.",
 )
+@click.option(
+    "--overwrite-patch-size",
+    nargs=3,
+    type=int,
+    default=None,
+    help="Override the checkpoint patch size for inference as x y z.",
+)
+@click.option(
+    "--overwrite-normalization",
+    default=None,
+    callback=_parse_normalization_option,
+    help=(
+        "Override the checkpoint normalization config with YAML or JSON, for example "
+        "'{type: zscore}' or '{type: ct, mean: 0, std: 1, clip_min: -1024, clip_max: 3071}'."
+    ),
+)
 def predict(
     model_path: Path,
     input_dir: Path,
@@ -741,6 +763,8 @@ def predict(
     iou: float | None,
     device: str,
     clip_boxes_to_image: bool,
+    overwrite_patch_size: tuple[int, int, int] | None,
+    overwrite_normalization: dict | list[dict] | None,
 ) -> int:
     """Run inference on .nii.gz images in INPUT_DIR and write JSON (and masks) to OUTPUT_DIR."""
     try:
@@ -753,8 +777,69 @@ def predict(
                 nms_iou_threshold=iou,
                 device=device,
                 clip_boxes_to_image=clip_boxes_to_image,
+                overwrite_patch_size=(
+                    PatchSize.from_xyz(overwrite_patch_size)
+                    if overwrite_patch_size is not None
+                    else None
+                ),
+                overwrite_normalization=overwrite_normalization,
             )
         )
     except Exception as e:  # pragma: no cover
         LOGGER.exception("Prediction failed", exc_info=e)
         return 1
+
+
+@main.command("evaluate-predictions")
+@click.argument(
+    "predictions_dir",
+    metavar="PREDICTIONS-DIR",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.argument(
+    "labels_dir",
+    metavar="LABELS-DIR",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--output",
+    type=click.Path(
+        file_okay=True,
+        dir_okay=False,
+        writable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+    default=Path("results.json"),
+    show_default=True,
+    help="Path to the JSON file that will receive the evaluation summary.",
+)
+def evaluate_predictions(predictions_dir: Path, labels_dir: Path, output: Path) -> int:
+    """Compute detection metrics for prediction JSON files against RadYOLO label files."""
+    try:
+        summary = evaluate_prediction_folder(predictions_dir, labels_dir)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except Exception as e:  # pragma: no cover
+        LOGGER.exception("Prediction evaluation failed", exc_info=e)
+        msg = "Prediction evaluation failed. See logs for details."
+        raise click.ClickException(msg) from e
+
+    click.echo(f"Wrote results to: {output!s}")
+    return 0

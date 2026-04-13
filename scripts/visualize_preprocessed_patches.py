@@ -198,6 +198,9 @@ def _build_dataset(
         "fold": args.fold,
         "group": args.group,
         "normalization": {"type": "none"} if config is None else config.normalization,
+        "apply_preprocessing": (
+            True if config is None else config.apply_preprocessing
+        ),
         "load_masks": args.load_masks,
         "config": config,
     }

@@ -221,6 +221,7 @@ def run_validation(best_model_path: Path, group: str) -> Path:
         augment=False,
         min_stride=int(model.stride.min().item()) if hasattr(model, "stride") else 8,
         normalization=train_config.normalization,
+        apply_preprocessing=train_config.apply_preprocessing,
         load_masks=train_config.segmentation_output,
         foreground_oversampling=foreground_oversampling,
         min_box_crop_fraction=train_config.min_box_crop_fraction,
@@ -255,6 +256,8 @@ def run_prediction_dir(model_path: Path, input_dir: Path, output_dir: Path) -> P
             nms_iou_threshold=0.2,
             device="cpu",
             clip_boxes_to_image=True,
+            overwrite_patch_size=None,
+            overwrite_normalization=None,
         )
     )
     if result != 0:

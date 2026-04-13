@@ -14,7 +14,7 @@ This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-
 
 After installation this project provides a cli `radyolo` with built-in help.
 
-Available commands are `train`, `test`, `predict`, `analyze-dataset`, `propose-model-config`, `create-data-splits`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
+Available commands are `train`, `test`, `predict`, `evaluate-predictions`, `analyze-dataset`, `propose-model-config`, `create-data-splits`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
@@ -44,7 +44,17 @@ The `predict` command can be used for model inference. It is called as follows:
 uv run -m radyolo predict <path-to-model-checkpoint> <input-image-folder> <output-folder>
 ```
 
-Here the `input-image-folder` is a folder of NifTi files, where the predict command expects each file to represent a case to run the model on. The resulting detections and optional segmentation masks are saved to the `output-folder`.
+Here the `input-image-folder` is a folder of NifTi files, where the predict command expects each file to represent a case to run the model on. By default prediction reuses the checkpoint normalization and patch size. If needed, `--overwrite-patch-size x y z` and `--overwrite-normalization "{type: ...}"` replace those checkpoint preprocessing settings for inference only. The resulting detections and optional segmentation masks are saved to the `output-folder`.
+
+### Evaluate prediction outputs against reference labels
+
+The `evaluate-predictions` command computes detection metrics directly from `predict` output JSON files and a RadYOLO `labels/` folder:
+
+```bash
+uv run -m radyolo evaluate-predictions ./output_predict D:/datasets/LUNA16/radyolo/labels
+```
+
+Files are matched by case name, using the JSON filename stem and label filename stem. Metrics are computed only for cases present in both folders.
 
 ## Dataset Format
 

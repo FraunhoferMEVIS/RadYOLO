@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import torch
 import yaml
 
 from radyolo.config.spatial import PatchSize
@@ -78,3 +79,41 @@ def test_trainer_keeps_wholeimage_validation_without_patch_oversampling(
     assert val_loader.dataset.foreground_oversampling == 0.0
     assert train_loader.dataset.min_box_crop_fraction == 0.5
     assert val_loader.dataset.min_box_crop_fraction == 0.5
+
+
+def test_wholeimage_dataset_can_apply_preprocessing(
+    synthetic_dataset: Path,
+) -> None:
+    dataset = WholeImageDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        normalization={"type": "255_to_01"},
+        apply_preprocessing=True,
+    )
+
+    sample = dataset.load_image_label_and_mask(0)
+
+    assert sample["image"].shape == (1, 32, 16, 16)
+    assert sample["shape"] == (32, 16, 16)
+    assert sample["ratio_pad"] == ((0.5, 0.5, 0.5), (0, 0, 0))
+    assert torch.isclose(sample["image"].max(), torch.tensor(1.0 / 255.0, dtype=torch.float32))
+
+
+def test_patchwise_dataset_can_skip_normalization_for_preprocessed_inputs(
+    synthetic_dataset: Path,
+    monkeypatch,
+) -> None:
+    dataset = PatchWiseDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        normalization={"type": "255_to_01"},
+        apply_preprocessing=False,
+    )
+    monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
+
+    sample = dataset[0]
+
+    assert sample["image"].shape == (1, 32, 16, 16)
+    assert torch.isclose(sample["image"].max(), torch.tensor(1.0, dtype=torch.float32))

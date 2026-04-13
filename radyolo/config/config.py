@@ -110,6 +110,7 @@ class DefaultConfig(BaseModel):
     # applied globally or a list of such dicts for each channel. For ct you have to define
     # mean, std, clip_min and clip_max in the dict.
     normalization: dict | list[dict] = {"type": "none"}
+    apply_preprocessing: bool = True  # keep preprocessing settings in config for inference, and apply them while loading raw training data
     foreground_oversampling: float = Field(
         0.0,
         ge=0.0,

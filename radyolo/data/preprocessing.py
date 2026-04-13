@@ -82,6 +82,8 @@ def preprocess_image(
     target_shape: PatchSize | None = None,
     input_voxel_size: VoxelSize | None = None,
     target_voxel_size: VoxelSize | None = None,
+    apply_resampling: bool = True,
+    apply_normalization: bool = True,
     output_dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
     if image.ndim == 3:
@@ -91,11 +93,15 @@ def preprocess_image(
         raise ValueError(msg)
 
     source_shape = cast("tuple[int, int, int]", tuple(int(dim) for dim in image.shape[1:]))
-    destination_shape = resolve_target_shape(
-        source_shape,
-        target_shape=target_shape,
-        input_voxel_size=input_voxel_size,
-        target_voxel_size=target_voxel_size,
+    destination_shape = (
+        resolve_target_shape(
+            source_shape,
+            target_shape=target_shape,
+            input_voxel_size=input_voxel_size,
+            target_voxel_size=target_voxel_size,
+        )
+        if apply_resampling
+        else source_shape
     )
 
     working_image = image.to(dtype=torch.float32).clone()
@@ -110,7 +116,8 @@ def preprocess_image(
             ),
         ).squeeze(0)
 
-    working_image = normalize_image(working_image, normalization)
+    if apply_normalization:
+        working_image = normalize_image(working_image, normalization)
     if working_image.dtype != output_dtype:
         working_image = working_image.to(dtype=output_dtype)
 

@@ -617,6 +617,7 @@ class Trainer:
             augment=mode == "train",
             min_stride=get_model_min_stride(model),
             normalization=self.config.normalization,
+            apply_preprocessing=self.config.apply_preprocessing,
             load_masks=self.config.segmentation_output,
             foreground_oversampling=foreground_oversampling,
             min_box_crop_fraction=self.config.min_box_crop_fraction,

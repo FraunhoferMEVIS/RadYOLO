@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
+    from radyolo.config.spatial import PatchSize
     from radyolo.models.layers import ModelOutput
 
 LOGGER = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ class PredictionConfig:
     nms_iou_threshold: float
     device: str
     clip_boxes_to_image: bool
+    overwrite_patch_size: PatchSize | None = None
+    overwrite_normalization: dict | list[dict] | None = None
 
 
 def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
@@ -123,7 +126,6 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
             prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
         model, train_config, names = _load_model(prediction_cfg)
         clip_boxes_to_image = prediction_cfg.clip_boxes_to_image
-        target_size = train_config.patch_size
         files = list(_iter_nifti(prediction_cfg.input_dir))
         if not files:
             LOGGER.error("No .nii.gz files found in %s", prediction_cfg.input_dir)
@@ -133,10 +135,22 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
             nifti_img = nib.load(str(img_path))
             img_np = np.asanyarray(nifti_img.dataobj, dtype=np.float32)
             img_tensor = torch.from_numpy(img_np).permute(*reversed(range(img_np.ndim)))
-            img_preprocessed, original_shape, _ = preprocess_image(
+            normalization = (
+                prediction_cfg.overwrite_normalization
+                if prediction_cfg.overwrite_normalization is not None
+                else train_config.normalization
+            )
+            patch_size = (
+                prediction_cfg.overwrite_patch_size
+                if prediction_cfg.overwrite_patch_size is not None
+                else train_config.patch_size
+            )
+            img_preprocessed, original_shape, inference_shape = preprocess_image(
                 img_tensor,
-                train_config.normalization,
-                target_shape=target_size,
+                normalization,
+                target_shape=patch_size,
+                apply_resampling=True,
+                apply_normalization=True,
                 output_dtype=torch.float32,
             )
             device = model.device
@@ -154,7 +168,7 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
             image_results: list[dict[str, object]] = []
             if detections.numel():
                 ops.scale_boxes(
-                    target_size.get_zyx(),
+                    inference_shape,
                     detections[:, :6],
                     original_shape,
                     ratio_pad=None,

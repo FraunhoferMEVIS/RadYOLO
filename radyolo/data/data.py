@@ -1074,6 +1074,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         fold: int = 0,
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
+        apply_preprocessing: bool = True,
         load_masks: bool = True,
         foreground_oversampling: float = 0.0,
         min_box_crop_fraction: float = 0.5,
@@ -1088,6 +1089,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.fold = fold
         self.group = group
         self.normalization = _resolve_normalization(normalization)
+        self.apply_preprocessing = apply_preprocessing
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
@@ -1198,6 +1200,8 @@ class WholeImageDataset(Dataset[Sample], Sized):
             image,
             self.normalization,
             target_shape=self.patch_size,
+            apply_resampling=self.apply_preprocessing,
+            apply_normalization=self.apply_preprocessing,
             output_dtype=torch.float32,
         )
         return image_resampled_normalized, original_shape, resized_shape
@@ -1228,6 +1232,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         fold: int = 0,
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
+        apply_preprocessing: bool = True,
         load_masks: bool = True,
         foreground_oversampling: float = 0.33,
         min_box_crop_fraction: float = 0.5,
@@ -1244,6 +1249,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.fold = fold
         self.group = group
         self.normalization = _resolve_normalization(normalization)
+        self.apply_preprocessing = apply_preprocessing
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
@@ -1523,6 +1529,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         image_tensor, _, resized_shape = preprocess_image(
             image_tensor,
             self.normalization,
+            apply_normalization=self.apply_preprocessing,
             output_dtype=torch.float32,
         )
         classes, bboxes = _load_labels(self.src_path, case_name)

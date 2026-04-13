@@ -5,7 +5,8 @@ import numpy as np
 import torch
 
 from radyolo.inference import predict as predict_module
-from radyolo.inference.predict import _reconstruct_and_save_mask, _relative_box
+from radyolo.inference.predict import PredictionConfig, _reconstruct_and_save_mask, _relative_box
+from radyolo.config.spatial import PatchSize
 from radyolo.models.layers import ModelOutput
 from radyolo.utils.ops import (
     box_image_to_world,
@@ -175,3 +176,83 @@ def test_reconstruct_and_save_mask_writes_thresholded_nifti_mask(tmp_path, monke
     assert np.array_equal(saved_mask.affine, np.eye(4))
     assert set(np.unique(saved_data)).issubset({0, 1})
     assert int(saved_data.sum()) == 4
+
+
+def test_run_prediction_uses_prediction_overrides(monkeypatch, tmp_path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    image_path = input_dir / "case1.nii.gz"
+    nib.save(nib.Nifti1Image(np.zeros((4, 5, 6), dtype=np.float32), affine=np.eye(4)), image_path)
+
+    class DummyModel:
+        device = torch.device("cpu")
+
+        def __call__(self, image: torch.Tensor) -> ModelOutput:
+            return ModelOutput(
+                decoded_boxes=torch.zeros((1, 6, 0), dtype=torch.float32),
+                class_probabilities=torch.zeros((1, 1, 0), dtype=torch.float32),
+            )
+
+    class DummyTrainConfig:
+        normalization = {"type": "none"}
+        patch_size = PatchSize(x=10, y=11, z=12)
+        num_classes = 1
+        agnostic_nms = False
+        max_det = 300
+        nms_time_limit = 0.0
+
+    captured: dict[str, object] = {}
+
+    def fake_preprocess_image(
+        image: torch.Tensor,
+        normalization,
+        *,
+        target_shape,
+        apply_resampling: bool,
+        apply_normalization: bool,
+        output_dtype: torch.dtype,
+    ):
+        captured["normalization"] = normalization
+        captured["target_shape"] = target_shape
+        captured["apply_resampling"] = apply_resampling
+        captured["apply_normalization"] = apply_normalization
+        captured["output_dtype"] = output_dtype
+        return image.to(dtype=output_dtype), (6, 5, 4), (6, 5, 4)
+
+    monkeypatch.setattr(
+        predict_module,
+        "_load_model",
+        lambda cfg: (DummyModel(), DummyTrainConfig(), {0: "class_0"}),
+    )
+    monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.zeros((0, 8), dtype=torch.float32),
+            None,
+        ),
+    )
+
+    result = predict_module.run_prediction(
+        PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=input_dir,
+            output_dir=output_dir,
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="cpu",
+            clip_boxes_to_image=False,
+            overwrite_patch_size=PatchSize(x=20, y=21, z=22),
+            overwrite_normalization={"type": "zscore"},
+        )
+    )
+
+    assert result == 0
+    assert captured["normalization"] == {"type": "zscore"}
+    assert captured["target_shape"] == PatchSize(x=20, y=21, z=22)
+    assert captured["apply_resampling"] is True
+    assert captured["apply_normalization"] is True
+    assert captured["output_dtype"] == torch.float32
+    assert (output_dir / "case1.json").exists()
