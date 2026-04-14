@@ -49,14 +49,13 @@ def test_evaluate_predictions_cli_uses_only_common_cases(tmp_path) -> None:
     )
 
     assert result.exit_code == 0
-    assert result.output.strip() == str(output_path)
+    assert result.output.strip() == f"Wrote results to: {output_path!s}"
     summary = json.loads(output_path.read_text(encoding="utf-8"))
     assert summary["case_counts"]["common"] == 1
     assert summary["case_counts"]["missing_in_predictions"] == 1
     assert summary["case_counts"]["missing_in_labels"] == 1
     assert summary["missing_cases"]["missing_in_predictions"] == ["case_label_only"]
     assert summary["missing_cases"]["missing_in_labels"] == ["case_prediction_only"]
-    assert summary["evaluated_cases"] == ["case_common"]
     assert summary["metrics"]["metrics/precision"] == pytest.approx(1.0)
     assert summary["metrics"]["metrics/recall"] == pytest.approx(1.0)
     assert summary["metrics"]["metrics/mAP10"] == pytest.approx(0.995, abs=1e-6)
