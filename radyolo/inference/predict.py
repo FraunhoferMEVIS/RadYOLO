@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import logging
 import multiprocessing as mp
 import queue
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -16,6 +17,7 @@ import torch.nn.functional as F  # noqa: N812
 from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DefaultConfig, DetectionPostprocessConfig
+from radyolo.config.spatial import VoxelSize
 from radyolo.data.preprocessing import preprocess_image
 from radyolo.models.model import load_checkpoint_model
 from radyolo.utils import ops
@@ -38,6 +40,7 @@ class _LoadedImageTask:
     case_name: str
     affine: np.ndarray
     image: np.ndarray
+    voxel_size_xyz: tuple[float, float, float] | None = None
 
 
 @dataclass(slots=True)
@@ -48,6 +51,7 @@ class _WriteTask:
     original_shape: tuple[int, int, int]
     prototype_masks: torch.Tensor | None
     mask_detections: list[torch.Tensor]
+    merged_mask_probabilities: list[torch.Tensor] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -69,6 +73,10 @@ class PredictionConfig:
     clip_boxes_to_image: bool
     overwrite_patch_size: PatchSize | None = None
     overwrite_normalization: dict | list[dict] | None = None
+    overwrite_voxel_size: VoxelSize | None = None
+    patch_overlap: float = 0.5
+    patch_border_weight: float = 0.9
+    preprocessing_on_gpu: bool = True
     num_load_workers: int = 2
     num_write_workers: int = 2
 
@@ -88,6 +96,265 @@ def _iter_nifti(input_dir: Path) -> Iterable[Path]:
 
 def _case_name_from_path(img_path: Path) -> str:
     return img_path.stem.replace(".nii", "")
+
+
+def _resolve_normalization(
+    train_config: DefaultConfig,
+    prediction_config: PredictionConfig,
+) -> dict | list[dict]:
+    return (
+        prediction_config.overwrite_normalization
+        if prediction_config.overwrite_normalization is not None
+        else train_config.normalization
+    )
+
+
+def _resolve_patch_size(
+    train_config: DefaultConfig,
+    prediction_config: PredictionConfig,
+) -> PatchSize:
+    return (
+        prediction_config.overwrite_patch_size
+        if prediction_config.overwrite_patch_size is not None
+        else train_config.patch_size
+    )
+
+
+def _resolve_input_voxel_size(loaded_image: _LoadedImageTask) -> VoxelSize | None:
+    if loaded_image.voxel_size_xyz is None:
+        return None
+    return VoxelSize.from_xyz(loaded_image.voxel_size_xyz)
+
+
+def _resolve_target_voxel_size(
+    train_config: DefaultConfig,
+    prediction_config: PredictionConfig,
+) -> VoxelSize | None:
+    if prediction_config.overwrite_voxel_size is not None:
+        return prediction_config.overwrite_voxel_size
+    return train_config.voxel_size
+
+
+def _tensor_shape_xyz(image: torch.Tensor) -> tuple[int, int, int]:
+    return tuple(int(dim) for dim in reversed(image.shape[-3:]))
+
+
+def _get_patch_starts(size: int, patch_size: int, overlap: float) -> list[int]:
+    if patch_size >= size:
+        return [0]
+
+    last_start = size - patch_size
+    max_stride = max(1.0, patch_size * (1.0 - overlap))
+    num_patches = int(np.ceil(last_start / max_stride)) + 1
+    return np.rint(np.linspace(0, last_start, num_patches)).astype(int).tolist()
+
+
+def _iter_patch_origins(
+    image_shape_xyz: tuple[int, int, int],
+    patch_shape_xyz: tuple[int, int, int],
+    overlap: float,
+) -> Iterable[tuple[int, int, int]]:
+    starts_per_axis = [
+        _get_patch_starts(size, patch_size, overlap)
+        for size, patch_size in zip(image_shape_xyz, patch_shape_xyz, strict=True)
+    ]
+    return itertools.product(*starts_per_axis)
+
+
+def _extract_tensor_patch(
+    image: torch.Tensor,
+    patch_origin_xyz: tuple[int, int, int],
+    patch_shape_xyz: tuple[int, int, int],
+    fill_value: float,
+) -> torch.Tensor:
+    patch_shape_zyx = tuple(reversed(patch_shape_xyz))
+    image_shape_zyx = tuple(int(dim) for dim in image.shape[-3:])
+    patch_origin_zyx = tuple(reversed(patch_origin_xyz))
+    patch = torch.full(
+        (image.shape[0], *patch_shape_zyx),
+        fill_value,
+        dtype=image.dtype,
+        device=image.device,
+    )
+
+    source_slices: list[slice] = []
+    destination_slices: list[slice] = []
+    for origin, patch_dim, image_dim in zip(
+        patch_origin_zyx,
+        patch_shape_zyx,
+        image_shape_zyx,
+        strict=True,
+    ):
+        source_start = max(origin, 0)
+        source_end = min(origin + patch_dim, image_dim)
+        destination_start = max(-origin, 0)
+        destination_end = destination_start + max(source_end - source_start, 0)
+        source_slices.append(slice(source_start, source_end))
+        destination_slices.append(slice(destination_start, destination_end))
+
+    patch[
+        :,
+        destination_slices[0],
+        destination_slices[1],
+        destination_slices[2],
+    ] = image[
+        :,
+        source_slices[0],
+        source_slices[1],
+        source_slices[2],
+    ]
+    return patch
+
+
+def _apply_patch_border_weight(
+    detection: torch.Tensor,
+    patch_shape_xyz: tuple[int, int, int],
+    border_weight: float,
+) -> torch.Tensor:
+    if border_weight >= 1.0:
+        return detection
+
+    patch_extent = detection.new_tensor(
+        [
+            patch_shape_xyz[0],
+            patch_shape_xyz[1],
+            patch_shape_xyz[2],
+            patch_shape_xyz[0],
+            patch_shape_xyz[1],
+            patch_shape_xyz[2],
+        ]
+    )
+    border_distances = torch.minimum(detection[:6], patch_extent - detection[:6]).clamp(min=0)
+    axis_norm = detection.new_tensor(
+        [
+            max(patch_shape_xyz[0] / 2.0, 1.0),
+            max(patch_shape_xyz[1] / 2.0, 1.0),
+            max(patch_shape_xyz[2] / 2.0, 1.0),
+            max(patch_shape_xyz[0] / 2.0, 1.0),
+            max(patch_shape_xyz[1] / 2.0, 1.0),
+            max(patch_shape_xyz[2] / 2.0, 1.0),
+        ]
+    )
+    center_score = torch.clamp(border_distances / axis_norm, min=0.0, max=1.0).amin()
+    weighted_detection = detection.clone()
+    weighted_detection[6] = weighted_detection[6] * (
+        border_weight + (1.0 - border_weight) * center_score
+    )
+    return weighted_detection
+
+
+def _shift_detection_to_image(
+    detection: torch.Tensor,
+    patch_origin_xyz: tuple[int, int, int],
+) -> torch.Tensor:
+    shifted_detection = detection.clone()
+    shifted_detection[:6] += shifted_detection.new_tensor(
+        [
+            patch_origin_xyz[0],
+            patch_origin_xyz[1],
+            patch_origin_xyz[2],
+            patch_origin_xyz[0],
+            patch_origin_xyz[1],
+            patch_origin_xyz[2],
+        ]
+    )
+    return shifted_detection
+
+
+def _merge_patch_detections(
+    detections: list[torch.Tensor],
+    *,
+    iou_threshold: float,
+    agnostic_nms: bool,
+    max_det: int,
+) -> tuple[torch.Tensor, list[int]]:
+    if not detections:
+        return torch.zeros((0, 8), dtype=torch.float32), []
+
+    merged = torch.stack(detections, dim=0)
+    order = merged[:, 6].argsort(descending=True)
+    merged = merged[order]
+    if merged.shape[0] > max_det:
+        merged = merged[:max_det]
+        order = order[:max_det]
+
+    class_offsets = merged[:, 7:8] * (0 if agnostic_nms else 7680)
+    keep = ops.nms(merged[:, :6] + class_offsets, merged[:, 6], iou_threshold)
+    keep = keep[:max_det]
+    keep_indices = order[keep].tolist()
+    return merged[keep], keep_indices
+
+
+def _reconstruct_patch_mask_to_image(
+    detection: torch.Tensor,
+    prototype_masks: torch.Tensor,
+    patch_shape_zyx: tuple[int, int, int],
+    image_shape_zyx: tuple[int, int, int],
+    patch_origin_xyz: tuple[int, int, int],
+) -> torch.Tensor | None:
+    nm = detection.shape[0] - 8
+    if nm <= 0:
+        return None
+
+    coefficients = detection[8 : 8 + nm].to(device=prototype_masks.device)
+    patch_mask_prob = ops.reconstruct_mask_probabilities(coefficients, prototype_masks)
+    patch_mask_prob = F.interpolate(
+        patch_mask_prob.unsqueeze(0).unsqueeze(0),
+        size=patch_shape_zyx,
+        mode="trilinear",
+        align_corners=False,
+    )[0, 0].to(dtype=torch.float32)
+
+    full_mask = torch.zeros(image_shape_zyx, dtype=torch.float32)
+    patch_origin_zyx = tuple(reversed(patch_origin_xyz))
+    source_slices: list[slice] = []
+    destination_slices: list[slice] = []
+    for origin, patch_dim, image_dim in zip(
+        patch_origin_zyx,
+        patch_shape_zyx,
+        image_shape_zyx,
+        strict=True,
+    ):
+        source_start = max(-origin, 0)
+        source_end = source_start + max(min(origin + patch_dim, image_dim) - max(origin, 0), 0)
+        destination_start = max(origin, 0)
+        destination_end = destination_start + max(source_end - source_start, 0)
+        source_slices.append(slice(source_start, source_end))
+        destination_slices.append(slice(destination_start, destination_end))
+
+    full_mask[
+        destination_slices[0],
+        destination_slices[1],
+        destination_slices[2],
+    ] = patch_mask_prob[
+        source_slices[0],
+        source_slices[1],
+        source_slices[2],
+    ]
+    return full_mask
+
+
+def _save_merged_mask_probability(
+    mask_probability: torch.Tensor,
+    original_shape: tuple[int, int, int],
+    mask_affine: np.ndarray,
+    mask_dir: Path,
+    det_index: int,
+    case_name: str,
+) -> str:
+    mask_up = F.interpolate(
+        mask_probability.unsqueeze(0).unsqueeze(0),
+        size=original_shape,
+        mode="trilinear",
+        align_corners=False,
+    )[0, 0].permute(2, 1, 0)
+    mask_bin = (mask_up >= 0.5).cpu().numpy().astype("uint8")
+    mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
+    mask_dir.mkdir(exist_ok=True)
+    mask_filename = f"{case_name}_det{det_index}.nii.gz"
+    mask_path = mask_dir / mask_filename
+    nib.save(mask_img, str(mask_path))
+    return mask_filename
 
 
 def _postprocess_single(
@@ -156,51 +423,84 @@ def _reconstruct_and_save_mask(
     return mask_filename
 
 
-def _predict_loaded_image(
+def _build_prediction_entries(
+    detections: torch.Tensor,
+    *,
+    case_name: str,
+    affine: np.ndarray,
+    original_shape: tuple[int, int, int],
+    names: dict[int, str],
+    include_masks: bool,
+) -> tuple[list[dict[str, object]], list[torch.Tensor]]:
+    image_results: list[dict[str, object]] = []
+    mask_detections: list[torch.Tensor] = []
+    for det_i, det in enumerate(detections):
+        box_image_xyzxyz = det[:6]
+        try:
+            box_world_xyzxyz = ops.box_image_to_world(
+                box_image_xyzxyz, np.asarray(affine, dtype=np.float32)
+            )
+        except (RuntimeError, ValueError, TypeError):  # pragma: no cover
+            box_world_xyzxyz = box_image_xyzxyz
+        entry: dict[str, object] = {
+            "class": int(det[7].item()),
+            "class_name": names.get(int(det[7].item()), str(int(det[7].item()))),
+            "confidence": round(float(det[6].item()), 6),
+            "box_image_xyzxyz": [round(float(x), 2) for x in box_image_xyzxyz.tolist()],
+            "box_world_xyzxyz": [round(float(x), 2) for x in box_world_xyzxyz.tolist()],
+            "box_relative_xyzxyz": _relative_box(box_image_xyzxyz, original_shape),
+        }
+        if include_masks:
+            entry["mask_path"] = f"{case_name}_det{det_i}.nii.gz"
+            mask_detections.append(det.detach().to(dtype=torch.float32).clone())
+        image_results.append(entry)
+    return image_results, mask_detections
+
+
+def _predict_whole_image(
     loaded_image: _LoadedImageTask,
     *,
     model: HardcodedModel,
     train_config: DefaultConfig,
     names: dict[int, str],
     prediction_config: PredictionConfig,
- ) -> _WriteTask:
+) -> _WriteTask:
     img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
         *reversed(range(loaded_image.image.ndim))
     )
-    normalization = (
-        prediction_config.overwrite_normalization
-        if prediction_config.overwrite_normalization is not None
-        else train_config.normalization
-    )
-    patch_size = (
-        prediction_config.overwrite_patch_size
-        if prediction_config.overwrite_patch_size is not None
-        else train_config.patch_size
-    )
-    img_preprocessed, original_shape, inference_shape = preprocess_image(
+    normalization = _resolve_normalization(train_config, prediction_config)
+    patch_size = _resolve_patch_size(train_config, prediction_config)
+    input_voxel_size = _resolve_input_voxel_size(loaded_image)
+    target_voxel_size = _resolve_target_voxel_size(train_config, prediction_config)
+    target_shape = patch_size if target_voxel_size is None else None
+
+    device = model.device
+    img_tensor = img_tensor.to(device)
+    img_tensor, original_shape, inference_shape = preprocess_image(
         img_tensor,
         normalization,
-        target_shape=patch_size,
+        target_shape=target_shape,
+        input_voxel_size=input_voxel_size,
+        target_voxel_size=target_voxel_size,
         apply_resampling=True,
         apply_normalization=True,
         output_dtype=torch.float32,
     )
 
-    device = model.device
     autocast_ctx = (
         torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     )
     with torch.no_grad(), autocast_ctx:
-        model_output: ModelOutput = model(img_preprocessed.unsqueeze(0).to(device))
+        model_output: ModelOutput = model(img_tensor.unsqueeze(0))
     detections, proto_masks = _postprocess_single(
         model_output,
         train_config,
         prediction_config,
         len(names),
     )
-    image_results: list[dict[str, object]] = []
-    mask_detections: list[torch.Tensor] = []
     prototype_masks: torch.Tensor | None = None
+    mask_detections: list[torch.Tensor] = []
+    image_results: list[dict[str, object]] = []
     if detections.numel():
         ops.scale_boxes(
             inference_shape,
@@ -209,26 +509,14 @@ def _predict_loaded_image(
             ratio_pad=None,
             clip=prediction_config.clip_boxes_to_image,
         )
-        for det_i, det in enumerate(detections):
-            box_image_xyzxyz = det[:6]
-            try:
-                box_world_xyzxyz = ops.box_image_to_world(
-                    box_image_xyzxyz, np.asarray(loaded_image.affine, dtype=np.float32)
-                )
-            except (RuntimeError, ValueError, TypeError):  # pragma: no cover
-                box_world_xyzxyz = box_image_xyzxyz
-            entry: dict[str, object] = {
-                "class": int(det[7].item()),
-                "class_name": names.get(int(det[7].item()), str(int(det[7].item()))),
-                "confidence": round(float(det[6].item()), 6),
-                "box_image_xyzxyz": [round(float(x), 2) for x in box_image_xyzxyz.tolist()],
-                "box_world_xyzxyz": [round(float(x), 2) for x in box_world_xyzxyz.tolist()],
-                "box_relative_xyzxyz": _relative_box(box_image_xyzxyz, original_shape),
-            }
-            if model_output.mask_coefficients is not None and proto_masks is not None:
-                entry["mask_path"] = f"{loaded_image.case_name}_det{det_i}.nii.gz"
-                mask_detections.append(det.detach().to(dtype=torch.float32).clone())
-            image_results.append(entry)
+        image_results, mask_detections = _build_prediction_entries(
+            detections,
+            case_name=loaded_image.case_name,
+            affine=loaded_image.affine,
+            original_shape=original_shape,
+            names=names,
+            include_masks=model_output.mask_coefficients is not None and proto_masks is not None,
+        )
         if mask_detections and proto_masks is not None:
             prototype_masks = (
                 proto_masks[0].detach().to(device="cpu", dtype=torch.float32).contiguous()
@@ -243,13 +531,181 @@ def _predict_loaded_image(
     )
 
 
+def _predict_patchwise_image(
+    loaded_image: _LoadedImageTask,
+    *,
+    model: HardcodedModel,
+    train_config: DefaultConfig,
+    names: dict[int, str],
+    prediction_config: PredictionConfig,
+) -> _WriteTask:
+    img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
+        *reversed(range(loaded_image.image.ndim))
+    )
+    normalization = _resolve_normalization(train_config, prediction_config)
+    patch_size = _resolve_patch_size(train_config, prediction_config)
+    patch_shape_xyz = patch_size.get_xyz()
+    patch_shape_zyx = patch_size.get_zyx()
+    input_voxel_size = _resolve_input_voxel_size(loaded_image)
+    target_voxel_size = _resolve_target_voxel_size(train_config, prediction_config)
+
+    device = model.device
+    if prediction_config.preprocessing_on_gpu:
+        img_tensor = img_tensor.to(device)
+    img_tensor, original_shape, inference_shape = preprocess_image(
+        img_tensor,
+        normalization,
+        input_voxel_size=input_voxel_size,
+        target_voxel_size=target_voxel_size,
+        apply_resampling=True,
+        apply_normalization=True,
+        output_dtype=torch.float32,
+    )
+    inference_shape_xyz = _tensor_shape_xyz(img_tensor)
+    patch_fill_value = float(img_tensor.min().item())
+
+    autocast_ctx = (
+        torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
+    )
+    merged_detections: list[torch.Tensor] = []
+    merged_masks: list[torch.Tensor] = []
+    for patch_origin_xyz in _iter_patch_origins(
+        inference_shape_xyz,
+        patch_shape_xyz,
+        prediction_config.patch_overlap,
+    ):
+        patch = _extract_tensor_patch(
+            img_tensor,
+            patch_origin_xyz,
+            patch_shape_xyz,
+            patch_fill_value,
+        )
+        if not prediction_config.preprocessing_on_gpu:
+            patch = patch.to(device)
+        with torch.no_grad(), autocast_ctx:
+            model_output: ModelOutput = model(patch.unsqueeze(0))
+        detections, proto_masks = _postprocess_single(
+            model_output,
+            train_config,
+            prediction_config,
+            len(names),
+        )
+        if not detections.numel():
+            continue
+
+        prototype_cpu = (
+            proto_masks[0].detach().to(device="cpu", dtype=torch.float32).contiguous()
+            if proto_masks is not None
+            else None
+        )
+        for detection in detections:
+            weighted_detection = _apply_patch_border_weight(
+                detection,
+                patch_shape_xyz,
+                prediction_config.patch_border_weight,
+            )
+            merged_detections.append(
+                _shift_detection_to_image(weighted_detection, patch_origin_xyz)
+            )
+            if model_output.mask_coefficients is not None and prototype_cpu is not None:
+                full_mask = _reconstruct_patch_mask_to_image(
+                    detection.detach().to(dtype=torch.float32).clone(),
+                    prototype_cpu,
+                    patch_shape_zyx,
+                    inference_shape,
+                    patch_origin_xyz,
+                )
+                if full_mask is not None:
+                    merged_masks.append(full_mask)
+
+    merged_prediction_tensor, keep_indices = _merge_patch_detections(
+        merged_detections,
+        iou_threshold=prediction_config.nms_iou_threshold,
+        agnostic_nms=train_config.agnostic_nms,
+        max_det=train_config.max_det,
+    )
+    if merged_prediction_tensor.numel() == 0:
+        return _WriteTask(
+            case_name=loaded_image.case_name,
+            image_results=[],
+            affine=loaded_image.affine,
+            original_shape=original_shape,
+            prototype_masks=None,
+            mask_detections=[],
+        )
+
+    if prediction_config.clip_boxes_to_image:
+        ops.clip_boxes(merged_prediction_tensor[:, :6], inference_shape)
+    selected_masks = [merged_masks[index] for index in keep_indices] if merged_masks else []
+    ops.scale_boxes(
+        inference_shape,
+        merged_prediction_tensor[:, :6],
+        original_shape,
+        ratio_pad=None,
+        clip=prediction_config.clip_boxes_to_image,
+    )
+    image_results, _mask_detections = _build_prediction_entries(
+        merged_prediction_tensor,
+        case_name=loaded_image.case_name,
+        affine=loaded_image.affine,
+        original_shape=original_shape,
+        names=names,
+        include_masks=bool(selected_masks),
+    )
+    return _WriteTask(
+        case_name=loaded_image.case_name,
+        image_results=image_results,
+        affine=loaded_image.affine,
+        original_shape=original_shape,
+        prototype_masks=None,
+        mask_detections=[],
+        merged_mask_probabilities=selected_masks,
+    )
+
+
+def _predict_loaded_image(
+    loaded_image: _LoadedImageTask,
+    *,
+    model: HardcodedModel,
+    train_config: DefaultConfig,
+    names: dict[int, str],
+    prediction_config: PredictionConfig,
+) -> _WriteTask:
+    if train_config.training_mode == "patchwise":
+        return _predict_patchwise_image(
+            loaded_image,
+            model=model,
+            train_config=train_config,
+            names=names,
+            prediction_config=prediction_config,
+        )
+    return _predict_whole_image(
+        loaded_image,
+        model=model,
+        train_config=train_config,
+        names=names,
+        prediction_config=prediction_config,
+    )
+
+
 def _write_prediction_result(output_dir: Path, write_task: _WriteTask) -> None:
-    if write_task.prototype_masks is not None:
+    if write_task.prototype_masks is not None or write_task.merged_mask_probabilities:
         mask_affine = np.asarray(write_task.affine, dtype=np.float32)
+    if write_task.prototype_masks is not None:
         for det_i, det_tensor in enumerate(write_task.mask_detections):
             _reconstruct_and_save_mask(
                 det_tensor,
                 write_task.prototype_masks,
+                write_task.original_shape,
+                mask_affine,
+                output_dir / "masks",
+                det_i,
+                write_task.case_name,
+            )
+    if write_task.merged_mask_probabilities:
+        for det_i, mask_probability in enumerate(write_task.merged_mask_probabilities):
+            _save_merged_mask_probability(
+                mask_probability,
                 write_task.original_shape,
                 mask_affine,
                 output_dir / "masks",
@@ -298,6 +754,7 @@ def _loader_worker(
                     case_name=current_case,
                     affine=np.asarray(nifti_img.affine, dtype=np.float32),
                     image=np.ascontiguousarray(img_np),
+                    voxel_size_xyz=tuple(float(zoom) for zoom in nifti_img.header.get_zooms()[:3]),
                 )
             )
     except Exception:  # pragma: no cover - exercised via process supervision
@@ -314,6 +771,7 @@ def _inference_worker(
     current_case: str | None = None
     try:
         model, train_config, names = _load_model(prediction_cfg)
+        _validate_loaded_model_prediction_config(train_config, prediction_cfg)
         finished_loaders = 0
         while finished_loaders < prediction_cfg.num_load_workers:
             loaded_image = inference_queue.get()
@@ -401,6 +859,32 @@ def _log_failed_processes(processes: list[mp.Process]) -> None:
             process.name,
             process.exitcode,
         )
+
+
+def _validate_prediction_config(prediction_cfg: PredictionConfig) -> None:
+    if not 0.0 <= prediction_cfg.patch_overlap < 1.0:
+        msg = "patch_overlap must be in the range [0, 1)."
+        raise ValueError(msg)
+    if not 0.0 < prediction_cfg.patch_border_weight <= 1.0:
+        msg = "patch_border_weight must be in the range (0, 1]."
+        raise ValueError(msg)
+
+
+def _validate_loaded_model_prediction_config(
+    train_config: DefaultConfig,
+    prediction_cfg: PredictionConfig,
+) -> None:
+    if (
+        train_config.training_mode != "patchwise"
+        and prediction_cfg.overwrite_voxel_size is not None
+        and prediction_cfg.overwrite_patch_size is not None
+    ):
+        msg = (
+            "Whole-image inference accepts either --overwrite-patch-size or "
+            "--overwrite-voxel-size, "
+            "but not both at the same time."
+        )
+        raise ValueError(msg)
 
 
 def _update_progress_from_load_queue(
@@ -521,6 +1005,7 @@ def _run_prediction_pipeline(prediction_cfg: PredictionConfig, files: list[Path]
 
 def run_prediction(prediction_cfg: PredictionConfig) -> int:
     try:
+        _validate_prediction_config(prediction_cfg)
         if not prediction_cfg.output_dir.exists():
             prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
         files = list(_iter_nifti(prediction_cfg.input_dir))

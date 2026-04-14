@@ -9,8 +9,8 @@ import pytest
 import torch
 import yaml
 
-from radyolo.config.config import get_cfg, load_model_checkpoint, save_model_checkpoint
-from radyolo.config.spatial import PatchSize
+from radyolo.config.config import DefaultConfig, get_cfg, load_model_checkpoint, save_model_checkpoint
+from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import Trainer
 
@@ -118,3 +118,21 @@ def test_resume_preserves_typed_patch_size(
     assert checkpoint is not None
     assert isinstance(trainer.config.patch_size, PatchSize)
     assert trainer.config.patch_size.get_zyx() == config.patch_size.get_zyx()
+
+
+def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path) -> None:
+    config = get_cfg(minimal_train_config, {"voxel_size": {"x": 1.5, "y": 1.2, "z": 2.5}})
+
+    assert config.voxel_size == VoxelSize(x=1.5, y=1.2, z=2.5)
+    assert "voxel_size" in config.model_dump()
+    assert "target_voxel_size" not in config.model_dump()
+
+
+def test_default_config_accepts_legacy_target_voxel_size_field(minimal_train_config: Path) -> None:
+    with minimal_train_config.open(encoding="utf-8") as file:
+        yaml_config = yaml.safe_load(file)
+    yaml_config["target_voxel_size"] = {"x": 1.0, "y": 1.0, "z": 2.0}
+
+    config = DefaultConfig.model_validate(yaml_config)
+
+    assert config.voxel_size == VoxelSize(x=1.0, y=1.0, z=2.0)

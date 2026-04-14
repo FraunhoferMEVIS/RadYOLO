@@ -1,21 +1,27 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 
 import nibabel as nib
 import numpy as np
+import pytest
 import torch
 
 from radyolo.inference import predict as predict_module
 from radyolo.inference.predict import (
     PredictionConfig,
     _LoadedImageTask,
+    _apply_patch_border_weight,
+    _get_patch_starts,
+    _merge_patch_detections,
     _predict_loaded_image,
+    _predict_patchwise_image,
     _reconstruct_and_save_mask,
     _relative_box,
     _write_prediction_result,
 )
-from radyolo.config.spatial import PatchSize
+from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.models.layers import ModelOutput
 from radyolo.utils.ops import (
     box_image_to_world,
@@ -191,10 +197,12 @@ def test_reconstruct_and_save_mask_writes_thresholded_nifti_mask(tmp_path, monke
 class _DummyTrainConfig:
     normalization: dict[str, str] = None  # type: ignore[assignment]
     patch_size: PatchSize = None  # type: ignore[assignment]
+    voxel_size: VoxelSize | None = None
     num_classes: int = 1
     agnostic_nms: bool = False
     max_det: int = 300
     nms_time_limit: float = 0.0
+    training_mode: str = "wholeimage"
 
     def __post_init__(self) -> None:
         if self.normalization is None:
@@ -226,13 +234,17 @@ def test_predict_loaded_image_uses_prediction_overrides(monkeypatch, tmp_path) -
         image: torch.Tensor,
         normalization,
         *,
-        target_shape,
+        target_shape=None,
+        input_voxel_size=None,
+        target_voxel_size=None,
         apply_resampling: bool,
         apply_normalization: bool,
         output_dtype: torch.dtype,
     ):
         captured["normalization"] = normalization
         captured["target_shape"] = target_shape
+        captured["input_voxel_size"] = input_voxel_size
+        captured["target_voxel_size"] = target_voxel_size
         captured["apply_resampling"] = apply_resampling
         captured["apply_normalization"] = apply_normalization
         captured["output_dtype"] = output_dtype
@@ -268,6 +280,8 @@ def test_predict_loaded_image_uses_prediction_overrides(monkeypatch, tmp_path) -
 
     assert captured["normalization"] == {"type": "zscore"}
     assert captured["target_shape"] == PatchSize(x=20, y=21, z=22)
+    assert captured["input_voxel_size"] is None
+    assert captured["target_voxel_size"] is None
     assert captured["apply_resampling"] is True
     assert captured["apply_normalization"] is True
     assert captured["output_dtype"] == torch.float32
@@ -324,3 +338,309 @@ def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> 
     assert (tmp_path / "masks" / "case2_det0.nii.gz").exists()
     assert tuple(captured["proto_shape"]) == (2, 2, 2)
     assert captured["original_shape"] == (2, 2, 2)
+
+
+def test_get_patch_starts_covers_image_with_requested_overlap() -> None:
+    assert _get_patch_starts(10, 4, 0.5) == [0, 2, 4, 6]
+    assert _get_patch_starts(3, 4, 0.5) == [0]
+
+
+def test_get_patch_starts_evenly_spreads_uneven_tail() -> None:
+    assert _get_patch_starts(11, 4, 0.5) == [0, 2, 4, 5, 7]
+
+
+def test_get_patch_starts_allows_larger_overlap_to_keep_even_spacing() -> None:
+    assert _get_patch_starts(11, 4, 0.25) == [0, 2, 5, 7]
+
+
+def test_patch_border_weight_downweights_border_predictions() -> None:
+    detection = torch.tensor([0.0, 2.0, 2.0, 2.0, 4.0, 4.0, 1.0, 0.0], dtype=torch.float32)
+
+    weighted = _apply_patch_border_weight(detection, (4, 4, 4), 0.8)
+
+    assert weighted[6].item() == pytest.approx(0.8)
+
+
+def test_merge_patch_detections_applies_image_level_nms() -> None:
+    detections = [
+        torch.tensor([0.0, 0.0, 0.0, 4.0, 4.0, 4.0, 0.9, 0.0], dtype=torch.float32),
+        torch.tensor([0.1, 0.1, 0.1, 4.1, 4.1, 4.1, 0.7, 0.0], dtype=torch.float32),
+    ]
+
+    merged, keep_indices = _merge_patch_detections(
+        detections,
+        iou_threshold=0.2,
+        agnostic_nms=False,
+        max_det=10,
+    )
+
+    assert merged.shape == (1, 8)
+    assert keep_indices == [0]
+
+
+def test_predict_loaded_image_uses_patchwise_voxel_resampling(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    loaded_image = _LoadedImageTask(
+        case_name="case_patch",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+        voxel_size_xyz=(1.0, 2.0, 3.0),
+    )
+
+    def fake_patchwise_predict(*args, **kwargs):
+        captured["loaded_image"] = kwargs["loaded_image"] if "loaded_image" in kwargs else args[0]
+        captured["prediction_config"] = kwargs["prediction_config"]
+        return predict_module._WriteTask(
+            case_name="case_patch",
+            image_results=[],
+            affine=np.eye(4, dtype=np.float32),
+            original_shape=(6, 5, 4),
+            prototype_masks=None,
+            mask_detections=[],
+        )
+
+    monkeypatch.setattr(predict_module, "_predict_patchwise_image", fake_patchwise_predict)
+
+    write_task = _predict_loaded_image(
+        loaded_image,
+        model=_DummyModel(),
+        train_config=_DummyTrainConfig(training_mode="patchwise"),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="cpu",
+            clip_boxes_to_image=False,
+            overwrite_voxel_size=VoxelSize(x=1.5, y=1.5, z=1.5),
+        ),
+    )
+
+    assert captured["loaded_image"].voxel_size_xyz == (1.0, 2.0, 3.0)
+    assert captured["prediction_config"].overwrite_voxel_size == VoxelSize(x=1.5, y=1.5, z=1.5)
+    assert write_task.case_name == "case_patch"
+
+
+def test_predict_loaded_image_uses_checkpoint_voxel_size_by_default(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    loaded_image = _LoadedImageTask(
+        case_name="case_voxel_default",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+        voxel_size_xyz=(2.0, 2.0, 2.0),
+    )
+
+    def fake_preprocess_image(
+        image: torch.Tensor,
+        normalization,
+        *,
+        target_shape=None,
+        input_voxel_size=None,
+        target_voxel_size=None,
+        apply_resampling: bool,
+        apply_normalization: bool,
+        output_dtype: torch.dtype,
+    ):
+        captured["target_shape"] = target_shape
+        captured["input_voxel_size"] = input_voxel_size
+        captured["target_voxel_size"] = target_voxel_size
+        return image.to(dtype=output_dtype), (6, 5, 4), (6, 10, 8)
+
+    monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.zeros((0, 8), dtype=torch.float32),
+            None,
+        ),
+    )
+
+    _predict_loaded_image(
+        loaded_image,
+        model=_DummyModel(),
+        train_config=_DummyTrainConfig(voxel_size=VoxelSize(x=1.0, y=1.0, z=1.0)),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="cpu",
+            clip_boxes_to_image=False,
+        ),
+    )
+
+    assert captured["target_shape"] is None
+    assert captured["input_voxel_size"] == VoxelSize(x=2.0, y=2.0, z=2.0)
+    assert captured["target_voxel_size"] == VoxelSize(x=1.0, y=1.0, z=1.0)
+
+
+def test_predict_patchwise_image_moves_image_before_preprocessing_when_enabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    events: list[str] = []
+    loaded_image = _LoadedImageTask(
+        case_name="case_gpu_preprocess",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+    )
+    model = _DummyModel()
+    model.device = torch.device("cuda")
+    original_tensor_to = torch.Tensor.to
+
+    def fake_tensor_to(self, *args, **kwargs):
+        target_device = kwargs.get("device")
+        remaining_args = args
+        remaining_kwargs = dict(kwargs)
+        if args and isinstance(args[0], torch.device | str):
+            target_device = args[0]
+            remaining_args = args[1:]
+        if target_device is not None and torch.device(target_device).type == "cuda":
+            events.append("to_cuda")
+            if remaining_kwargs.pop("device", None) is not None:
+                return original_tensor_to(self, *remaining_args, **remaining_kwargs)
+            if remaining_args or remaining_kwargs:
+                return original_tensor_to(self, *remaining_args, **remaining_kwargs)
+            return self
+        return original_tensor_to(self, *args, **kwargs)
+
+    def fake_preprocess_image(
+        image: torch.Tensor,
+        normalization,
+        *,
+        target_shape=None,
+        input_voxel_size=None,
+        target_voxel_size=None,
+        apply_resampling: bool,
+        apply_normalization: bool,
+        output_dtype: torch.dtype,
+    ):
+        del normalization, target_shape, input_voxel_size, target_voxel_size
+        del apply_resampling, apply_normalization, output_dtype
+        events.append("preprocess")
+        return image, (6, 5, 4), (6, 5, 4)
+
+    def fake_extract_tensor_patch(image, patch_origin_xyz, patch_shape_xyz, fill_value):
+        del image, patch_origin_xyz, patch_shape_xyz, fill_value
+        events.append("extract_patch")
+        return torch.zeros((1, 12, 11, 10), dtype=torch.float32)
+
+    monkeypatch.setattr(torch.Tensor, "to", fake_tensor_to)
+    monkeypatch.setattr(predict_module.torch, "autocast", lambda *_args, **_kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
+    monkeypatch.setattr(predict_module, "_extract_tensor_patch", fake_extract_tensor_patch)
+    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.zeros((0, 8), dtype=torch.float32),
+            None,
+        ),
+    )
+
+    _predict_patchwise_image(
+        loaded_image,
+        model=model,
+        train_config=_DummyTrainConfig(training_mode="patchwise"),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="0",
+            clip_boxes_to_image=False,
+            preprocessing_on_gpu=True,
+        ),
+    )
+
+    assert events[:3] == ["to_cuda", "preprocess", "extract_patch"]
+
+
+def test_predict_patchwise_image_moves_only_patches_when_disabled(monkeypatch, tmp_path) -> None:
+    events: list[str] = []
+    loaded_image = _LoadedImageTask(
+        case_name="case_gpu_model",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+    )
+    model = _DummyModel()
+    model.device = torch.device("cuda")
+    original_tensor_to = torch.Tensor.to
+
+    def fake_tensor_to(self, *args, **kwargs):
+        target_device = kwargs.get("device")
+        remaining_args = args
+        remaining_kwargs = dict(kwargs)
+        if args and isinstance(args[0], torch.device | str):
+            target_device = args[0]
+            remaining_args = args[1:]
+        if target_device is not None and torch.device(target_device).type == "cuda":
+            events.append("to_cuda")
+            if remaining_kwargs.pop("device", None) is not None:
+                return original_tensor_to(self, *remaining_args, **remaining_kwargs)
+            if remaining_args or remaining_kwargs:
+                return original_tensor_to(self, *remaining_args, **remaining_kwargs)
+            return self
+        return original_tensor_to(self, *args, **kwargs)
+
+    def fake_preprocess_image(
+        image: torch.Tensor,
+        normalization,
+        *,
+        target_shape=None,
+        input_voxel_size=None,
+        target_voxel_size=None,
+        apply_resampling: bool,
+        apply_normalization: bool,
+        output_dtype: torch.dtype,
+    ):
+        del image, normalization, target_shape, input_voxel_size, target_voxel_size
+        del apply_resampling, apply_normalization, output_dtype
+        events.append("preprocess")
+        return torch.zeros((1, 6, 5, 4), dtype=torch.float32), (6, 5, 4), (6, 5, 4)
+
+    def fake_extract_tensor_patch(image, patch_origin_xyz, patch_shape_xyz, fill_value):
+        del image, patch_origin_xyz, patch_shape_xyz, fill_value
+        events.append("extract_patch")
+        return torch.zeros((1, 12, 11, 10), dtype=torch.float32)
+
+    monkeypatch.setattr(torch.Tensor, "to", fake_tensor_to)
+    monkeypatch.setattr(predict_module.torch, "autocast", lambda *_args, **_kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
+    monkeypatch.setattr(predict_module, "_extract_tensor_patch", fake_extract_tensor_patch)
+    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.zeros((0, 8), dtype=torch.float32),
+            None,
+        ),
+    )
+
+    _predict_patchwise_image(
+        loaded_image,
+        model=model,
+        train_config=_DummyTrainConfig(training_mode="patchwise"),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="0",
+            clip_boxes_to_image=False,
+            preprocessing_on_gpu=False,
+        ),
+    )
+
+    assert events[:3] == ["preprocess", "extract_patch", "to_cuda"]

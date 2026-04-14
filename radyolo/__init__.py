@@ -756,6 +756,38 @@ def convert_to_nndetection(
     ),
 )
 @click.option(
+    "--overwrite-voxel-size",
+    nargs=3,
+    type=float,
+    default=None,
+    help="Override the checkpoint voxel size for inference as x y z.",
+)
+@click.option(
+    "--patch-overlap",
+    default=0.5,
+    type=float,
+    show_default=True,
+    help="Sliding-window overlap fraction for patchwise inference.",
+)
+@click.option(
+    "--patch-border-weight",
+    default=0.9,
+    type=float,
+    show_default=True,
+    help="Minimum confidence multiplier for detections touching patch borders.",
+)
+@click.option(
+    "--preprocessing-on-gpu/--no-preprocessing-on-gpu",
+    "preprocessing_on_gpu",
+    default=True,
+    show_default=True,
+    help=(
+        "For patchwise inference, move the full image to the inference device before "
+        "preprocessing and patch extraction. Disable this to preprocess on CPU and move only "
+        "each extracted patch for model execution."
+    ),
+)
+@click.option(
     "--num-load-workers",
     default=2,
     type=click.IntRange(min=1),
@@ -779,6 +811,10 @@ def predict(
     clip_boxes_to_image: bool,
     overwrite_patch_size: tuple[int, int, int] | None,
     overwrite_normalization: dict | list[dict] | None,
+    overwrite_voxel_size: tuple[float, float, float] | None,
+    patch_overlap: float,
+    patch_border_weight: float,
+    preprocessing_on_gpu: bool,
     num_load_workers: int,
     num_write_workers: int,
 ) -> int:
@@ -799,6 +835,14 @@ def predict(
                     else None
                 ),
                 overwrite_normalization=overwrite_normalization,
+                overwrite_voxel_size=(
+                    VoxelSize.from_xyz(overwrite_voxel_size)
+                    if overwrite_voxel_size is not None
+                    else None
+                ),
+                patch_overlap=patch_overlap,
+                patch_border_weight=patch_border_weight,
+                preprocessing_on_gpu=preprocessing_on_gpu,
                 num_load_workers=num_load_workers,
                 num_write_workers=num_write_workers,
             )
