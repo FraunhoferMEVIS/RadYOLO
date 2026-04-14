@@ -36,6 +36,7 @@ epochs: 1000                      # (int) number of epochs to train for
 patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training
 training_mode: "patchwise"      # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
 patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
+voxel_size: null                  # optional resampling target in x, y, z: {x: 0.8, y: 0.8, z: 1.5} or null, only used for patchwise training
 normalization: {type: "none"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 apply_preprocessing: True         # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
 foreground_oversampling: 0.33     # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
