@@ -303,7 +303,8 @@ def _convert_case_to_blosc2(
     config: PreprocessCaseConfig,
 ) -> None:
     image_tensor, voxel_size = _load_nifti_tensor(image_path)
-    image_preprocessed, _, resized_shape = preprocess_image(
+    original_ndim = image_tensor.ndim
+    image_tensor, _, resized_shape = preprocess_image(
         image_tensor,
         config.normalization,
         target_shape=config.target_image_size,
@@ -312,7 +313,7 @@ def _convert_case_to_blosc2(
         output_dtype=resolve_torch_dtype(config.image_dtype),
     )
     _save_preprocessed_image(
-        _tensor_to_saved_numpy(image_preprocessed, image_tensor.ndim).astype(
+        _tensor_to_saved_numpy(image_tensor, original_ndim).astype(
             resolve_numpy_dtype(config.image_dtype),
             copy=False,
         ),

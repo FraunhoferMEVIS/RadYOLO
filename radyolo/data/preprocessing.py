@@ -104,12 +104,12 @@ def preprocess_image(
         else source_shape
     )
 
-    working_image = image.to(dtype=torch.float32).clone()
+    image = image.to(dtype=torch.float32)
     if destination_shape != source_shape:
-        working_image = cast(
+        image = cast(
             "torch.Tensor",
             F.interpolate(
-                working_image.unsqueeze(0),
+                image.unsqueeze(0),
                 size=destination_shape,
                 mode="trilinear",
                 align_corners=False,
@@ -117,11 +117,11 @@ def preprocess_image(
         ).squeeze(0)
 
     if apply_normalization:
-        working_image = normalize_image(working_image, normalization)
-    if working_image.dtype != output_dtype:
-        working_image = working_image.to(dtype=output_dtype)
+        image = normalize_image(image, normalization)
+    if image.dtype != output_dtype:
+        image = image.to(dtype=output_dtype)
 
-    return working_image, source_shape, destination_shape
+    return image, source_shape, destination_shape
 
 
 def resample_mask(mask: torch.Tensor, target_shape: PatchSize) -> torch.Tensor:
