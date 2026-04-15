@@ -13,6 +13,7 @@ from radyolo.config.config import DefaultConfig, get_cfg, load_model_checkpoint,
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import Trainer
+from radyolo.utils.util import ModelEMA
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +36,7 @@ def test_load_model_checkpoint_rejects_legacy_numpy_metadata(
         "optimizer_state_dict": optimizer.state_dict(),
         "scaler_state_dict": scaler.state_dict(),
         "train_config": config.model_dump_json(),
-        "train_metrics": {"metrics/mAP-ewa": np.float32(0.25)},
+        "train_metrics": {"metrics/fitness": np.float32(0.25)},
         "date": datetime.datetime.now(tz=datetime.UTC).isoformat(),
     }
 
@@ -66,14 +67,14 @@ def test_save_model_checkpoint_writes_weights_only_safe_metadata(
         optimizer=optimizer,
         scaler=scaler,
         train_config=config,
-        train_metrics={"metrics/mAP-ewa": np.float32(0.5)},
+        train_metrics={"metrics/fitness": np.float32(0.5)},
     )
 
     raw_checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     checkpoint = load_model_checkpoint(checkpoint_path)
 
     assert isinstance(raw_checkpoint["optimizer_state_dict"]["param_groups"][0]["lr"], float)
-    assert isinstance(raw_checkpoint["train_metrics"]["metrics/mAP-ewa"], float)
+    assert isinstance(raw_checkpoint["train_metrics"]["metrics/fitness"], float)
     assert checkpoint["epoch"] == 2
     assert checkpoint["train_config"].experiment_name == config.experiment_name
 
@@ -100,7 +101,7 @@ def test_resume_preserves_typed_patch_size(
         optimizer=optimizer,
         scaler=scaler,
         train_config=config,
-        train_metrics={"metrics/mAP-ewa": 0.25},
+        train_metrics={"metrics/fitness": 0.25},
     )
 
     resume_config_path = tmp_path / "resume_train.yaml"
@@ -126,3 +127,18 @@ def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path
     assert config.voxel_size == VoxelSize(x=1.5, y=1.2, z=2.5)
     assert "voxel_size" in config.model_dump()
     assert "target_voxel_size" not in config.model_dump()
+
+
+def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.config = trainer.config.model_copy(update={"fitness_metric_weights": (0.5, 0.25, 0.25)})
+
+    fitness = trainer._compute_validation_fitness(
+        {
+            "metrics/mAP10-95": 0.6,
+            "metrics/mAP10-95Agn": 0.2,
+            "metrics/dice": 0.4,
+        }
+    )
+
+    assert fitness == pytest.approx(0.45)

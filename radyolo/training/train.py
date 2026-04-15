@@ -115,12 +115,22 @@ class Trainer:
         LOGGER.info("Input config path: %s", self.config_path.resolve())
         LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
 
-        # Stateful metric: exponentially weighted mAP10-95 across epochs (persisted on resume)
-        self.ewa_mAP1095 = None
+        # Stateful validation fitness: exponentially weighted metric aggregate across epochs.
+        self.ewa_fitness = None
         self.ewa_alpha = 0.6
 
     def copy_train_config(self) -> None:
         shutil.copy2(self.config_path, self.save_dir / "train_config.yaml")
+
+    def _compute_validation_fitness(self, metrics: dict[str, float]) -> float:
+        map_1095 = float(metrics.get("metrics/mAP10-95", 0.0))
+        map_1095_agn = float(metrics.get("metrics/mAP10-95Agn", 0.0))
+        dice = float(metrics.get("metrics/dice", 0.0))
+        weights = self.config.fitness_metric_weights
+        total_weight = sum(weights)
+        return (
+            weights[0] * map_1095 + weights[1] * map_1095_agn + weights[2] * dice
+        ) / total_weight
 
     def check_resume(self) -> None:
         resume = self.config.resume
@@ -657,7 +667,7 @@ class Trainer:
             self.config,
             {
                 **metrics,
-                "metrics/mAP-ewa": float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0,
+                "metrics/fitness": float(self.ewa_fitness) if self.ewa_fitness is not None else 0.0,
             },
         )
 
@@ -682,16 +692,15 @@ class Trainer:
         best_fitness: float | None,
     ) -> tuple[dict[str, float], float, float]:
         metrics = validator(self, ema=ema)
-        map_val = metrics.get("metrics/mAP10-95")
-        if map_val is not None:
-            if self.ewa_mAP1095 is None:
-                self.ewa_mAP1095 = float(map_val)
-            else:
-                self.ewa_mAP1095 = self.ewa_alpha * float(self.ewa_mAP1095) + (
-                    1.0 - self.ewa_alpha
-                ) * float(map_val)
-            metrics["metrics/mAP-ewa"] = float(self.ewa_mAP1095)
-        fitness = float(self.ewa_mAP1095) if self.ewa_mAP1095 is not None else 0.0
+        current_fitness = self._compute_validation_fitness(metrics)
+        if self.ewa_fitness is None:
+            self.ewa_fitness = current_fitness
+        else:
+            self.ewa_fitness = self.ewa_alpha * float(self.ewa_fitness) + (
+                1.0 - self.ewa_alpha
+            ) * current_fitness
+        metrics["metrics/fitness"] = float(self.ewa_fitness)
+        fitness = float(self.ewa_fitness)
         if not best_fitness or best_fitness < fitness:
             best_fitness = fitness
         return metrics, fitness, best_fitness
@@ -730,7 +739,8 @@ class Trainer:
         scaler.load_state_dict(checkpoint["scaler_state_dict"])
         ema.ema.load_state_dict(checkpoint["model_state_dict"])
         ema.updates = checkpoint["ema_updates"]
-        self.ewa_mAP1095 = checkpoint.get("train_metrics", {}).get("metrics/mAP-ewa")
+        train_metrics = checkpoint.get("train_metrics", {})
+        self.ewa_fitness = train_metrics.get("metrics/fitness")
 
         LOGGER.info(
             "Resuming training %s from epoch %d to %d total epochs.",

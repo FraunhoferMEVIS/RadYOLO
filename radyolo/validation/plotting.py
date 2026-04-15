@@ -37,7 +37,7 @@ RESULTS_PLOT_COLUMNS = (
     "val/cls_obj_loss",
     "val/cls_sep_loss",
     "val/mask_loss",
-    "metrics/mAP10Agn",
+    "metrics/fitness",
     "metrics/mAP10",
     "metrics/mAP10-95Agn",
     "metrics/mAP10-95",

@@ -170,6 +170,11 @@ class DefaultConfig(BaseModel):
     agnostic_nms: bool = False  # class-agnostic NMS
     max_det: int = 300  # maximum number of detections per image
     clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds during validation/prediction
+    fitness_metric_weights: tuple[float, float, float] = (
+        0.4,
+        0.4,
+        0.2,
+    )  # weights for [mAP10-95, mAP10-95Agn, dice] when computing validation fitness
 
     # Plot settings
     plots: bool = True  # save plots and images during train/val
@@ -284,6 +289,15 @@ class DefaultConfig(BaseModel):
             raise ValueError(msg)
         if self.bbox_parametrization == "center_extents" and self.dfl_reg_max > 1:
             msg = "bbox_parametrization='center_extents' requires dfl_reg_max=1"
+            raise ValueError(msg)
+        if len(self.fitness_metric_weights) != 3:
+            msg = "fitness_metric_weights must contain exactly three entries"
+            raise ValueError(msg)
+        if any(weight < 0 for weight in self.fitness_metric_weights):
+            msg = "fitness_metric_weights entries must be non-negative"
+            raise ValueError(msg)
+        if sum(self.fitness_metric_weights) <= 0:
+            msg = "fitness_metric_weights must sum to a positive value"
             raise ValueError(msg)
         return self
 

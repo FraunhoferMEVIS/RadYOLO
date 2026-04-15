@@ -65,8 +65,9 @@ def test_plot_results_warns_when_results_png_is_busy(
         "metrics/mAP10-95",
         "metrics/mAP10-95Agn",
         "metrics/dice",
+        "metrics/fitness",
     ]
-    pd.DataFrame([[0, *range(1, 17)], [1, *range(2, 18)]], columns=columns).to_csv(
+    pd.DataFrame([[0, *range(1, 18)], [1, *range(2, 19)]], columns=columns).to_csv(
         results_csv,
         index=False,
     )

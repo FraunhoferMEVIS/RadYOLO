@@ -76,6 +76,7 @@ nms_time_limit: 0.5                    # (float) maximum time in seconds per ima
 agnostic_nms: False                    # (bool) class-agnostic NMS
 max_det: 300                           # (int) maximum number of detections per image
 clip_boxes_to_image: True              # (bool) clip predicted 3D boxes to image bounds during validation/prediction
+fitness_metric_weights: [0.4, 0.4, 0.2] # (list[float]) weights for [mAP10-95, mAP10-95Agn, dice] when computing EMA fitness
 
 # Plot Settings
 plots: True                                 # (bool) save plots and images during train/val
