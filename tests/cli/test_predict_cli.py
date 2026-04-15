@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from typing import TYPE_CHECKING
 
 from click.testing import CliRunner
@@ -216,6 +217,10 @@ def test_predict_cli_uses_shared_preprocessing(
     tmp_path,
 ) -> None:
     model_path = trained_run / "weights" / "best.pt"
+    input_dir = tmp_path / "prediction_input"
+    input_dir.mkdir()
+    source_image = next(iter(sorted((synthetic_dataset / "images").glob("*.nii.gz"))))
+    shutil.copy2(source_image, input_dir / source_image.name)
     output_dir = tmp_path / "prediction_output"
     runner = CliRunner()
 
@@ -224,11 +229,15 @@ def test_predict_cli_uses_shared_preprocessing(
         [
             "predict",
             str(model_path),
-            str(synthetic_dataset / "images"),
+            str(input_dir),
             str(output_dir),
             "--device",
             "cpu",
             "--clip-boxes-to-image",
+            "--num-load-workers",
+            "1",
+            "--num-write-workers",
+            "1",
         ],
     )
 
