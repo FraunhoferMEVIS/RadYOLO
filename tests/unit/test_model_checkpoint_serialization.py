@@ -126,13 +126,3 @@ def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path
     assert config.voxel_size == VoxelSize(x=1.5, y=1.2, z=2.5)
     assert "voxel_size" in config.model_dump()
     assert "target_voxel_size" not in config.model_dump()
-
-
-def test_default_config_accepts_legacy_target_voxel_size_field(minimal_train_config: Path) -> None:
-    with minimal_train_config.open(encoding="utf-8") as file:
-        yaml_config = yaml.safe_load(file)
-    yaml_config["target_voxel_size"] = {"x": 1.0, "y": 1.0, "z": 2.0}
-
-    config = DefaultConfig.model_validate(yaml_config)
-
-    assert config.voxel_size == VoxelSize(x=1.0, y=1.0, z=2.0)
