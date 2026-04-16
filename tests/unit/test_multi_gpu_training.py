@@ -11,7 +11,12 @@ from torch.utils.data import SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from radyolo.models.model import build_model_from_config
-from radyolo.training.train import Trainer
+from radyolo.training.train import (
+    DDP_BACKEND_ENV,
+    Trainer,
+    _distributed_train_worker,
+    _select_distributed_backend,
+)
 from radyolo.utils.util import ModelEMA, wrap_model_for_training, select_device
 
 
@@ -29,6 +34,68 @@ def test_select_device_accepts_multiple_cuda_devices(monkeypatch) -> None:
 
     assert device == torch.device("cuda:0")
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0,1"
+
+
+def test_select_distributed_backend_accepts_env_override(monkeypatch) -> None:
+    monkeypatch.setenv(DDP_BACKEND_ENV, "gloo")
+
+    assert _select_distributed_backend() == "gloo"
+
+
+def test_select_distributed_backend_rejects_unavailable_nccl(monkeypatch) -> None:
+    monkeypatch.setenv(DDP_BACKEND_ENV, "nccl")
+    monkeypatch.setattr("radyolo.training.train.dist.is_nccl_available", lambda: False)
+
+    with pytest.raises(ValueError, match="NCCL is not available"):
+        _select_distributed_backend()
+
+
+def test_distributed_train_worker_logs_start(caplog, monkeypatch) -> None:
+    trainer_calls: list[str] = []
+    env_vars = (
+        "RADYOLO_DDP_LOCAL_RANK",
+        "RADYOLO_DDP_RANK",
+        "RADYOLO_DDP_WORLD_SIZE",
+        "MASTER_ADDR",
+        "MASTER_PORT",
+    )
+    previous_env = {env_var: os.environ.get(env_var) for env_var in env_vars}
+
+    class FakeTrainer:
+        def __init__(self, cfg: str) -> None:
+            trainer_calls.append(cfg)
+
+        def train(self) -> None:
+            trainer_calls.append("train")
+
+    monkeypatch.setattr("radyolo.training.train.Trainer", FakeTrainer)
+    for env_var in env_vars:
+        monkeypatch.delenv(env_var, raising=False)
+
+    try:
+        with caplog.at_level("INFO"):
+            _distributed_train_worker(
+                local_rank=1,
+                world_size=2,
+                config_path="fake-config.yaml",
+                master_addr="127.0.0.1",
+                master_port=23456,
+            )
+
+        assert trainer_calls == ["fake-config.yaml", "train"]
+        assert (
+            "Started distributed train worker rank=1/2 with master=127.0.0.1:23456 "
+            "for config=fake-config.yaml."
+        ) in caplog.text
+        assert os.environ["RADYOLO_DDP_LOCAL_RANK"] == "1"
+        assert os.environ["RADYOLO_DDP_RANK"] == "1"
+        assert os.environ["RADYOLO_DDP_WORLD_SIZE"] == "2"
+    finally:
+        for env_var, previous_value in previous_env.items():
+            if previous_value is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = previous_value
 
 
 def test_trainer_wraps_training_model_for_multiple_gpus_with_ddp(

@@ -62,6 +62,7 @@ LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 DDP_LOCAL_RANK_ENV = "RADYOLO_DDP_LOCAL_RANK"
 DDP_RANK_ENV = "RADYOLO_DDP_RANK"
 DDP_WORLD_SIZE_ENV = "RADYOLO_DDP_WORLD_SIZE"
+DDP_BACKEND_ENV = "RADYOLO_DDP_BACKEND"
 
 
 def _find_free_port() -> int:
@@ -72,8 +73,18 @@ def _find_free_port() -> int:
 
 
 def _select_distributed_backend() -> str:
-    if os.name != "nt" and dist.is_nccl_available():
-        return "nccl"
+    requested_backend = os.environ.get(DDP_BACKEND_ENV, "").strip().lower()
+    if requested_backend:
+        if requested_backend not in {"gloo", "nccl"}:
+            msg = (
+                f"Unsupported distributed backend override {requested_backend!r}. "
+                f"Set {DDP_BACKEND_ENV} to 'gloo' or 'nccl'."
+            )
+            raise ValueError(msg)
+        if requested_backend == "nccl" and not dist.is_nccl_available():
+            msg = "RADYOLO_DDP_BACKEND=nccl was requested but NCCL is not available."
+            raise ValueError(msg)
+        return requested_backend
     return "gloo"
 
 
@@ -89,6 +100,14 @@ def _distributed_train_worker(
     os.environ[DDP_WORLD_SIZE_ENV] = str(world_size)
     os.environ["MASTER_ADDR"] = master_addr
     os.environ["MASTER_PORT"] = str(master_port)
+    LOGGER.info(
+        "Started distributed train worker rank=%d/%d with master=%s:%d for config=%s.",
+        local_rank,
+        world_size,
+        master_addr,
+        master_port,
+        config_path,
+    )
 
     trainer = Trainer(cfg=config_path)
     trainer.train()
@@ -141,6 +160,9 @@ class Trainer:
         if self.config.use_cudnn_benchmark:
             torch.backends.cudnn.benchmark = True
 
+        if not self.should_launch_distributed and self.is_main_process:
+            self._configure_file_logging()
+
         if self.distributed:
             self._setup_distributed_process_group()
 
@@ -162,46 +184,54 @@ class Trainer:
         self.loss_names = ["Loss"]
         self.loss_items = torch.ones((0,))
 
-        time_now = datetime.datetime.now(tz=datetime.UTC)
-
-        if not self.should_launch_distributed and self.is_main_process:
-            file_handler = logging.FileHandler(
-                str(
-                    self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(
-                        ".log"
-                    )
-                ),
-                encoding="utf-8",
-            )
-            file_handler.setFormatter(
-                logging.Formatter(
-                    fmt=(
-                        "%(asctime)s %(levelname)- 9s %(module)30.30s:"
-                        "%(funcName)-14.14s:%(lineno)- 4d: %(message)s"
-                    ),
-                    datefmt="[%H:%M:%S%z]",
-                )
-            )
-            file_handler.addFilter(YoloFilter())
-            logging.root.addHandler(file_handler)
-            LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
-            LOGGER.info("Input config path: %s", self.config_path.resolve())
-            LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
-
         # Stateful validation fitness: exponentially weighted metric aggregate across epochs.
         self.ewa_fitness = None
         self.ewa_alpha = 0.6
+
+    def _configure_file_logging(self) -> None:
+        time_now = datetime.datetime.now(tz=datetime.UTC)
+        file_handler = logging.FileHandler(
+            str(self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(".log")),
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(
+            logging.Formatter(
+                fmt=(
+                    "%(asctime)s %(levelname)- 9s %(module)30.30s:"
+                    "%(funcName)-14.14s:%(lineno)- 4d: %(message)s"
+                ),
+                datefmt="[%H:%M:%S%z]",
+            )
+        )
+        file_handler.addFilter(YoloFilter())
+        logging.root.addHandler(file_handler)
+        LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
+        LOGGER.info("Input config path: %s", self.config_path.resolve())
+        LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
 
     def _setup_distributed_process_group(self) -> None:
         if dist.is_initialized():
             return
         backend = _select_distributed_backend()
+        LOGGER.info(
+            (
+                "Rank %d initializing distributed process group with backend=%s, "
+                "world_size=%d, local_rank=%d, master=%s:%s."
+            ),
+            self.rank,
+            backend,
+            self.world_size,
+            self.local_rank,
+            os.environ.get("MASTER_ADDR", "<unset>"),
+            os.environ.get("MASTER_PORT", "<unset>"),
+        )
         dist.init_process_group(
             backend=backend,
             rank=self.rank,
             world_size=self.world_size,
-            timeout=datetime.timedelta(minutes=30),
+            timeout=datetime.timedelta(minutes=10),
         )
+        LOGGER.info("Rank %d finished distributed process group initialization.", self.rank)
 
     def _teardown_distributed_process_group(self) -> None:
         if self.distributed and dist.is_initialized():
@@ -228,6 +258,13 @@ class Trainer:
         self._validate_distributed_setup()
         master_addr = "127.0.0.1"
         master_port = _find_free_port()
+        LOGGER.info(
+            "Launching distributed training with %d processes via backend=%s at %s:%d.",
+            self.configured_world_size,
+            _select_distributed_backend(),
+            master_addr,
+            master_port,
+        )
         mp.spawn(
             _distributed_train_worker,
             args=(
