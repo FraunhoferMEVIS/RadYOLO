@@ -227,7 +227,7 @@ class Validator:
             max_det=self.config.max_det,
             nms_time_limit=self.config.nms_time_limit,
             nc=self.nc,
-            multi_label=True,
+            multi_label=False,
         )
         return ops.postprocess_model_output(
             model_output,
