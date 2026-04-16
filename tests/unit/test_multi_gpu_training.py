@@ -12,7 +12,6 @@ from torch.utils.data.distributed import DistributedSampler
 
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import (
-    DDP_BACKEND_ENV,
     Trainer,
     _distributed_train_worker,
     _select_distributed_backend,
@@ -36,18 +35,16 @@ def test_select_device_accepts_multiple_cuda_devices(monkeypatch) -> None:
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0,1"
 
 
-def test_select_distributed_backend_accepts_env_override(monkeypatch) -> None:
-    monkeypatch.setenv(DDP_BACKEND_ENV, "gloo")
+def test_select_distributed_backend_prefers_nccl_when_available(monkeypatch) -> None:
+    monkeypatch.setattr("radyolo.training.train.dist.is_nccl_available", lambda: True)
 
-    assert _select_distributed_backend() == "gloo"
+    assert _select_distributed_backend() == "nccl"
 
 
-def test_select_distributed_backend_rejects_unavailable_nccl(monkeypatch) -> None:
-    monkeypatch.setenv(DDP_BACKEND_ENV, "nccl")
+def test_select_distributed_backend_falls_back_to_gloo(monkeypatch) -> None:
     monkeypatch.setattr("radyolo.training.train.dist.is_nccl_available", lambda: False)
 
-    with pytest.raises(ValueError, match="NCCL is not available"):
-        _select_distributed_backend()
+    assert _select_distributed_backend() == "gloo"
 
 
 def test_distributed_train_worker_logs_start(caplog, monkeypatch) -> None:

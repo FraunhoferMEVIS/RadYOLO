@@ -62,7 +62,6 @@ LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 DDP_LOCAL_RANK_ENV = "RADYOLO_DDP_LOCAL_RANK"
 DDP_RANK_ENV = "RADYOLO_DDP_RANK"
 DDP_WORLD_SIZE_ENV = "RADYOLO_DDP_WORLD_SIZE"
-DDP_BACKEND_ENV = "RADYOLO_DDP_BACKEND"
 
 
 def _find_free_port() -> int:
@@ -73,18 +72,8 @@ def _find_free_port() -> int:
 
 
 def _select_distributed_backend() -> str:
-    requested_backend = os.environ.get(DDP_BACKEND_ENV, "").strip().lower()
-    if requested_backend:
-        if requested_backend not in {"gloo", "nccl"}:
-            msg = (
-                f"Unsupported distributed backend override {requested_backend!r}. "
-                f"Set {DDP_BACKEND_ENV} to 'gloo' or 'nccl'."
-            )
-            raise ValueError(msg)
-        if requested_backend == "nccl" and not dist.is_nccl_available():
-            msg = "RADYOLO_DDP_BACKEND=nccl was requested but NCCL is not available."
-            raise ValueError(msg)
-        return requested_backend
+    if dist.is_nccl_available():
+        return "nccl"
     return "gloo"
 
 
