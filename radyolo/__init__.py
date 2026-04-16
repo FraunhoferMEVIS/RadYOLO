@@ -98,16 +98,6 @@ def main(verbose: bool, debug: bool) -> None:
     tqdm_logger.addHandler(tqdm_handler)
     tqdm_logger.setLevel(logging.INFO)
 
-    yolo_handler = logging.StreamHandler(sys.stdout)
-    if tqdm_loggable.utils.is_interactive_session():
-        yolo_handler.setFormatter(logging.Formatter())
-    else:
-        yolo_handler.setFormatter(simple_formatter)
-
-    yolo_logger = logging.getLogger("yolo")
-    yolo_logger.addHandler(yolo_handler)
-    yolo_logger.setLevel(level)
-
     if debug:
         LOGGER.debug("Debug logging enabled.")
     elif verbose:

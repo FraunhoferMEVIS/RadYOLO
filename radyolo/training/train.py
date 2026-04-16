@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import socket
+import sys
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -57,7 +58,8 @@ if TYPE_CHECKING:
 
 
 LOGGER = logging.getLogger(__name__)
-LOGGER_YOLO = logging.getLogger("yolo." + __name__)
+RADYOLO_LOGGER_NAME = "radyolo"
+MANAGED_LOGGING_HANDLER_ATTR = "_radyolo_managed_handler"
 
 DDP_LOCAL_RANK_ENV = "RADYOLO_DDP_LOCAL_RANK"
 DDP_RANK_ENV = "RADYOLO_DDP_RANK"
@@ -84,6 +86,8 @@ def _distributed_train_worker(
     master_addr: str,
     master_port: int,
 ) -> None:
+    worker_config = get_cfg(config_path, {})
+    _configure_process_logging(worker_config.verbose)
     os.environ[DDP_LOCAL_RANK_ENV] = str(local_rank)
     os.environ[DDP_RANK_ENV] = str(local_rank)
     os.environ[DDP_WORLD_SIZE_ENV] = str(world_size)
@@ -102,9 +106,42 @@ def _distributed_train_worker(
     trainer.train()
 
 
-class YoloFilter(logging.Filter):
+class StdoutFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        return not record.name.startswith("yolo.")
+        return record.levelno < logging.WARNING
+
+
+def _mark_managed_handler(handler: logging.Handler) -> logging.Handler:
+    setattr(handler, MANAGED_LOGGING_HANDLER_ATTR, True)
+    return handler
+
+
+def _has_managed_handlers(logger: logging.Logger) -> bool:
+    return any(getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False) for handler in logger.handlers)
+
+
+def _configure_process_logging(verbose: bool) -> None:
+    level = logging.INFO if verbose else logging.WARNING
+    simple_formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(message)s",
+        datefmt="[%H:%M:%S%z]",
+        defaults={"spacer": " " * 11},
+    )
+
+    radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
+    if not _has_managed_handlers(radyolo_logger):
+        out_handler = _mark_managed_handler(logging.StreamHandler(sys.stdout))
+        out_handler.setLevel(level)
+        out_handler.addFilter(StdoutFilter())
+        out_handler.setFormatter(simple_formatter)
+        radyolo_logger.addHandler(out_handler)
+
+        err_handler = _mark_managed_handler(logging.StreamHandler(sys.stderr))
+        err_handler.setLevel(logging.WARNING)
+        err_handler.setFormatter(simple_formatter)
+        radyolo_logger.addHandler(err_handler)
+
+    radyolo_logger.setLevel(logging.DEBUG)
 
 
 class Trainer:
@@ -179,6 +216,7 @@ class Trainer:
 
     def _configure_file_logging(self) -> None:
         time_now = datetime.datetime.now(tz=datetime.UTC)
+        radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
         file_handler = logging.FileHandler(
             str(self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(".log")),
             encoding="utf-8",
@@ -192,8 +230,8 @@ class Trainer:
                 datefmt="[%H:%M:%S%z]",
             )
         )
-        file_handler.addFilter(YoloFilter())
-        logging.root.addHandler(file_handler)
+        radyolo_logger.addHandler(file_handler)
+        radyolo_logger.setLevel(logging.DEBUG)
         LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
         LOGGER.info("Input config path: %s", self.config_path.resolve())
         LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
@@ -526,7 +564,7 @@ class Trainer:
             timing_values = self._create_epoch_timing_values()
 
             if self.is_main_process:
-                LOGGER_YOLO.info(
+                LOGGER.info(
                     "%11s" * (3 + len(self.loss_names)),
                     "Epoch",
                     "GPU_mem",

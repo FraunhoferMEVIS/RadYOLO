@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from radyolo.utils.util import ModelEMA
 
 LOGGER = logging.getLogger(__name__)
-LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 
 
 class Validator:
