@@ -242,6 +242,42 @@ def test_trainer_rejects_non_divisible_distributed_batch_size(
         trainer._validate_distributed_setup()
 
 
+def test_trainer_scales_distributed_loss_to_global_batch_size(
+    minimal_train_config,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "distributed_loss_scale.yaml"
+    with minimal_train_config.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    config["device"] = "0,1"
+    config["batch_size"] = 2
+    with config_path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False)
+
+    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
+    monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
+    monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
+    monkeypatch.setattr(torch.cuda, "set_device", lambda _device: None)
+    monkeypatch.setattr("radyolo.training.train.dist.init_process_group", lambda **_kwargs: None)
+    monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: False)
+
+    distributed_trainer = Trainer(cfg=config_path)
+    single_process_loss = torch.tensor(3.5)
+
+    assert distributed_trainer._get_per_process_batch_size() == 1
+    assert distributed_trainer._scale_loss_for_backward(single_process_loss) == torch.tensor(7.0)
+
+    monkeypatch.delenv("RADYOLO_DDP_LOCAL_RANK", raising=False)
+    monkeypatch.delenv("RADYOLO_DDP_RANK", raising=False)
+    monkeypatch.delenv("RADYOLO_DDP_WORLD_SIZE", raising=False)
+
+    single_gpu_trainer = Trainer(cfg=config_path)
+
+    assert single_gpu_trainer._scale_loss_for_backward(single_process_loss) is single_process_loss
+
+
 def test_model_ema_updates_from_wrapped_model() -> None:
     model = torch.nn.Linear(2, 2, bias=False)
     ema = ModelEMA(model, decay=0.5, tau=1.0)

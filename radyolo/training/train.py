@@ -325,6 +325,11 @@ class Trainer:
         dist.broadcast(stop_tensor, src=0)
         return bool(stop_tensor.item())
 
+    def _scale_loss_for_backward(self, loss: torch.Tensor) -> torch.Tensor:
+        if not self.distributed:
+            return loss
+        return loss * self.world_size
+
     def copy_train_config(self) -> None:
         shutil.copy2(self.config_path, self.save_dir / "train_config.yaml")
 
@@ -653,6 +658,8 @@ class Trainer:
                         ) / (i + 1)
 
                     # Backward
+                    loss = self._scale_loss_for_backward(loss)
+
                     deterministic_restore = torch.are_deterministic_algorithms_enabled()
                     try:
                         torch.use_deterministic_algorithms(False)
