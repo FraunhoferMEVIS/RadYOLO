@@ -120,18 +120,19 @@ def bbox_iou(
                 convex_width.pow(2) + convex_height.pow(2) + convex_depth.pow(2) + eps
             )  # convex diagonal squared
             rho2 = (
-                (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
+                (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2)
+                + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
+                + (b2_z1 + b2_z2 - b1_z1 - b1_z2).pow(2)
             ) / 4  # center dist**2
-            if (
-                CIoU
-            ):  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+            if CIoU:
+                # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
                 # v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
                 v = (
                     (2 / math.pi)
                     * (
-                        ((w2 / h2).atan() - (w1 / h1).atan())
-                        + ((w2 / d2).atan() - (w1 / d2).atan())
-                        + ((h2 / d2).atan() - (h1 / d1).atan())
+                        ((w2 / h2).atan() - (w1 / h1).atan()).abs()
+                        + ((w2 / d2).atan() - (w1 / d1).atan()).abs()
+                        + ((h2 / d2).atan() - (h1 / d1).atan()).abs()
                     )
                     / 3
                 ).pow(2)
@@ -139,8 +140,8 @@ def bbox_iou(
                     alpha = v / (v - iou + (1 + eps))
                 return iou - (rho2 / c2 + v * alpha)  # CIoU
             return iou - rho2 / c2  # DIoU
-        c_area = convex_width * convex_height + eps  # convex area
-        return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
+        c_volume = convex_width * convex_height * convex_depth + eps  # convex area
+        return iou - (c_volume - union) / c_volume  # GIoU https://arxiv.org/pdf/1902.09630.pdf
     return iou  # IoU
 
 
@@ -704,7 +705,9 @@ class Metric:
         Returns:
             (float): The mAP over IoU thresholds of 0.1 - 0.95 in steps of 0.05.
         """
-        return self.all_ap.mean() if isinstance(self.all_ap, np.ndarray) and self.all_ap.size else 0.0
+        return (
+            self.all_ap.mean() if isinstance(self.all_ap, np.ndarray) and self.all_ap.size else 0.0
+        )
 
     @property
     def map_agnostic(self) -> float:
