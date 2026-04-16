@@ -183,6 +183,8 @@ class v8DetectionLoss:  # noqa: N801
         device: torch.device,
         include_stride4_output: bool,
         tal_topk: int = 10,
+        tal_topk_final: int | None = None,
+        tal_topk_final_epoch: int | None = None,
         tal_alpha: float = 0.5,
         tal_beta: float = 1.0,
         gamma: float = 2.0,
@@ -215,6 +217,9 @@ class v8DetectionLoss:  # noqa: N801
         self.device: torch.device = device
         self.bbox_parametrization = bbox_parametrization
         self.bbox_center_offset_limit = bbox_center_offset_limit
+        self.tal_topk_initial = tal_topk
+        self.tal_topk_final = tal_topk if tal_topk_final is None else tal_topk_final
+        self.tal_topk_final_epoch = 1 if tal_topk_final_epoch is None else tal_topk_final_epoch
 
         self.use_dfl: bool = m.use_dfl
         if self.use_dfl and self.bbox_parametrization != "ltrb":
@@ -241,6 +246,20 @@ class v8DetectionLoss:  # noqa: N801
         self.enable_mask_loss = enable_mask_loss
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
+
+    @staticmethod
+    def interpolate_tal_topk(
+        initial_topk: int,
+        final_topk: int,
+        current_epoch: int,
+        final_epoch: int,
+    ) -> int:
+        if final_epoch <= 1:
+            return final_topk
+        clamped_epoch = min(max(current_epoch, 1), final_epoch)
+        progress = (clamped_epoch - 1) / (final_epoch - 1)
+        interpolated_topk = (1 - progress) * initial_topk + progress * final_topk
+        return round(interpolated_topk)
 
     def preprocess(
         self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor
@@ -283,6 +302,7 @@ class v8DetectionLoss:  # noqa: N801
         self,
         model_output: ModelOutput,
         batch: Batch,
+        current_epoch: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the detection loss multiplied by batch size."""
         loss = torch.zeros(5, device=self.device)  # box, cls_obj, dfl, mask, cls_sep
@@ -324,6 +344,16 @@ class v8DetectionLoss:  # noqa: N801
 
         # For assignment: use objectness when available so a prediction score exists
         # even if no class is selected / assigned
+        self.assigner.topk = (
+            self.tal_topk_initial
+            if current_epoch is None
+            else self.interpolate_tal_topk(
+                initial_topk=self.tal_topk_initial,
+                final_topk=self.tal_topk_final,
+                current_epoch=current_epoch,
+                final_epoch=self.tal_topk_final_epoch,
+            )
+        )
         if self.separate_objectness_head:
             assign_scores = pred_objectness_logit.detach().squeeze(-1).sigmoid()  # (B, A)
             # Expand to (B, A, C) so assigner API stays the same
@@ -465,6 +495,8 @@ def build_detection_loss_from_config(
         device=device,
         include_stride4_output=unwrapped_model.include_stride4_output,
         tal_topk=train_config.tal_topk,
+        tal_topk_final=train_config.tal_topk_final,
+        tal_topk_final_epoch=train_config.tal_topk_final_epoch,
         tal_alpha=train_config.tal_alpha,
         tal_beta=train_config.tal_beta,
         gamma=train_config.gamma,

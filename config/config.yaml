@@ -52,7 +52,9 @@ warmup_epochs: 3.0                # (float) warmup epochs
 warmup_momentum: 0.8              # (float) warmup initial momentum
 warmup_bias_lr: 0.1               # (float) warmup initial bias learning rate
 grad_clip_max_norm: 10.0          # (float) max norm used for gradient clipping
-tal_topk: 10                      # (int) top-k anchors to keep per ground truth for task-aligned assignment
+tal_topk: 10                      # (int) initial top-k anchors to keep per ground truth for task-aligned assignment
+tal_topk_final: 1                 # (int) final top-k anchors reached by the TAL schedule
+tal_topk_final_epoch: 900         # (int) 1-based epoch at which tal_topk_final is reached; values beyond this keep tal_topk_final
 tal_alpha: 0.5                    # (float) class score exponent in task-aligned assignment metric
 tal_beta: 1.0                     # (float) IoU exponent in task-aligned assignment metric
 ema_decay: 0.9999                 # (float) exponential moving average decay

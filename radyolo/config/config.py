@@ -138,7 +138,15 @@ class DefaultConfig(BaseModel):
     warmup_momentum: float = 0.8  # warmup initial momentum
     warmup_bias_lr: float = 0.1  # warmup initial bias learning rate
     grad_clip_max_norm: float = 10.0  # max norm used for gradient clipping
-    tal_topk: int = 10  # top-k anchors to keep per ground truth for task-aligned assignment
+    tal_topk: int = Field(
+        10, ge=1
+    )  # initial top-k anchors to keep per ground truth for task-aligned assignment
+    tal_topk_final: int | None = Field(
+        default=None, ge=1
+    )  # final top-k anchors reached by the TAL schedule; defaults to tal_topk
+    tal_topk_final_epoch: int | None = Field(
+        default=None, ge=1
+    )  # 1-based epoch at which tal_topk_final is reached; defaults to epochs
     tal_alpha: float = 0.5  # class score exponent in task-aligned assignment metric
     tal_beta: float = 1.0  # IoU exponent in task-aligned assignment metric
     ema_decay: float = 0.9999  # exponential moving average decay
@@ -290,6 +298,10 @@ class DefaultConfig(BaseModel):
         if self.bbox_parametrization == "center_extents" and self.dfl_reg_max > 1:
             msg = "bbox_parametrization='center_extents' requires dfl_reg_max=1"
             raise ValueError(msg)
+        if self.tal_topk_final is None:
+            self.tal_topk_final = self.tal_topk
+        if self.tal_topk_final_epoch is None:
+            self.tal_topk_final_epoch = self.epochs
         if len(self.fitness_metric_weights) != 3:
             msg = "fitness_metric_weights must contain exactly three entries"
             raise ValueError(msg)

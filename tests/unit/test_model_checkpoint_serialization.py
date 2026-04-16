@@ -142,3 +142,10 @@ def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) 
     )
 
     assert fitness == pytest.approx(0.45)
+
+
+def test_default_config_defaults_tal_topk_schedule_to_static_value(minimal_train_config: Path) -> None:
+    config = get_cfg(minimal_train_config, {})
+
+    assert config.tal_topk_final == config.tal_topk
+    assert config.tal_topk_final_epoch == config.epochs

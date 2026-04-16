@@ -133,7 +133,11 @@ class Validator:
                 model_output: ModelOutput = model(batch["img"])
 
                 if self.training:
-                    validation_loss += loss(model_output, batch)[1]
+                    validation_loss += loss(
+                        model_output,
+                        batch,
+                        current_epoch=trainer.epoch + 1,
+                    )[1]
 
             # Postprocess and metrics
             preds = self.postprocess(model_output)

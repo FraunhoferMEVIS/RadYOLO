@@ -577,7 +577,11 @@ class Trainer:
 
                         loss, self.loss_items = cast(
                             "tuple[torch.Tensor, torch.Tensor]",
-                            self.loss(raw_predictions, prepared_batch),
+                            self.loss(
+                                raw_predictions,
+                                prepared_batch,
+                                current_epoch=self.epoch + 1,
+                            ),
                         )
 
                         tloss = (
