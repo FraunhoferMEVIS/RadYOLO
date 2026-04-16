@@ -1579,4 +1579,5 @@ def build_dataloader(
         pin_memory=(device.type if isinstance(device, torch.device) else device) != "cpu",
         collate_fn=getattr(dataset, "collate_fn", None),
         persistent_workers=number_workers > 0,
+        multiprocessing_context="forkserver" if os.name == "posix" else None,
     )
