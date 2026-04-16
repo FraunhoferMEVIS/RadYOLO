@@ -713,9 +713,9 @@ class Trainer:
 
             final_epoch = self.epoch + 1 >= self.epochs
 
-            metrics: dict[str, float] = {}
-            fitness = 0.0
             if self.is_main_process:
+                metrics: dict[str, float] = {}
+                fitness = 0.0
                 if validator is not None and (self.config.val or final_epoch or stop):
                     metrics, fitness, best_fitness = self.validate(
                         validator=validator,
@@ -757,9 +757,9 @@ class Trainer:
 
             self.epoch += 1
 
-        seconds = time.time() - train_time_start
-        msg = f"\n{self.epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
         if self.is_main_process:
+            seconds = time.time() - train_time_start
+            msg = f"\n{self.epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
             LOGGER.info(msg)
 
         self._clear_memory()
