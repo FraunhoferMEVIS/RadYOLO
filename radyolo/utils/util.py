@@ -146,11 +146,31 @@ class ModelEMA:
     def update(self, model: nn.Module) -> None:
         """Update EMA parameters."""
         if self.enabled:
-            self.updates += 1
-            d = self.decay(self.updates)
+            next_updates = self.updates + 1
+            decay = self.decay(next_updates)
 
-            msd = model.state_dict()  # model state_dict
-            for k, v in self.ema.state_dict().items():
-                if v.dtype.is_floating_point:  # true for FP16 and FP32
-                    v *= d                          # noqa: PLW2901
-                    v += (1 - d) * msd[k].detach()  # noqa: PLW2901
+            model_state_dict = model.state_dict()  # model state_dict
+            ema_state_dict = self.ema.state_dict()
+            previous_floating_state = {
+                key: value.clone()
+                for key, value in ema_state_dict.items()
+                if value.dtype.is_floating_point
+            }
+            for key, value in ema_state_dict.items():
+                if value.dtype.is_floating_point:  # true for FP16 and FP32
+                    value *= decay                          # noqa: PLW2901
+                    value += (1 - decay) * model_state_dict[key].detach()  # noqa: PLW2901
+
+            if any(
+                not torch.isfinite(parameter).all().item()
+                for parameter in self.ema.parameters()
+                if parameter.dtype.is_floating_point
+            ):
+                for key, value in previous_floating_state.items():
+                    ema_state_dict[key].copy_(value)
+                LOGGER.warning(
+                    "Skipping EMA update because EMA parameters became non-finite after update."
+                )
+                return
+
+            self.updates = next_updates
