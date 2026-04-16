@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel
 
 PYTHON_VERSION = platform.python_version()
 NUM_THREADS = min(8, max(1, (os.cpu_count() or 1) - 1))
@@ -43,6 +44,58 @@ def intersect_dicts(
     }
 
 
+def _normalize_device_string(device: str) -> str:
+    normalized = str(device).lower()
+    for remove in ("cuda:", "none", "(", ")", "[", "]", "'", '"', " "):
+        normalized = normalized.replace(remove, "")
+    return normalized
+
+
+def parse_cuda_device_ids(device: str | torch.device = "") -> list[int]:
+    if isinstance(device, torch.device):
+        if device.type != "cuda":
+            return []
+        return [0 if device.index is None else int(device.index)]
+
+    normalized = _normalize_device_string(device)
+    if normalized in {"", "-1", "cpu", "mps", "mps:0"}:
+        return []
+    if normalized == "cuda":
+        return [0]
+    return [int(index) for index in normalized.split(",") if index]
+
+
+def wrap_model_for_training(
+    model: nn.Module,
+    *,
+    distributed: bool,
+    rank: int,
+    local_rank: int,
+) -> nn.Module:
+    """Wrap a model for distributed training when DDP is enabled."""
+    if not distributed:
+        return model
+
+    LOGGER.info(
+        "Rank %d enabling DistributedDataParallel on cuda:%d.",
+        rank,
+        local_rank,
+    )
+    return DistributedDataParallel(
+        model,
+        device_ids=[local_rank],
+        output_device=local_rank,
+    )
+
+
+def unwrap_model(model: nn.Module) -> nn.Module:
+    """Return the underlying module from a wrapped training model."""
+    module = getattr(model, "module", None)
+    if isinstance(module, nn.Module):
+        return module
+    return model
+
+
 def select_device(
     device: str | torch.device = "", _: int = 0, newline: bool = False, verbose: bool = True
 ) -> torch.device:
@@ -50,9 +103,7 @@ def select_device(
         return device
 
     s = f"radyolo Python-{PYTHON_VERSION} torch-{torch.__version__}"
-    device = str(device).lower()
-    for remove in "cuda:", "none", "(", ")", "[", "]", "'", " ":
-        device.replace(remove, "")  # to string, 'cuda:0' -> '0' and '(0, 1)' -> '0,1'
+    device = _normalize_device_string(str(device))
 
     cpu = device == "cpu"
     mps = device in {"mps", "mps:0"}
@@ -77,10 +128,8 @@ def select_device(
             raise ValueError(msg)
 
     if not cpu and not mps and torch.cuda.is_available():  # prefer GPU if available
-        devices = device.split(",") if device else "0"
+        devices = device.split(",") if device else ["0"]
         gpus = len(devices)  # device count
-        if gpus > 1:
-            raise NotImplementedError
         space = " " * (len(s) + 1)
         for i, d in enumerate(devices):
             s += f"{'' if i == 0 else space}CUDA:{d} ({get_gpu_info(i)})\n"  # bytes to MB
@@ -134,7 +183,7 @@ class ModelEMA:
         self, model: nn.Module, decay: float = 0.9999, tau: float = 2000, updates: int = 0
     ) -> None:
         """Initialize EMA for 'model' with given arguments."""
-        self.ema = deepcopy(model).eval()  # FP32 EMA
+        self.ema = deepcopy(unwrap_model(model)).eval()  # FP32 EMA
         self.updates = updates  # number of EMA updates
         self.decay = lambda x: decay * (
             1 - math.exp(-x / tau)
@@ -149,7 +198,7 @@ class ModelEMA:
             next_updates = self.updates + 1
             decay = self.decay(next_updates)
 
-            model_state_dict = model.state_dict()  # model state_dict
+            model_state_dict = unwrap_model(model).state_dict()  # model state_dict
             ema_state_dict = self.ema.state_dict()
             previous_floating_state = {
                 key: value.clone()

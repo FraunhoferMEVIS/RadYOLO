@@ -3,7 +3,9 @@ from __future__ import annotations
 import datetime
 import gc
 import logging
+import os
 import shutil
+import socket
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -11,9 +13,12 @@ from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 import tqdm_loggable
 import tqdm_loggable.utils
 import yaml
+from torch.utils.data.distributed import DistributedSampler
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
@@ -33,7 +38,13 @@ from radyolo.data.data import (
 from radyolo.models.model import HardcodedModel, build_model_from_config, get_model_min_stride
 from radyolo.training.loss import build_detection_loss_from_config
 from radyolo.utils.torch_utils import EarlyStopping
-from radyolo.utils.util import ModelEMA, init_seeds, select_device
+from radyolo.utils.util import (
+    ModelEMA,
+    init_seeds,
+    parse_cuda_device_ids,
+    select_device,
+    wrap_model_for_training,
+)
 from radyolo.validation.plotting import plot_results
 from radyolo.validation.validate import Validator
 
@@ -48,6 +59,40 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 LOGGER_YOLO = logging.getLogger("yolo." + __name__)
 
+DDP_LOCAL_RANK_ENV = "RADYOLO_DDP_LOCAL_RANK"
+DDP_RANK_ENV = "RADYOLO_DDP_RANK"
+DDP_WORLD_SIZE_ENV = "RADYOLO_DDP_WORLD_SIZE"
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        return int(sock.getsockname()[1])
+
+
+def _select_distributed_backend() -> str:
+    if os.name != "nt" and dist.is_nccl_available():
+        return "nccl"
+    return "gloo"
+
+
+def _distributed_train_worker(
+    local_rank: int,
+    world_size: int,
+    config_path: str,
+    master_addr: str,
+    master_port: int,
+) -> None:
+    os.environ[DDP_LOCAL_RANK_ENV] = str(local_rank)
+    os.environ[DDP_RANK_ENV] = str(local_rank)
+    os.environ[DDP_WORLD_SIZE_ENV] = str(world_size)
+    os.environ["MASTER_ADDR"] = master_addr
+    os.environ["MASTER_PORT"] = str(master_port)
+
+    trainer = Trainer(cfg=config_path)
+    trainer.train()
+
 
 class YoloFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -58,6 +103,10 @@ class Trainer:
     def __init__(self, cfg: str | Path) -> None:
         self.config_path = Path(cfg)
         self.config = get_cfg(cfg, {})
+        self.in_distributed_worker = DDP_LOCAL_RANK_ENV in os.environ
+        self.local_rank = int(os.environ.get(DDP_LOCAL_RANK_ENV, "0"))
+        self.rank = int(os.environ.get(DDP_RANK_ENV, "0"))
+        self.world_size = int(os.environ.get(DDP_WORLD_SIZE_ENV, "1"))
         output_folder_base = Path(self.config.output_folder_base or "runs")
         output_folder_base.mkdir(parents=True, exist_ok=True)
 
@@ -73,8 +122,27 @@ class Trainer:
         self.check_resume()
 
         self.device = select_device(self.config.device)
+        self.cuda_device_ids = (
+            parse_cuda_device_ids(self.config.device) if self.device.type == "cuda" else []
+        )
+        self.configured_world_size = max(len(self.cuda_device_ids), 1)
+        self.should_launch_distributed = (
+            self.configured_world_size > 1 and not self.in_distributed_worker
+        )
+        if not self.in_distributed_worker:
+            self.local_rank = 0
+            self.rank = 0
+            self.world_size = 1
+        self.distributed = self.in_distributed_worker
+        self.is_main_process = self.rank == 0
+        if self.distributed:
+            torch.cuda.set_device(self.local_rank)
+            self.device = torch.device("cuda", self.local_rank)
         if self.config.use_cudnn_benchmark:
             torch.backends.cudnn.benchmark = True
+
+        if self.distributed:
+            self._setup_distributed_process_group()
 
         init_seeds(self.config.seed, deterministic=self.config.deterministic)
 
@@ -96,28 +164,102 @@ class Trainer:
 
         time_now = datetime.datetime.now(tz=datetime.UTC)
 
-        file_handler = logging.FileHandler(
-            str(self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(".log")),
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(
-            logging.Formatter(
-                fmt=(
-                    "%(asctime)s %(levelname)- 9s %(module)30.30s:"
-                    "%(funcName)-14.14s:%(lineno)- 4d: %(message)s"
+        if not self.should_launch_distributed and self.is_main_process:
+            file_handler = logging.FileHandler(
+                str(
+                    self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(
+                        ".log"
+                    )
                 ),
-                datefmt="[%H:%M:%S%z]",
+                encoding="utf-8",
             )
-        )
-        file_handler.addFilter(YoloFilter())
-        logging.root.addHandler(file_handler)
-        LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
-        LOGGER.info("Input config path: %s", self.config_path.resolve())
-        LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
+            file_handler.setFormatter(
+                logging.Formatter(
+                    fmt=(
+                        "%(asctime)s %(levelname)- 9s %(module)30.30s:"
+                        "%(funcName)-14.14s:%(lineno)- 4d: %(message)s"
+                    ),
+                    datefmt="[%H:%M:%S%z]",
+                )
+            )
+            file_handler.addFilter(YoloFilter())
+            logging.root.addHandler(file_handler)
+            LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
+            LOGGER.info("Input config path: %s", self.config_path.resolve())
+            LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
 
         # Stateful validation fitness: exponentially weighted metric aggregate across epochs.
         self.ewa_fitness = None
         self.ewa_alpha = 0.6
+
+    def _setup_distributed_process_group(self) -> None:
+        if dist.is_initialized():
+            return
+        backend = _select_distributed_backend()
+        dist.init_process_group(
+            backend=backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=datetime.timedelta(minutes=30),
+        )
+
+    def _teardown_distributed_process_group(self) -> None:
+        if self.distributed and dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _validate_distributed_setup(self) -> None:
+        if self.device.type != "cuda":
+            msg = "DistributedDataParallel requires explicit CUDA devices, e.g. device='0,1'."
+            raise ValueError(msg)
+        if self.config.batch_size < self.configured_world_size:
+            msg = (
+                "batch_size must be at least the number of distributed processes; got "
+                f"batch_size={self.config.batch_size} and world_size={self.configured_world_size}."
+            )
+            raise ValueError(msg)
+        if self.config.batch_size % self.configured_world_size != 0:
+            msg = (
+                "batch_size must be divisible by the number of distributed processes; got "
+                f"batch_size={self.config.batch_size} and world_size={self.configured_world_size}."
+            )
+            raise ValueError(msg)
+
+    def _launch_distributed_training(self) -> None:
+        self._validate_distributed_setup()
+        master_addr = "127.0.0.1"
+        master_port = _find_free_port()
+        mp.spawn(
+            _distributed_train_worker,
+            args=(
+                self.configured_world_size,
+                str(self.config_path),
+                master_addr,
+                master_port,
+            ),
+            nprocs=self.configured_world_size,
+            join=True,
+        )
+
+    def _get_per_process_batch_size(self) -> int:
+        if not self.distributed:
+            return self.config.batch_size
+        return self.config.batch_size // self.world_size
+
+    def _get_per_process_workers(self) -> int:
+        if not self.distributed or self.config.workers == 0:
+            return self.config.workers
+        return max(self.config.workers // self.world_size, 1)
+
+    def _barrier(self) -> None:
+        if self.distributed and dist.is_initialized():
+            dist.barrier()
+
+    def _broadcast_stop(self, stop: bool) -> bool:
+        if not self.distributed:
+            return stop
+        stop_tensor = torch.tensor(int(stop), device="cpu")
+        dist.broadcast(stop_tensor, src=0)
+        return bool(stop_tensor.item())
 
     def copy_train_config(self) -> None:
         shutil.copy2(self.config_path, self.save_dir / "train_config.yaml")
@@ -189,7 +331,7 @@ class Trainer:
     def _setup_train(
         self,
     ) -> tuple[
-        HardcodedModel,
+        torch.nn.Module,
         torch.GradScaler,
         torch.utils.data.DataLoader,
         Validator | None,
@@ -226,7 +368,7 @@ class Trainer:
         train_loader = self.get_dataloader(
             self.config.data, model, fold=self.config.fold, mode="train"
         )
-        if self.config.val:
+        if self.config.val and (not self.distributed or self.is_main_process):
             val_loader = self.get_dataloader(
                 self.config.data, model, fold=self.config.fold, mode="val"
             )
@@ -239,6 +381,12 @@ class Trainer:
             val_loader = None
             validator = None
         ema = ModelEMA(model, decay=self.config.ema_decay, tau=self.config.ema_tau)
+        model = wrap_model_for_training(
+            model,
+            distributed=self.distributed,
+            rank=self.rank,
+            local_rank=self.local_rank,
+        )
 
         # Optimizer
         accumulate = max(round(self.config.nominal_batch_size / self.config.batch_size), 1)
@@ -278,42 +426,50 @@ class Trainer:
         )
 
     def train(self) -> None:
-        self.copy_train_config()
-        (
-            model,
-            scaler,
-            train_loader,
-            validator,
-            ema,
-            accumulate,
-            optimizer,
-            stop,
-            scheduler,
-            lf,
-            stopper,
-            best_fitness,
-            start_epoch,
-        ) = self._setup_train()
+        try:
+            if self.should_launch_distributed:
+                self._launch_distributed_training()
+                return
 
-        self._train_loop(
-            model=model,
-            train_loader=train_loader,
-            validator=validator,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            scaler=scaler,
-            lf=lf,
-            ema=ema,
-            accumulate=accumulate,
-            stopper=stopper,
-            stop=stop,
-            best_fitness=best_fitness,
-            start_epoch=start_epoch,
-        )
+            if self.is_main_process:
+                self.copy_train_config()
+            (
+                model,
+                scaler,
+                train_loader,
+                validator,
+                ema,
+                accumulate,
+                optimizer,
+                stop,
+                scheduler,
+                lf,
+                stopper,
+                best_fitness,
+                start_epoch,
+            ) = self._setup_train()
+
+            self._train_loop(
+                model=model,
+                train_loader=train_loader,
+                validator=validator,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                lf=lf,
+                ema=ema,
+                accumulate=accumulate,
+                stopper=stopper,
+                stop=stop,
+                best_fitness=best_fitness,
+                start_epoch=start_epoch,
+            )
+        finally:
+            self._teardown_distributed_process_group()
 
     def _train_loop(
         self,
-        model: HardcodedModel,
+        model: torch.nn.Module,
         train_loader: torch.utils.data.DataLoader,
         validator: Validator | None,
         optimizer: torch.optim.Optimizer,
@@ -339,21 +495,26 @@ class Trainer:
         optimizer.zero_grad()
         while True:
             model.train()
+            if isinstance(train_loader.sampler, DistributedSampler):
+                train_loader.sampler.set_epoch(self.epoch)
             timing_values = self._create_epoch_timing_values()
 
-            LOGGER_YOLO.info(
-                "%11s" * (3 + len(self.loss_names)),
-                "Epoch",
-                "GPU_mem",
-                *self.loss_names,
-                "Size",
-            )
-            pbar = tqdm(
-                enumerate(train_loader),
-                total=num_batches,
-                bar_format="{l_bar}{bar:10}{r_bar}",
-                smoothing=0.05,
-            )
+            if self.is_main_process:
+                LOGGER_YOLO.info(
+                    "%11s" * (3 + len(self.loss_names)),
+                    "Epoch",
+                    "GPU_mem",
+                    *self.loss_names,
+                    "Size",
+                )
+                pbar = tqdm(
+                    enumerate(train_loader),
+                    total=num_batches,
+                    bar_format="{l_bar}{bar:10}{r_bar}",
+                    smoothing=0.05,
+                )
+            else:
+                pbar = enumerate(train_loader)
             tloss: torch.Tensor | None = torch.zeros(5, dtype=torch.float64)
             loss_length: int = 1
             loss: torch.Tensor | None = None
@@ -361,7 +522,7 @@ class Trainer:
             has_previous_batch_in_epoch = False
             with (
                 logging_redirect_tqdm(loggers=[logging.root, logging.getLogger("radyolo")])
-                if tqdm_loggable.utils.is_interactive_session()
+                if self.is_main_process and tqdm_loggable.utils.is_interactive_session()
                 else nullcontext()
             ):
                 for i, batch in pbar:
@@ -449,22 +610,24 @@ class Trainer:
 
                     # Log
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
-                    pbar.set_description(
-                        ("%11s" * 2 + "%11.4g" * (loss_length))
-                        % (
-                            f"{self.epoch + 1}/{self.epochs}",
-                            f"{self._get_memory():.3g}G",
-                            *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
+                    if self.is_main_process:
+                        pbar.set_description(
+                            ("%11s" * 2 + "%11.4g" * (loss_length))
+                            % (
+                                f"{self.epoch + 1}/{self.epochs}",
+                                f"{self._get_memory():.3g}G",
+                                *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),
+                            )
                         )
-                    )
 
             scheduler.step()
+            self._barrier()
 
             if loss is None:
                 message = "Detected None loss"
                 raise RuntimeError(message)
 
-            if tloss is not None:
+            if self.is_main_process and tloss is not None:
                 LOGGER.info(
                     "%15s" * 1 + "%11s" * (2 + len(self.loss_names)),  # noqa: G003
                     "Completed Epoch",
@@ -482,39 +645,42 @@ class Trainer:
 
             final_epoch = self.epoch + 1 >= self.epochs
 
-            if validator is not None and (self.config.val or final_epoch or stop):
-                metrics, fitness, best_fitness = self.validate(
-                    validator=validator,
-                    ema=ema,
-                    best_fitness=best_fitness,
-                )
-            else:
-                metrics = {}
-                fitness = 0.0
+            metrics: dict[str, float] = {}
+            fitness = 0.0
+            if self.is_main_process:
+                if validator is not None and (self.config.val or final_epoch or stop):
+                    metrics, fitness, best_fitness = self.validate(
+                        validator=validator,
+                        ema=ema,
+                        best_fitness=best_fitness,
+                    )
 
-            self.save_metrics(
-                metrics={
-                    **(self.label_loss_items(tloss) if tloss is not None else {}),
-                    **metrics,
-                    **timing_values,
-                },
-                train_time_start=train_time_start,
-            )
-
-            stop |= stopper(self.epoch + 1, fitness) or final_epoch
-
-            if self.config.save or final_epoch:
-                self.save_model(
-                    best_fitness=best_fitness or 0.0,
-                    ema=ema,
-                    optimizer=optimizer,
-                    scaler=scaler,
-                    metrics=metrics,
-                    fitness=fitness,
+                self.save_metrics(
+                    metrics={
+                        **(self.label_loss_items(tloss) if tloss is not None else {}),
+                        **metrics,
+                        **timing_values,
+                    },
+                    train_time_start=train_time_start,
                 )
 
-            if self.config.plots:
-                plot_results(self.csv_path)
+                stop |= stopper(self.epoch + 1, fitness) or final_epoch
+
+                if self.config.save or final_epoch:
+                    self.save_model(
+                        best_fitness=best_fitness or 0.0,
+                        ema=ema,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        metrics=metrics,
+                        fitness=fitness,
+                    )
+
+                if self.config.plots:
+                    plot_results(self.csv_path)
+
+            stop = self._broadcast_stop(stop)
+            self._barrier()
 
             self._clear_memory()
 
@@ -525,7 +691,8 @@ class Trainer:
 
         seconds = time.time() - train_time_start
         msg = f"\n{self.epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
-        LOGGER.info(msg)
+        if self.is_main_process:
+            LOGGER.info(msg)
 
         self._clear_memory()
 
@@ -633,13 +800,23 @@ class Trainer:
             min_box_crop_fraction=self.config.min_box_crop_fraction,
             config=self.config,
         )
+        sampler = None
         shuffle = mode == "train"
+        if self.distributed and mode == "train":
+            sampler = DistributedSampler(
+                dataset,
+                num_replicas=self.world_size,
+                rank=self.rank,
+                shuffle=True,
+            )
+            shuffle = False
         return build_dataloader(
             dataset,
-            self.config.batch_size,
-            self.config.workers,
+            self._get_per_process_batch_size(),
+            self._get_per_process_workers(),
             shuffle,
             self.device,
+            sampler=sampler,
         )
 
     def save_model(

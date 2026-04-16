@@ -19,7 +19,7 @@ from radyolo.models.layers import (
     PrototypeMasksHighResolution,
     PrototypeMasksHighResolutionOneSkip,
 )
-from radyolo.utils.util import intersect_dicts, make_divisible, select_device
+from radyolo.utils.util import intersect_dicts, make_divisible, select_device, unwrap_model
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,6 +34,8 @@ class LoadedCheckpointModel:
 
 
 def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
+    if model is not None:
+        model = unwrap_model(model)
     stride = getattr(model, "stride", None)
     if isinstance(stride, torch.Tensor):
         return int(stride.min().item())

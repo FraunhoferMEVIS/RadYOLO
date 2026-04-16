@@ -18,6 +18,7 @@ from radyolo.training.tal import (
     make_anchors,
 )
 from radyolo.utils.ops import xyzwhd2xyzxyz
+from radyolo.utils.util import unwrap_model
 from radyolo.validation.metrics import bbox_iou
 
 if TYPE_CHECKING:
@@ -448,9 +449,10 @@ class v8DetectionLoss:  # noqa: N801
 
 def build_detection_loss_from_config(
     train_config: DefaultConfig,
-    model: HardcodedModel,
+    model: nn.Module,
     device: torch.device,
 ) -> v8DetectionLoss:
+    unwrapped_model = cast("HardcodedModel", unwrap_model(model))
     return v8DetectionLoss(
         box=train_config.box_loss_gain,
         cls=train_config.class_loss_gain,
@@ -459,9 +461,9 @@ def build_detection_loss_from_config(
         bbox_center_offset_limit=train_config.bbox_center_offset_limit,
         mask_loss_gain=train_config.mask_loss_gain,
         class_separate_loss_gain=train_config.class_separate_loss_gain,
-        detect_layer=model.l23,
+        detect_layer=unwrapped_model.l23,
         device=device,
-        include_stride4_output=model.include_stride4_output,
+        include_stride4_output=unwrapped_model.include_stride4_output,
         tal_topk=train_config.tal_topk,
         tal_alpha=train_config.tal_alpha,
         tal_beta=train_config.tal_beta,

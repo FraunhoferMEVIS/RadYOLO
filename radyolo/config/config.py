@@ -70,7 +70,7 @@ class DefaultConfig(BaseModel):
     experiment_name: int | str  # experiment name, results saved to 'output_folder_base/experiment_name'
 
     # General Settings
-    device: str = ""  # device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
+    device: str = ""  # device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda:0, "0,1" for multi-GPU training
     amp: bool = True  # Automatic Mixed Precision (AMP) training, True runs AMP check
     # Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and
     # chooses the best one

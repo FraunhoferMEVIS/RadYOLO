@@ -12,7 +12,7 @@ import blosc2
 import nibabel as nib
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler
 
 from radyolo.config.spatial import PatchSize
 from radyolo.data.augmentations import (
@@ -1565,6 +1565,7 @@ def build_dataloader(
     workers: int,
     shuffle: bool = True,
     device: torch.device | str = "cpu",
+    sampler: Sampler | None = None,
 ) -> DataLoader:
     """Return an DataLoader for training or validation set."""
     batch_size = min(batch_size, len(dataset))
@@ -1572,7 +1573,8 @@ def build_dataloader(
     return DataLoader(
         dataset=dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=shuffle if sampler is None else False,
+        sampler=sampler,
         num_workers=number_workers,
         pin_memory=(device.type if isinstance(device, torch.device) else device) != "cpu",
         collate_fn=getattr(dataset, "collate_fn", None),
