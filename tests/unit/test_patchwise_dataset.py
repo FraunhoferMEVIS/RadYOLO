@@ -213,6 +213,52 @@ def test_load_chunked_blosc2_patch_uses_zero_for_mask_padding(monkeypatch) -> No
     assert patch[1:, 1:, 1:].min() == 1
 
 
+def test_build_dataloader_skips_multiprocessing_context_without_workers(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_dataloader(*_args, **kwargs):
+        captured.update(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(data_module, "DataLoader", fake_dataloader)
+    monkeypatch.setattr(data_module.os, "name", "posix", raising=False)
+    monkeypatch.setattr(data_module.os, "cpu_count", lambda: 8)
+
+    data_module.build_dataloader(
+        dataset=[{"image": torch.zeros(1)}],
+        batch_size=1,
+        workers=0,
+        device="cpu",
+    )
+
+    assert captured["num_workers"] == 0
+    assert captured["persistent_workers"] is False
+    assert captured["multiprocessing_context"] is None
+
+
+def test_build_dataloader_uses_forkserver_on_posix_with_workers(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_dataloader(*_args, **kwargs):
+        captured.update(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(data_module, "DataLoader", fake_dataloader)
+    monkeypatch.setattr(data_module.os, "name", "posix", raising=False)
+    monkeypatch.setattr(data_module.os, "cpu_count", lambda: 8)
+
+    data_module.build_dataloader(
+        dataset=[{"image": torch.zeros(1)}],
+        batch_size=1,
+        workers=2,
+        device="cpu",
+    )
+
+    assert captured["num_workers"] == 2
+    assert captured["persistent_workers"] is True
+    assert captured["multiprocessing_context"] == "forkserver"
+
+
 def test_sample_patch_center_keeps_patch_inside_image_when_patch_fits() -> None:
     patch_shape_xyz = (16, 16, 32)
     image_shape_xyz = (32, 32, 64)

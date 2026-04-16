@@ -1570,6 +1570,9 @@ def build_dataloader(
     """Return an DataLoader for training or validation set."""
     batch_size = min(batch_size, len(dataset))
     number_workers = min(os.cpu_count() or 1, workers)
+    multiprocessing_context = None
+    if number_workers > 0 and os.name == "posix":
+        multiprocessing_context = "forkserver"
     return DataLoader(
         dataset=dataset,
         batch_size=batch_size,
@@ -1579,5 +1582,5 @@ def build_dataloader(
         pin_memory=(device.type if isinstance(device, torch.device) else device) != "cpu",
         collate_fn=getattr(dataset, "collate_fn", None),
         persistent_workers=number_workers > 0,
-        multiprocessing_context="forkserver" if os.name == "posix" else None,
+        multiprocessing_context=multiprocessing_context,
     )
