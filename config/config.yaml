@@ -42,23 +42,23 @@ apply_preprocessing: True         # (bool) apply patch_size/normalization while 
 foreground_oversampling: 0.33     # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 min_box_crop_fraction: 0.5        # (float) minimum fraction of a box volume that must stay inside a sampled patch to keep it
 batch_size: 2                     # (int) number of images per batch
-nominal_batch_size: 64            # (int) nominal batch size (i.e. samples for gradient accumulation)
-optimizer: Adam                   # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
+nominal_batch_size: 26            # (int) nominal batch size (i.e. samples for gradient accumulation)
+optimizer: SGD                    # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 initial_learning_rate: 0.01       # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
-final_learning_rate_ratio: 0.01   # (float) final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
-momentum: 0.937                   # (float) SGD momentum/Adam beta1
-weight_decay: 0.0005              # (float) optimizer weight decay 5e-4
-warmup_epochs: 3.0                # (float) warmup epochs
-warmup_momentum: 0.8              # (float) warmup initial momentum
-warmup_bias_lr: 0.1               # (float) warmup initial bias learning rate
-grad_clip_max_norm: 10.0          # (float) max norm used for gradient clipping
+final_learning_rate_ratio: 0.087  # (float) final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
+momentum: 0.857                   # (float) SGD momentum/Adam beta1
+weight_decay: 1.22e-05            # (float) optimizer weight decay
+warmup_epochs: 4.6                # (float) warmup epochs
+warmup_momentum: 0.78             # (float) warmup initial momentum
+warmup_bias_lr: 0.0025            # (float) warmup initial bias learning rate
+grad_clip_max_norm: 11.6          # (float) max norm used for gradient clipping
 tal_topk: 10                      # (int) initial top-k anchors to keep per ground truth for task-aligned assignment
 tal_topk_final: 1                 # (int) final top-k anchors reached by the TAL schedule
 tal_topk_final_epoch: 900         # (int) 1-based epoch at which tal_topk_final is reached; values beyond this keep tal_topk_final
-tal_alpha: 0.5                    # (float) class score exponent in task-aligned assignment metric
+tal_alpha: 1.0                    # (float) class score exponent in task-aligned assignment metric
 tal_beta: 1.0                     # (float) IoU exponent in task-aligned assignment metric
-ema_decay: 0.9999                 # (float) exponential moving average decay
-ema_tau: 2000.0                   # (float) EMA ramp-up factor, iterations until full ema_decay is used
+ema_decay: 0.988                  # (float) exponential moving average decay
+ema_tau: 3622                     # (float) EMA ramp-up factor, iterations until full ema_decay is used
 objectness_loss: "bce"            # (literal) can be either "bce" (binary cross entropy) or "focal" (focal loss)
 gamma: 2.0                        # (float) quality focal loss gamma (used when objectness_loss="focal")
 class_loss_gain: 0.5              # (float) classification / objectness loss gain
@@ -73,7 +73,7 @@ bbox_parametrization: "center_extents" # (literal) bbox prediction format, choic
 # Validation Settings
 val: True                              # (bool) validate/test during training
 confidence_threshold_validation: 0.001 # (float) object confidence threshold used for validation metrics/detection postprocessing
-nms_iou_threshold: 0.2                 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+nms_iou_threshold: 0.1                 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
 nms_time_limit: 0.5                    # (float) maximum time in seconds per image for NMS before early exit
 agnostic_nms: False                    # (bool) class-agnostic NMS
 max_det: 300                           # (int) maximum number of detections per image
