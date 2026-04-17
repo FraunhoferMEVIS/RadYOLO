@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import torch
 import torch.nn.functional as F  # noqa: N812
 from batchgeneratorsv2.transforms.intensity.brightness import (
-    BrightnessAdditiveTransform,
     MultiplicativeBrightnessTransform,
 )
 from batchgeneratorsv2.transforms.intensity.contrast import ContrastTransform
@@ -602,7 +601,7 @@ def batch_generators_intensity_augmentations(
             mu=add_brightness_mu,
             sigma=add_brightness_sigma,
             p=add_brightness_prob,
-            per_channel=do_intensity_augmentations_per_channel,
+            synchronize_channels=synchronize_channels,
         )
     if contrast_augmentation_device == placement and contrast_prob > 0:
         image = contrast_augmentation(
@@ -753,18 +752,19 @@ def additive_brightness_augmentation(
     mu: float,
     sigma: float,
     p: float,
-    per_channel: bool,
+    synchronize_channels: bool,
 ) -> torch.Tensor:
-    return _apply_batchgenerators_transform(
-        image,
-        BrightnessAdditiveTransform(
-            mu=mu,
-            sigma=sigma,
-            per_channel=per_channel,
-            p_per_channel=1,
-        ),
-        apply_probability=p,
-    )
+    if random.random() >= p:
+        return image
+
+    shift_shape = (image.shape[0],) + (1,) * (image.ndim - 1)
+    if synchronize_channels:
+        shift = torch.randn((1,), device=image.device, dtype=image.dtype)
+        shift = shift.mul_(sigma).add_(mu).expand(image.shape[0])
+    else:
+        shift = torch.randn((image.shape[0],), device=image.device, dtype=image.dtype)
+        shift = shift.mul_(sigma).add_(mu)
+    return image + shift.view(shift_shape)
 
 
 def contrast_augmentation(

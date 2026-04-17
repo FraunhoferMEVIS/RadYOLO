@@ -179,11 +179,6 @@ def test_gaussian_blur_augmentation_blurs_each_channel_independently(
             "MultiplicativeBrightnessTransform",
         ),
         (
-            "additive_brightness_augmentation",
-            {"mu": 0.0, "sigma": 0.5, "p": 0.3, "per_channel": True},
-            "BrightnessAdditiveTransform",
-        ),
-        (
             "contrast_augmentation",
             {"contrast_range": (0.8, 1.2), "p": 0.4, "synchronize_channels": False},
             "ContrastTransform",
@@ -229,6 +224,54 @@ def test_batchgenerators_wrappers_delegate_with_expected_transform(
     assert captured["probability"] == kwargs["p"]
     assert torch.equal(captured["image"], image)
     assert torch.equal(wrapped, image + 1.0)
+
+
+def test_additive_brightness_augmentation_synchronizes_shift_across_channels(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    image = torch.ones((2, 2, 2, 2), dtype=torch.float32)
+
+    monkeypatch.setattr(augmentation_module.random, "random", lambda: 0.0)
+    monkeypatch.setattr(
+        augmentation_module.torch,
+        "randn",
+        lambda shape, device=None, dtype=None: torch.full(shape, 2.0, device=device, dtype=dtype),
+    )
+
+    transformed = augmentation_module.additive_brightness_augmentation(
+        image,
+        mu=1.0,
+        sigma=0.5,
+        p=1.0,
+        synchronize_channels=True,
+    )
+
+    assert torch.equal(transformed, torch.full_like(image, 3.0))
+    assert torch.equal(transformed[0], transformed[1])
+
+
+def test_additive_brightness_augmentation_preserves_low_precision_dtype(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    image = torch.ones((2, 2, 2, 2), dtype=torch.bfloat16)
+
+    monkeypatch.setattr(augmentation_module.random, "random", lambda: 0.0)
+    monkeypatch.setattr(
+        augmentation_module.torch,
+        "randn",
+        lambda shape, device=None, dtype=None: torch.ones(shape, device=device, dtype=dtype),
+    )
+
+    transformed = augmentation_module.additive_brightness_augmentation(
+        image,
+        mu=0.5,
+        sigma=0.5,
+        p=1.0,
+        synchronize_channels=False,
+    )
+
+    assert transformed.dtype == torch.bfloat16
+    assert torch.equal(transformed.float(), torch.full_like(image.float(), 2.0))
 
 
 def test_ensure_non_zero_box_extents_clamps_small_extents() -> None:
