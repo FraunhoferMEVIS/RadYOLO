@@ -278,6 +278,55 @@ def test_trainer_scales_distributed_loss_to_global_batch_size(
     assert single_gpu_trainer._scale_loss_for_backward(single_process_loss) is single_process_loss
 
 
+def test_trainer_broadcast_stop_uses_cuda_tensor_for_nccl(
+    minimal_train_config,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "distributed_stop_broadcast.yaml"
+    with minimal_train_config.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    config["device"] = "0,1"
+    with config_path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False)
+
+    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
+    monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
+    monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
+    monkeypatch.setattr(torch.cuda, "set_device", lambda _device: None)
+    monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: True)
+    monkeypatch.setattr("radyolo.training.train.dist.get_backend", lambda: "nccl")
+
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def __init__(self, value: int, device: torch.device | str) -> None:
+            self.value = value
+            self.device = torch.device(device)
+
+        def item(self) -> int:
+            return self.value
+
+    def fake_tensor(value: int, device: torch.device | str) -> FakeTensor:
+        captured["tensor_device"] = torch.device(device)
+        return FakeTensor(value, device)
+
+    def fake_broadcast(tensor: FakeTensor, src: int) -> None:
+        captured["broadcast_device"] = tensor.device
+        captured["src"] = src
+
+    monkeypatch.setattr("radyolo.training.train.torch.tensor", fake_tensor)
+    monkeypatch.setattr("radyolo.training.train.dist.broadcast", fake_broadcast)
+
+    trainer = Trainer(cfg=config_path)
+
+    assert trainer._broadcast_stop(stop=True) is True
+    assert captured["tensor_device"] == torch.device("cuda:1")
+    assert captured["broadcast_device"] == torch.device("cuda:1")
+    assert captured["src"] == 0
+
+
 def test_model_ema_updates_from_wrapped_model() -> None:
     model = torch.nn.Linear(2, 2, bias=False)
     ema = ModelEMA(model, decay=0.5, tau=1.0)

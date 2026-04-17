@@ -318,10 +318,21 @@ class Trainer:
         if self.distributed and dist.is_initialized():
             dist.barrier()
 
+    def _get_distributed_collective_device(self) -> torch.device:
+        if not self.distributed:
+            return torch.device("cpu")
+        backend = dist.get_backend() if dist.is_initialized() else _select_distributed_backend()
+        if backend == "nccl":
+            return self.device
+        return torch.device("cpu")
+
     def _broadcast_stop(self, stop: bool) -> bool:
         if not self.distributed:
             return stop
-        stop_tensor = torch.tensor(int(stop), device="cpu")
+        stop_tensor = torch.tensor(
+            int(stop),
+            device=self._get_distributed_collective_device(),
+        )
         dist.broadcast(stop_tensor, src=0)
         return bool(stop_tensor.item())
 
