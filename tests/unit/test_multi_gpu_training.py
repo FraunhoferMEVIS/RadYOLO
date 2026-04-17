@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import cast
 
@@ -346,3 +347,120 @@ def test_model_ema_updates_from_wrapped_model() -> None:
 
     assert torch.all(ema_weight > 0.0)
     assert torch.all(ema_weight < 2.0)
+
+
+def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.config = trainer.config.model_copy(
+        update={
+            "epochs": 2,
+            "warmup_epochs": 0.0,
+            "val": False,
+            "save": False,
+            "plots": False,
+            "verbose": False,
+        }
+    )
+    trainer.epochs = trainer.config.epochs
+    trainer.loss_names = (
+        "box_loss",
+        "cls_obj_loss",
+        "dfl_loss",
+        "mask_loss",
+        "cls_sep_loss",
+    )
+    trainer.loss = lambda _predictions, _batch, current_epoch: (
+        torch.tensor(float(current_epoch), dtype=torch.float32, requires_grad=True),
+        torch.zeros(5, dtype=torch.float32),
+    )
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+
+        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
+            return (self.weight.unsqueeze(0),)
+
+    class RecordingEMA:
+        def __init__(self) -> None:
+            self.calls: list[float] = []
+            self.epoch_advances = 0
+
+        def update(self, model: torch.nn.Module) -> None:
+            self.calls.append(float(cast(FakeModel, model).weight.detach().item()))
+
+        def advance_updates(self) -> None:
+            self.epoch_advances += 1
+
+    class DummyTrainLoader:
+        def __init__(self, batches: list[dict[str, torch.Tensor]]) -> None:
+            self._batches = batches
+            self.sampler = object()
+
+        def __len__(self) -> int:
+            return len(self._batches)
+
+        def __iter__(self):
+            return iter(self._batches)
+
+    model = FakeModel()
+    ema = RecordingEMA()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    scaler = torch.GradScaler("cpu", enabled=False)
+    train_loader = DummyTrainLoader(
+        [{"img": torch.ones(1, dtype=torch.float32)} for _ in range(2)]
+    )
+
+    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(trainer, "_barrier", lambda: None)
+    monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
+    monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
+    monkeypatch.setattr(trainer, "_get_memory", lambda: 0.0)
+    monkeypatch.setattr(trainer, "save_metrics", lambda metrics, train_time_start: None)
+    monkeypatch.setattr(trainer, "save_model", lambda **_kwargs: None)
+
+    trainer._train_loop(
+        model=model,
+        train_loader=train_loader,
+        validator=None,
+        optimizer=optimizer,
+        scheduler=torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _epoch: 1.0),
+        scaler=scaler,
+        lf=lambda _epoch: 1.0,
+        ema=cast(ModelEMA, ema),
+        accumulate=1,
+        stopper=lambda _epoch, _fitness: False,
+        stop=False,
+        best_fitness=None,
+        start_epoch=0,
+    )
+
+    expected_step_updates = 0
+    last_opt_step = len(train_loader) * 0
+    for epoch in range(trainer.config.epochs):
+        for batch_index in range(len(train_loader)):
+            num_iterations = batch_index + len(train_loader) * epoch
+            if num_iterations - last_opt_step >= 1:
+                expected_step_updates += 1
+                last_opt_step = num_iterations
+
+    assert len(ema.calls) == expected_step_updates
+    assert ema.epoch_advances == trainer.config.epochs
+
+
+def test_model_ema_advance_updates_controls_epoch_counter() -> None:
+    model = torch.nn.Linear(2, 2, bias=False)
+    ema = ModelEMA(model, decay=0.5, tau=1.0)
+
+    with torch.no_grad():
+        model.weight.fill_(2.0)
+
+    ema.update(model)
+
+    assert ema.updates == 0
+
+    ema.advance_updates()
+
+    assert ema.updates == 1

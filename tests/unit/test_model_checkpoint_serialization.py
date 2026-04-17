@@ -129,6 +129,12 @@ def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path
     assert "target_voxel_size" not in config.model_dump()
 
 
+def test_default_config_uses_epoch_based_ema_tau_default(minimal_train_config: Path) -> None:
+    config = get_cfg(minimal_train_config, {})
+
+    assert config.ema_tau == 400.0
+
+
 def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) -> None:
     trainer = Trainer(cfg=minimal_train_config)
     trainer.config = trainer.config.model_copy(update={"fitness_metric_weights": (0.5, 0.25, 0.25)})

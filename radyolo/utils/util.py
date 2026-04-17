@@ -173,6 +173,8 @@ class ModelEMA:
     """Updated Exponential Moving Average (EMA) from https://github.com/rwightman/pytorch-image-models.
 
     Keeps a moving average of everything in the model state_dict (parameters and buffers).
+    During training, call `update()` on each optimizer step and advance `updates`
+    once per epoch with `advance_updates()`.
 
     For EMA details see https://www.tensorflow.org/api_docs/python/tf/train/ExponentialMovingAverage
 
@@ -180,11 +182,11 @@ class ModelEMA:
     """
 
     def __init__(
-        self, model: nn.Module, decay: float = 0.9999, tau: float = 2000, updates: int = 0
+        self, model: nn.Module, decay: float = 0.9999, tau: float = 400, updates: int = 0
     ) -> None:
         """Initialize EMA for 'model' with given arguments."""
         self.ema = deepcopy(unwrap_model(model)).eval()  # FP32 EMA
-        self.updates = updates  # number of EMA updates
+        self.updates = updates  # number of epoch-level EMA updates
         self.decay = lambda x: decay * (
             1 - math.exp(-x / tau)
         )  # decay exponential ramp (to help early epochs)
@@ -193,7 +195,7 @@ class ModelEMA:
         self.enabled = True
 
     def update(self, model: nn.Module) -> None:
-        """Update EMA parameters."""
+        """Update EMA parameters from the current model weights."""
         if self.enabled:
             next_updates = self.updates + 1
             decay = self.decay(next_updates)
@@ -222,4 +224,7 @@ class ModelEMA:
                 )
                 return
 
-            self.updates = next_updates
+    def advance_updates(self) -> None:
+        """Advance the epoch-level EMA update counter."""
+        if self.enabled:
+            self.updates += 1

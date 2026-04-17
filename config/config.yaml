@@ -58,7 +58,7 @@ tal_topk_final_epoch: 900         # (int) 1-based epoch at which tal_topk_final 
 tal_alpha: 1.0                    # (float) class score exponent in task-aligned assignment metric
 tal_beta: 1.0                     # (float) IoU exponent in task-aligned assignment metric
 ema_decay: 0.988                  # (float) exponential moving average decay
-ema_tau: 3622                     # (float) EMA ramp-up factor, iterations until full ema_decay is used
+ema_tau: 400                      # (float) EMA ramp-up factor, epochs until full ema_decay is used
 objectness_loss: "bce"            # (literal) can be either "bce" (binary cross entropy) or "focal" (focal loss)
 gamma: 2.0                        # (float) quality focal loss gamma (used when objectness_loss="focal")
 class_loss_gain: 0.5              # (float) classification / objectness loss gain

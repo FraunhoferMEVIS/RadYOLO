@@ -150,7 +150,7 @@ class DefaultConfig(BaseModel):
     tal_alpha: float = 0.5  # class score exponent in task-aligned assignment metric
     tal_beta: float = 1.0  # IoU exponent in task-aligned assignment metric
     ema_decay: float = 0.9999  # exponential moving average decay
-    ema_tau: float = 2000.0  # EMA ramp-up factor, iterations until full ema_decay is used
+    ema_tau: float = 400.0  # EMA ramp-up factor, epochs until full ema_decay is used
     objectness_loss: Literal["bce", "focal"] = (
         "bce"  # can be either "bce" (binary cross entropy) or "focal" (focal loss)
     )

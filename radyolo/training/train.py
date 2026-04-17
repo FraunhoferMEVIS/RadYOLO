@@ -706,6 +706,8 @@ class Trainer:
                             )
                         )
 
+            ema.advance_updates()
+
             scheduler.step()
             self._barrier()
 
