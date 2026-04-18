@@ -262,7 +262,9 @@ class TaskAlignedAssigner(nn.Module):
                 for m in range(max_num_objects):
                     if zero_mask[b, m]:
                         # Get indices of k closest anchors
-                        topk_vals, topk_idx = torch.topk(distances[b, m], k=8, largest=False)
+                        topk_vals, topk_idx = torch.topk(
+                            distances[b, m], k=self.topk, largest=False
+                        )
 
                         # Assign alignment metric based on inverse distance scaling
                         # Closest gets 0.1, futher anchors get proportionally less
