@@ -236,7 +236,7 @@ def test_build_dataloader_skips_multiprocessing_context_without_workers(monkeypa
     assert captured["multiprocessing_context"] is None
 
 
-def test_build_dataloader_uses_forkserver_on_posix_with_workers(monkeypatch) -> None:
+def test_build_dataloader_uses_spawn_on_posix_with_workers(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_dataloader(*_args, **kwargs):
@@ -256,7 +256,7 @@ def test_build_dataloader_uses_forkserver_on_posix_with_workers(monkeypatch) -> 
 
     assert captured["num_workers"] == 2
     assert captured["persistent_workers"] is True
-    assert captured["multiprocessing_context"] == "forkserver"
+    assert captured["multiprocessing_context"] == "spawn"
 
 
 def test_sample_patch_center_keeps_patch_inside_image_when_patch_fits() -> None:
