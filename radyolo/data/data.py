@@ -1572,7 +1572,7 @@ def build_dataloader(
     number_workers = min(os.cpu_count() or 1, workers)
     multiprocessing_context = None
     if number_workers > 0 and os.name == "posix":
-        multiprocessing_context = "forkserver"
+        multiprocessing_context = "spawn"
     return DataLoader(
         dataset=dataset,
         batch_size=batch_size,
