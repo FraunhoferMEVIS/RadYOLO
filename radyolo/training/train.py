@@ -664,6 +664,15 @@ class Trainer:
                             ),
                         )
 
+                        if not torch.isfinite(loss) or not torch.isfinite(self.loss_items).all():
+                            self._log_non_finite_training_batch(
+                                batch=prepared_batch,
+                                loss=loss,
+                                loss_items=self.loss_items,
+                            )
+                            optimizer.zero_grad()
+                            continue
+
                         tloss = (
                             tloss * i + self.loss_items.to(dtype=tloss.dtype, device=tloss.device)
                         ) / (i + 1)
@@ -707,13 +716,8 @@ class Trainer:
                         )
 
             ema.advance_updates()
-
             scheduler.step()
             self._barrier()
-
-            if loss is None:
-                message = "Detected None loss"
-                raise RuntimeError(message)
 
             if self.is_main_process and tloss is not None:
                 LOGGER.info(
@@ -821,10 +825,51 @@ class Trainer:
     ) -> None:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)
+        if Trainer._has_non_finite_gradients(model):
+            LOGGER.warning("Skipping optimizer step because gradients became non-finite.")
+            optimizer.zero_grad()
+            scaler.update()
+            return
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
         ema.update(model)
+        return
+
+    @staticmethod
+    def _has_non_finite_gradients(model: torch.nn.Module) -> bool:
+        parameters_with_grads = [
+            parameter
+            for parameter in model.parameters()
+            if parameter.grad is not None and parameter.grad.dtype.is_floating_point
+        ]
+        return any(not torch.isfinite(parameter.grad).all() for parameter in parameters_with_grads)
+
+    @staticmethod
+    def _log_non_finite_training_batch(
+        batch: dict,
+        loss: torch.Tensor,
+        loss_items: torch.Tensor,
+    ) -> None:
+        loss_value = (
+            loss.detach().float().cpu().item()
+            if loss.numel() == 1
+            else loss.detach().float().cpu()
+        )
+        case_names = batch.get("case_names")
+        if isinstance(case_names, (list, tuple)):
+            case_text = ", ".join(str(name) for name in case_names[:4])
+        elif case_names is None:
+            case_text = "<unknown>"
+        else:
+            case_text = str(case_names)
+        LOGGER.warning(
+            "Skipping batch because training loss became non-finite. loss=%s loss_items=%s "
+            "cases=%s",
+            loss_value,
+            loss_items.detach().float().cpu().tolist(),
+            case_text,
+        )
 
     def _get_memory(self) -> float:
         """Get accelerator memory utilization in GB."""

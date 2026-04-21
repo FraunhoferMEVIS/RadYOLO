@@ -450,6 +450,123 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
     assert ema.epoch_advances == trainer.config.epochs
 
 
+def test_trainer_skips_non_finite_loss_batch(minimal_train_config, monkeypatch) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.config = trainer.config.model_copy(
+        update={
+            "epochs": 1,
+            "warmup_epochs": 0.0,
+            "val": False,
+            "save": False,
+            "plots": False,
+            "verbose": False,
+        }
+    )
+    trainer.epochs = trainer.config.epochs
+    trainer.loss_names = (
+        "box_loss",
+        "cls_obj_loss",
+        "dfl_loss",
+        "mask_loss",
+        "cls_sep_loss",
+    )
+
+    loss_calls = {"count": 0}
+
+    def _loss(_predictions, _batch, current_epoch):
+        del current_epoch
+        loss_calls["count"] += 1
+        if loss_calls["count"] == 1:
+            return (
+                torch.tensor(float("nan"), dtype=torch.float32, requires_grad=True),
+                torch.full((5,), float("nan"), dtype=torch.float32),
+            )
+        return (
+            torch.tensor(1.0, dtype=torch.float32, requires_grad=True),
+            torch.ones(5, dtype=torch.float32),
+        )
+
+    trainer.loss = _loss
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+
+        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
+            return (self.weight.unsqueeze(0),)
+
+    class RecordingEMA:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.epoch_advances = 0
+
+        def update(self, _model: torch.nn.Module) -> None:
+            self.calls += 1
+
+        def advance_updates(self) -> None:
+            self.epoch_advances += 1
+
+    class DummyTrainLoader:
+        def __init__(self, batches: list[dict[str, torch.Tensor | list[str]]]) -> None:
+            self._batches = batches
+            self.sampler = object()
+
+        def __len__(self) -> int:
+            return len(self._batches)
+
+        def __iter__(self):
+            return iter(self._batches)
+
+    model = FakeModel()
+    ema = RecordingEMA()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    scaler = torch.GradScaler("cpu", enabled=False)
+    train_loader = DummyTrainLoader(
+        [
+            {"img": torch.ones(1, dtype=torch.float32), "case_names": ["bad-case"]},
+            {"img": torch.ones(1, dtype=torch.float32), "case_names": ["good-case"]},
+        ]
+    )
+
+    optimizer_step_calls = {"count": 0}
+
+    def _optimizer_step(*args, **kwargs):
+        del args, kwargs
+        optimizer_step_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(trainer, "optimizer_step", _optimizer_step)
+    monkeypatch.setattr(trainer, "_barrier", lambda: None)
+    monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
+    monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
+    monkeypatch.setattr(trainer, "_get_memory", lambda: 0.0)
+    monkeypatch.setattr(trainer, "save_metrics", lambda metrics, train_time_start: None)
+    monkeypatch.setattr(trainer, "save_model", lambda **_kwargs: None)
+
+    trainer._train_loop(
+        model=model,
+        train_loader=train_loader,
+        validator=None,
+        optimizer=optimizer,
+        scheduler=torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _epoch: 1.0),
+        scaler=scaler,
+        lf=lambda _epoch: 1.0,
+        ema=cast(ModelEMA, ema),
+        accumulate=1,
+        stopper=lambda _epoch, _fitness: False,
+        stop=False,
+        best_fitness=None,
+        start_epoch=0,
+    )
+
+    assert loss_calls["count"] == 2
+    assert optimizer_step_calls["count"] == 1
+    assert ema.epoch_advances == 1
+
+
 def test_model_ema_advance_updates_controls_epoch_counter() -> None:
     model = torch.nn.Linear(2, 2, bias=False)
     ema = ModelEMA(model, decay=0.5, tau=1.0)

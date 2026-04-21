@@ -17,7 +17,7 @@ from radyolo.training.tal import (
     encode_bbox_targets,
     make_anchors,
 )
-from radyolo.utils.ops import xyzwhd2xyzxyz
+from radyolo.utils.ops import reconstruct_mask_logits, xyzwhd2xyzxyz
 from radyolo.utils.util import unwrap_model
 from radyolo.validation.metrics import bbox_iou
 
@@ -452,9 +452,9 @@ class v8DetectionLoss:  # noqa: N801
                                 LOGGER.warning("No assinged grid cells. Skipping this mask.")
                                 continue
                             mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
-                            pred_masks_logits = torch.einsum(
-                                "in,nhwd->ihwd", mask_coefficients_i, prototype_masks_batch
-                            )  # (i, n_proto) @ (n_proto, h, w, d) -> (i, h, w, d)
+                            pred_masks_logits = reconstruct_mask_logits(
+                                mask_coefficients_i, prototype_masks_batch
+                            )
                             gt_mask_correct_dtype = gt_mask.to(pred_masks_logits.dtype)
                             gt_mask_expanded = gt_mask_correct_dtype.expand(
                                 pred_masks_logits.shape[0], -1, -1, -1
@@ -463,6 +463,14 @@ class v8DetectionLoss:  # noqa: N801
                                 pred_masks_logits, gt_mask_expanded
                             )
                             mask_bce_loss = self.mask_bce_loss(pred_masks_logits, gt_mask_expanded)
+                            if not torch.isfinite(mask_dice_loss + mask_bce_loss):
+                                LOGGER.warning(
+                                    "Skipping one mask-loss term because Dice/BCE became non-finite. "
+                                    "batch_index=%s mask_index=%s",
+                                    batch_index,
+                                    mask_index,
+                                )
+                                continue
                             loss[3] += mask_dice_loss + mask_bce_loss
                             mask_loss_count += 1
                 if mask_loss_count > 0:
@@ -474,7 +482,7 @@ class v8DetectionLoss:  # noqa: N801
         loss[3] *= self.mask_loss_gain
         loss[4] *= self.class_separate_loss_gain
 
-        return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask)
+        return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask, cls_sep)
 
 
 def build_detection_loss_from_config(

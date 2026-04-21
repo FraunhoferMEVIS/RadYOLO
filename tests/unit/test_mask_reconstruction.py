@@ -21,3 +21,20 @@ def test_reconstruct_mask_probabilities_promotes_to_float32() -> None:
     assert probabilities.shape == (1, 2, 2)
     assert torch.isfinite(probabilities).all()
     assert torch.all((probabilities >= 0.0) & (probabilities <= 1.0))
+
+
+def test_reconstruct_mask_logits_promotes_to_float32() -> None:
+    coefficients = torch.tensor([1000.0, -1000.0], dtype=torch.float16)
+    prototypes = torch.tensor(
+        [
+            [[[0.001, -0.001], [0.5, -0.5]]],
+            [[[-0.001, 0.001], [-0.5, 0.5]]],
+        ],
+        dtype=torch.float16,
+    )
+
+    logits = ops.reconstruct_mask_logits(coefficients, prototypes)
+
+    assert logits.dtype == torch.float32
+    assert logits.shape == (1, 2, 2)
+    assert torch.isfinite(logits).all()
