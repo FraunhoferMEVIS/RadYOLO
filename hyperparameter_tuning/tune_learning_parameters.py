@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import hashlib
 import importlib
 import logging
 import math
@@ -38,6 +39,7 @@ _ensure_project_root_on_sys_path()
 
 LOGGER = logging.getLogger(__name__)
 RNG = np.random.default_rng()
+TRIAL_PROGRESS_FILENAME = "trial_progress.yaml"
 
 SUPPORTED_DISTRIBUTIONS = {
     "choice",
@@ -440,6 +442,226 @@ def _normalize_name(raw: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in raw)
 
 
+def _compute_run_config_signature(run_config: Mapping[str, object]) -> str:
+    payload = yaml.safe_dump(dict(run_config), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _load_trial_progress(trial_dir: Path) -> dict[str, Any]:
+    progress_path = trial_dir / TRIAL_PROGRESS_FILENAME
+    if not progress_path.exists():
+        return {"datasets": {}}
+
+    progress = _read_yaml(progress_path)
+    datasets = progress.get("datasets")
+    if not isinstance(datasets, dict):
+        progress["datasets"] = {}
+    return progress
+
+
+def _write_trial_progress(trial_dir: Path, progress: Mapping[str, object]) -> None:
+    progress_path = trial_dir / TRIAL_PROGRESS_FILENAME
+    with progress_path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(dict(progress), handle, sort_keys=False)
+
+
+def _get_dataset_progress_entry(
+    trial_progress: Mapping[str, object],
+    dataset_name: str,
+) -> dict[str, Any] | None:
+    datasets = trial_progress.get("datasets")
+    if not isinstance(datasets, Mapping):
+        return None
+    entry = datasets.get(dataset_name)
+    if not isinstance(entry, dict):
+        return None
+    return entry
+
+
+def _update_dataset_progress_entry(
+    trial_progress: dict[str, Any],
+    dataset_name: str,
+    updates: Mapping[str, object],
+) -> dict[str, Any]:
+    datasets = trial_progress.setdefault("datasets", {})
+    if not isinstance(datasets, dict):
+        msg = "trial progress datasets entry must be a mapping"
+        raise TypeError(msg)
+
+    entry = copy.deepcopy(datasets.get(dataset_name, {}))
+    entry.update(copy.deepcopy(dict(updates)))
+    entry["updated_at"] = dt.datetime.now(tz=dt.UTC).isoformat()
+    datasets[dataset_name] = entry
+    return entry
+
+
+def _load_existing_run_config_signature(config_path: Path) -> str | None:
+    if not config_path.exists():
+        return None
+
+    try:
+        payload = _read_yaml(config_path)
+    except Exception:
+        LOGGER.warning("Failed to read existing training config at %s", config_path)
+        return None
+    return _compute_run_config_signature(payload)
+
+
+def _get_cached_completed_dataset_metrics(
+    progress_entry: Mapping[str, object] | None,
+    config_signature: str,
+) -> tuple[float, float, int, int, float] | None:
+    if progress_entry is None:
+        return None
+    if progress_entry.get("config_signature") != config_signature:
+        return None
+    if progress_entry.get("status") != "completed":
+        return None
+
+    required_keys = (
+        "primary_metric",
+        "secondary_metric",
+        "primary_best_epoch",
+        "secondary_best_epoch",
+        "training_minutes",
+    )
+    if any(key not in progress_entry for key in required_keys):
+        return None
+
+    return (
+        float(progress_entry["primary_metric"]),
+        float(progress_entry["secondary_metric"]),
+        int(progress_entry["primary_best_epoch"]),
+        int(progress_entry["secondary_best_epoch"]),
+        float(progress_entry["training_minutes"]),
+    )
+
+
+def _should_resume_dataset_run(
+    progress_entry: Mapping[str, object] | None,
+    config_signature: str,
+    last_checkpoint_path: Path,
+    existing_config_path: Path,
+) -> bool:
+    if not last_checkpoint_path.exists():
+        return False
+
+    if progress_entry is not None and progress_entry.get("config_signature") == config_signature:
+        return str(progress_entry.get("status", "")).lower() not in {
+            "completed",
+            "training_completed",
+        }
+
+    return _load_existing_run_config_signature(existing_config_path) == config_signature
+
+
+def _restore_completed_dataset_metrics(
+    progress_entry: Mapping[str, object] | None,
+    config_signature: str,
+    csv_path: Path,
+    primary_metric_column: str,
+    secondary_metric_column: str,
+    rolling_window_epochs: int,
+    trial_progress: dict[str, Any],
+    trial_dir: Path,
+    dataset_name: str,
+) -> tuple[float, float, int, int, float] | None:
+    cached_metrics = _get_cached_completed_dataset_metrics(progress_entry, config_signature)
+    if cached_metrics is not None:
+        return cached_metrics
+
+    if progress_entry is None:
+        return None
+    if progress_entry.get("config_signature") != config_signature:
+        return None
+    if progress_entry.get("status") != "training_completed":
+        return None
+
+    (
+        primary_metric,
+        secondary_metric,
+        primary_best_epoch,
+        secondary_best_epoch,
+    ) = _extract_metric_from_csv(
+        csv_path,
+        primary_metric_column,
+        secondary_metric_column,
+        rolling_window_epochs,
+    )
+    training_minutes = float(progress_entry.get("training_minutes", 0.0))
+    _update_dataset_progress_entry(
+        trial_progress,
+        dataset_name,
+        {
+            "config_signature": config_signature,
+            "status": "completed",
+            "primary_metric": float(primary_metric),
+            "secondary_metric": float(secondary_metric),
+            "primary_best_epoch": int(primary_best_epoch),
+            "secondary_best_epoch": int(secondary_best_epoch),
+            "training_minutes": training_minutes,
+        },
+    )
+    _write_trial_progress(trial_dir, trial_progress)
+    return (
+        float(primary_metric),
+        float(secondary_metric),
+        int(primary_best_epoch),
+        int(secondary_best_epoch),
+        training_minutes,
+    )
+
+
+def _alphabetical_restore_trial_sort_key(trial: object) -> tuple[str, str]:
+    trial_id = str(getattr(trial, "trial_id", "")).lower()
+    local_path = str(getattr(trial, "local_path", "")).lower()
+    return trial_id, local_path
+
+
+def _patch_ray_restore_trial_order() -> None:
+    from ray.tune.execution.tune_controller import TuneController
+    from ray.tune.experiment import Trial
+    from ray.tune.tune_config import ResumeConfig
+
+    if getattr(TuneController, "_radyolo_alphabetical_restore_patch", False):
+        return
+
+    def _requeue_restored_trials_alphabetically(
+        self: Any,
+        trials: list[Trial],
+        resume_config: ResumeConfig,
+    ) -> None:
+        for trial in sorted(trials, key=_alphabetical_restore_trial_sort_key):
+            if trial.status == Trial.ERROR:
+                resume_type = resume_config.errored
+            elif trial.status == Trial.TERMINATED:
+                resume_type = resume_config.finished
+            else:
+                resume_type = resume_config.unfinished
+
+            trial_to_add = None
+            if resume_type == ResumeConfig.ResumeType.RESUME:
+                trial_to_add = trial
+                trial_to_add.run_metadata.error_filename = None
+                trial_to_add.run_metadata.pickled_error_filename = None
+                trial_to_add.set_status(Trial.PENDING)
+            elif resume_type == ResumeConfig.ResumeType.RESTART:
+                trial_to_add = trial.reset()
+                trial_to_add.restore_path = None
+            elif resume_type == ResumeConfig.ResumeType.SKIP:
+                trial_to_add = trial
+                if trial_to_add.status != Trial.ERROR:
+                    trial_to_add.set_status(Trial.TERMINATED)
+            else:
+                msg = f"Unknown resume type: {resume_type}"
+                raise ValueError(msg)
+
+            self.add_trial(trial_to_add)
+
+    TuneController._requeue_restored_trials = _requeue_restored_trials_alphabetically
+    TuneController._radyolo_alphabetical_restore_patch = True
+
+
 def _as_positive_patch_size(value: Any, *, field_name: str) -> dict[str, int]:
     if isinstance(value, dict):
         expected_axes = ("x", "y", "z")
@@ -533,6 +755,10 @@ def _run_trial(
     experiment_name = str(tune_settings["experiment_name"])
     trial_dir = output_root / experiment_name / "trial_runs" / f"trial_{trial_id}"
     trial_dir.mkdir(parents=True, exist_ok=True)
+    trial_progress = _load_trial_progress(trial_dir)
+    trial_progress["trial_id"] = trial_id
+    trial_progress["sampled_hyperparameters"] = copy.deepcopy(sampled)
+    _write_trial_progress(trial_dir, trial_progress)
 
     metrics_cfg = tune_settings["metrics"]
     datasets = tune_settings["datasets"]
@@ -559,6 +785,9 @@ def _run_trial(
         dataset_name = _normalize_name(str(dataset.get("name", Path(str(dataset["data"])).name)))
         dataset_dir = trial_dir / dataset_name
         output_folder_base = dataset_dir / "runs"
+        train_output_dir = output_folder_base / "train"
+        results_csv_path = train_output_dir / "results.csv"
+        last_checkpoint_path = train_output_dir / "weights" / "last.pt"
         output_folder_base.mkdir(parents=True, exist_ok=True)
 
         run_config = _deep_merge(template_config, common_overrides)
@@ -570,58 +799,130 @@ def _run_trial(
         run_config["output_folder_base"] = str(output_folder_base)
         run_config["experiment_name"] = "train"
         run_config["exist_ok"] = True
-        run_config["resume"] = False
 
         config_path = dataset_dir / "train_config.yaml"
-        with config_path.open("w", encoding="utf-8") as handle:
-            yaml.safe_dump(run_config, handle, sort_keys=False)
-
-        training_start = time.perf_counter()
-        return_code = _run_training(command, config_path, cwd=training_cwd)
-        training_minutes = (time.perf_counter() - training_start) / 60.0
+        config_signature = _compute_run_config_signature(run_config)
+        progress_entry = _get_dataset_progress_entry(trial_progress, dataset_name)
         primary_metric_key = f"dataset_metric/{dataset_name}"
         secondary_metric_key = f"dataset_metric_secondary/{dataset_name}"
         primary_epoch_key = f"dataset_best_epoch/{dataset_name}"
         secondary_epoch_key = f"dataset_best_epoch_secondary/{dataset_name}"
         training_minutes_key = f"dataset_training_minutes/{dataset_name}"
-        if return_code != 0:
-            LOGGER.warning(
-                "Training failed for dataset '%s' in trial %s with exit code %d",
-                dataset_name,
-                trial_id,
-                return_code,
-            )
-            primary_metric = failure_metric
-            secondary_metric = failure_metric
-            primary_best_epoch = -1
-            secondary_best_epoch = -1
-            report_payload[f"dataset_failed/{dataset_name}"] = 1
+
+        restored_metrics = _restore_completed_dataset_metrics(
+            progress_entry,
+            config_signature,
+            results_csv_path,
+            primary_metric_column,
+            secondary_metric_column,
+            rolling_window_epochs,
+            trial_progress,
+            trial_dir,
+            dataset_name,
+        )
+        if restored_metrics is not None:
+            (
+                primary_metric,
+                secondary_metric,
+                primary_best_epoch,
+                secondary_best_epoch,
+                training_minutes,
+            ) = restored_metrics
+            report_payload[f"dataset_failed/{dataset_name}"] = 0
         else:
-            csv_path = output_folder_base / "train" / "results.csv"
-            try:
-                (
-                    primary_metric,
-                    secondary_metric,
-                    primary_best_epoch,
-                    secondary_best_epoch,
-                ) = _extract_metric_from_csv(
-                    csv_path,
-                    primary_metric_column,
-                    secondary_metric_column,
-                    rolling_window_epochs,
-                )
-                report_payload[f"dataset_failed/{dataset_name}"] = 0
-            except Exception:
-                LOGGER.exception(
-                    "Failed metric extraction for dataset '%s' in trial %s",
+            run_config["resume"] = _should_resume_dataset_run(
+                progress_entry,
+                config_signature,
+                last_checkpoint_path,
+                config_path,
+            )
+            with config_path.open("w", encoding="utf-8") as handle:
+                yaml.safe_dump(run_config, handle, sort_keys=False)
+
+            _update_dataset_progress_entry(
+                trial_progress,
+                dataset_name,
+                {
+                    "config_signature": config_signature,
+                    "status": "running",
+                },
+            )
+            _write_trial_progress(trial_dir, trial_progress)
+
+            training_start = time.perf_counter()
+            return_code = _run_training(command, config_path, cwd=training_cwd)
+            training_minutes = (time.perf_counter() - training_start) / 60.0
+            if return_code != 0:
+                LOGGER.warning(
+                    "Training failed for dataset '%s' in trial %s with exit code %d",
                     dataset_name,
                     trial_id,
+                    return_code,
                 )
                 primary_metric = failure_metric
                 secondary_metric = failure_metric
                 primary_best_epoch = -1
                 secondary_best_epoch = -1
                 report_payload[f"dataset_failed/{dataset_name}"] = 1
+                _update_dataset_progress_entry(
+                    trial_progress,
+                    dataset_name,
+                    {
+                        "config_signature": config_signature,
+                        "status": "interrupted",
+                        "training_minutes": float(training_minutes),
+                    },
+                )
+                _write_trial_progress(trial_dir, trial_progress)
+            else:
+                _update_dataset_progress_entry(
+                    trial_progress,
+                    dataset_name,
+                    {
+                        "config_signature": config_signature,
+                        "status": "training_completed",
+                        "training_minutes": float(training_minutes),
+                    },
+                )
+                _write_trial_progress(trial_dir, trial_progress)
+                try:
+                    (
+                        primary_metric,
+                        secondary_metric,
+                        primary_best_epoch,
+                        secondary_best_epoch,
+                    ) = _extract_metric_from_csv(
+                        results_csv_path,
+                        primary_metric_column,
+                        secondary_metric_column,
+                        rolling_window_epochs,
+                    )
+                    report_payload[f"dataset_failed/{dataset_name}"] = 0
+                    _update_dataset_progress_entry(
+                        trial_progress,
+                        dataset_name,
+                        {
+                            "config_signature": config_signature,
+                            "status": "completed",
+                            "primary_metric": float(primary_metric),
+                            "secondary_metric": float(secondary_metric),
+                            "primary_best_epoch": int(primary_best_epoch),
+                            "secondary_best_epoch": int(secondary_best_epoch),
+                            "training_minutes": float(training_minutes),
+                        },
+                    )
+                    _write_trial_progress(trial_dir, trial_progress)
+                except Exception:
+                    LOGGER.exception(
+                        "Failed metric extraction for dataset '%s' in trial %s",
+                        dataset_name,
+                        trial_id,
+                    )
+                    primary_metric = failure_metric
+                    secondary_metric = failure_metric
+                    primary_best_epoch = -1
+                    secondary_best_epoch = -1
+                    report_payload[f"dataset_failed/{dataset_name}"] = 1
 
         if math.isnan(primary_metric):
             primary_metric = failure_metric
@@ -737,7 +1038,10 @@ def _load_tune_settings(
     output_root.mkdir(parents=True, exist_ok=True)
 
     experiment_name = str(
-        tune_cfg.get("experiment_name", f"tune_{dt.datetime.now(tz=dt.UTC).strftime('%Y%m%d_%H%M%S')}")
+        tune_cfg.get(
+            "experiment_name",
+            f"tune_{dt.datetime.now(tz=dt.UTC).strftime('%Y%m%d_%H%M%S')}",
+        )
     )
 
     metrics_cfg = tune_cfg.get("metrics", {})
@@ -810,6 +1114,7 @@ def main() -> int:
     experiment_dir = output_root / experiment_name
 
     if Tuner.can_restore(str(experiment_dir)):
+        _patch_ray_restore_trial_order()
         LOGGER.info("Restoring existing Ray Tune experiment at %s", experiment_dir)
         tuner = Tuner.restore(
             str(experiment_dir),

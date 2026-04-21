@@ -6,9 +6,14 @@ from pathlib import Path
 import pytest
 
 from hyperparameter_tuning.tune_learning_parameters import (
+    _alphabetical_restore_trial_sort_key,
     _build_dataset_train_overrides,
     _build_initial_evaluation_point,
+    _compute_run_config_signature,
     _ensure_project_root_on_sys_path,
+    _get_cached_completed_dataset_metrics,
+    _restore_completed_dataset_metrics,
+    _should_resume_dataset_run,
 )
 
 
@@ -88,3 +93,119 @@ def test_build_initial_evaluation_point_skips_one_minus_loguniform_defaults() ->
     )
 
     assert initial_point == {"prototype_masks": 8}
+
+
+def test_alphabetical_restore_trial_sort_key_orders_trial_ids_alphabetically() -> None:
+    class TrialStub:
+        def __init__(self, trial_id: str, local_path: str) -> None:
+            self.trial_id = trial_id
+            self.local_path = local_path
+
+    trials = [
+        TrialStub("c3", "c"),
+        TrialStub("A1", "a"),
+        TrialStub("b2", "b"),
+    ]
+
+    sorted_trial_ids = [
+        trial.trial_id
+        for trial in sorted(trials, key=_alphabetical_restore_trial_sort_key)
+    ]
+
+    assert sorted_trial_ids == ["A1", "b2", "c3"]
+
+
+def test_should_resume_dataset_run_uses_matching_incomplete_progress_entry(tmp_path: Path) -> None:
+    config_signature = _compute_run_config_signature({"epochs": 10, "resume": False})
+    checkpoint_path = tmp_path / "runs" / "train" / "weights" / "last.pt"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_text("checkpoint", encoding="utf-8")
+
+    should_resume = _should_resume_dataset_run(
+        {"config_signature": config_signature, "status": "interrupted"},
+        config_signature,
+        checkpoint_path,
+        tmp_path / "train_config.yaml",
+    )
+
+    assert should_resume is True
+
+
+def test_should_resume_dataset_run_uses_existing_train_config_for_legacy_runs(tmp_path: Path) -> None:
+    run_config = {"epochs": 10, "resume": False, "batch_size": 2}
+    config_signature = _compute_run_config_signature(run_config)
+    config_path = tmp_path / "train_config.yaml"
+    config_path.write_text(
+        "epochs: 10\nresume: false\nbatch_size: 2\n",
+        encoding="utf-8",
+    )
+    checkpoint_path = tmp_path / "runs" / "train" / "weights" / "last.pt"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_text("checkpoint", encoding="utf-8")
+
+    should_resume = _should_resume_dataset_run(
+        None,
+        config_signature,
+        checkpoint_path,
+        config_path,
+    )
+
+    assert should_resume is True
+
+
+def test_get_cached_completed_dataset_metrics_requires_completed_status() -> None:
+    config_signature = _compute_run_config_signature({"epochs": 5})
+
+    cached_metrics = _get_cached_completed_dataset_metrics(
+        {
+            "config_signature": config_signature,
+            "status": "completed",
+            "primary_metric": 0.8,
+            "secondary_metric": 0.7,
+            "primary_best_epoch": 8,
+            "secondary_best_epoch": 7,
+            "training_minutes": 12.5,
+        },
+        config_signature,
+    )
+
+    assert cached_metrics == (0.8, 0.7, 8, 7, 12.5)
+
+
+def test_restore_completed_dataset_metrics_finalizes_training_completed_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_signature = _compute_run_config_signature({"epochs": 12, "batch_size": 2})
+    trial_progress = {
+        "datasets": {
+            "dataset_a": {
+                "config_signature": config_signature,
+                "status": "training_completed",
+                "training_minutes": 9.75,
+            }
+        }
+    }
+    csv_path = tmp_path / "results.csv"
+    csv_path.write_text("epoch,metrics/mAP10-95,metrics/dice\n1,0.1,0.2\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "hyperparameter_tuning.tune_learning_parameters._extract_metric_from_csv",
+        lambda *args, **kwargs: (0.81, 0.72, 11, 10),
+    )
+
+    metrics = _restore_completed_dataset_metrics(
+        trial_progress["datasets"]["dataset_a"],
+        config_signature,
+        csv_path,
+        "metrics/mAP10-95",
+        "metrics/dice",
+        5,
+        trial_progress,
+        tmp_path,
+        "dataset_a",
+    )
+
+    assert metrics == (0.81, 0.72, 11, 10, 9.75)
+    assert trial_progress["datasets"]["dataset_a"]["status"] == "completed"
+    assert trial_progress["datasets"]["dataset_a"]["primary_metric"] == pytest.approx(0.81)
