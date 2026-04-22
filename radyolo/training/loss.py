@@ -158,8 +158,9 @@ class BboxLoss(nn.Module):
             pred_dist = pred_dist * stride_tensor.unsqueeze(0)
             pred_dist = pred_dist / scale
             loss_dfl = (
-                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none")
-                .mean(-1, keepdim=True)
+                F.l1_loss(pred_dist[fg_mask], target_ltrb[fg_mask], reduction="none").mean(
+                    -1, keepdim=True
+                )
                 * weight
             )
             loss_dfl = loss_dfl.sum() / target_scores_sum
@@ -452,8 +453,8 @@ class v8DetectionLoss:  # noqa: N801
                                 LOGGER.warning("No assinged grid cells. Skipping this mask.")
                                 continue
                             mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
-                            pred_masks_logits = reconstruct_mask_logits(
-                                mask_coefficients_i, prototype_masks_batch
+                            pred_masks_logits = torch.einsum(
+                                "...n,nhwd->...hwd", mask_coefficients_i, prototype_masks_batch
                             )
                             gt_mask_correct_dtype = gt_mask.to(pred_masks_logits.dtype)
                             gt_mask_expanded = gt_mask_correct_dtype.expand(
