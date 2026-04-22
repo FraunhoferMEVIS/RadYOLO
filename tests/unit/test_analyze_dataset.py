@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
-import json
 import nibabel as nib
 import numpy as np
 
@@ -125,10 +125,10 @@ def test_analyze_dataset_writes_resampled_summary_and_box_sizes(tmp_path: Path) 
     assert fingerprint["resampled_imagesize_p10_vox"] == [13, 27, 40]
     assert fingerprint["resampled_imagesize_p90_vox"] == [13, 27, 40]
     assert fingerprint["box_size_median_vox"] == {"0": [6.5, 13.5, 20.0]}
+    assert fingerprint["box_size_p05_vox"] == [6.5, 13.5, 20.0]
     assert fingerprint["box_size_p95_vox"] == [6.5, 13.5, 20.0]
     assert fingerprint["n_images_with_objects"] == 2
     assert fingerprint["n_images_without_objects"] == 0
-    assert "box_size_p10_vox" not in fingerprint
 
 
 def test_analyze_dataset_box_size_p95_uses_all_objects_from_all_classes(tmp_path: Path) -> None:
@@ -160,6 +160,7 @@ def test_analyze_dataset_box_size_p95_uses_all_objects_from_all_classes(tmp_path
         "1": [40.0, 50.0, 60.0],
         "2": [70.0, 80.0, 90.0],
     }
+    assert fingerprint["box_size_p05_vox"] == [13.0, 23.0, 33.0]
     assert fingerprint["box_size_p95_vox"] == [67.0, 77.0, 87.0]
 
 

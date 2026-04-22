@@ -52,6 +52,7 @@ class DatasetFingerprint:
     resampled_imagesize_p90_vox: PatchSize
     boxes_per_class: dict[str, int]
     box_size_median_vox: dict[str, VoxelSize]
+    box_size_p05_vox: VoxelSize | None
     box_size_p95_vox: VoxelSize | None
     n_images_with_masks: int
     n_images_with_objects: int
@@ -72,6 +73,11 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "box_size_median_vox": {
             cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_vox.items()
         },
+        "box_size_p05_vox": (
+            list(fingerprint.box_size_p05_vox.get_xyz())
+            if fingerprint.box_size_p05_vox is not None
+            else None
+        ),
         "box_size_p95_vox": (
             list(fingerprint.box_size_p95_vox.get_xyz())
             if fingerprint.box_size_p95_vox is not None
@@ -548,9 +554,17 @@ def analyze_dataset(
             z=float(median[2]),
         )
 
+    box_size_p05_vox: VoxelSize | None = None
     box_size_p95_vox: VoxelSize | None = None
     if all_box_sizes:
-        p95 = np.percentile(np.array(all_box_sizes, dtype=np.float64), 95, axis=0)
+        size_array = np.array(all_box_sizes, dtype=np.float64)
+        p05 = np.percentile(size_array, 5, axis=0)
+        p95 = np.percentile(size_array, 95, axis=0)
+        box_size_p05_vox = VoxelSize(
+            x=float(p05[0]),
+            y=float(p05[1]),
+            z=float(p05[2]),
+        )
         box_size_p95_vox = VoxelSize(
             x=float(p95[0]),
             y=float(p95[1]),
@@ -568,6 +582,7 @@ def analyze_dataset(
         resampled_imagesize_p90_vox=resampled_imagesize_p90,
         boxes_per_class=total_by_class,
         box_size_median_vox=box_size_median_vox,
+        box_size_p05_vox=box_size_p05_vox,
         box_size_p95_vox=box_size_p95_vox,
         n_images_with_masks=n_masks,
         n_images_with_objects=n_images_with_objects,
