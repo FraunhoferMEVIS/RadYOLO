@@ -825,16 +825,10 @@ class Trainer:
     ) -> None:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)
-        if Trainer._has_non_finite_gradients(model):
-            LOGGER.warning("Skipping optimizer step because gradients became non-finite.")
-            optimizer.zero_grad()
-            scaler.update()
-            return
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
         ema.update(model)
-        return
 
     @staticmethod
     def _has_non_finite_gradients(model: torch.nn.Module) -> bool:
