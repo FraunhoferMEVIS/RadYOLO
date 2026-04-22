@@ -710,7 +710,7 @@ def _load_mask_array(
         nifti_image = nib.loadsave.load(mask_path)
         if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
             raise TypeError
-        return np.asanyarray(nifti_image.dataobj, dtype=np.uint8)
+        return np.squeeze(np.asanyarray(nifti_image.dataobj, dtype=np.uint8))
 
     if mask_path.suffix == ".b2nd":
         blosc2.set_nthreads(1)

@@ -57,13 +57,15 @@ def _copy_file_if_exists(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def _load_nifti_tensor(nifti_path: Path) -> tuple[torch.Tensor, VoxelSize]:
+def _load_nifti_tensor(nifti_path: Path, *, squeeze: bool = False) -> tuple[torch.Tensor, VoxelSize]:
     nifti_image = nib.loadsave.load(nifti_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI image type for case at {nifti_path}"
         raise TypeError(msg)
 
     image = np.asanyarray(nifti_image.dataobj)
+    if squeeze:
+        image = np.squeeze(image)
     image_tensor = torch.from_numpy(image)
     image_tensor = image_tensor.permute(*reversed(range(image_tensor.ndim)))
     voxel_size = VoxelSize.from_xyz(nifti_image.header.get_zooms()[:3])
@@ -327,7 +329,7 @@ def _convert_case_to_blosc2(
 
     mask_path = masks_dir / f"{case_id}.nii.gz"
     if mask_path.exists():
-        mask_tensor, _ = _load_nifti_tensor(mask_path)
+        mask_tensor, _ = _load_nifti_tensor(mask_path, squeeze=True)
         mask_resampled = resample_mask(
             mask_tensor.to(dtype=torch.uint8),
             PatchSize.from_zyx(resized_shape),
