@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import pickle
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -14,10 +15,6 @@ from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 def test_load_model_checkpoint_rejects_legacy_numpy_metadata(
     minimal_train_config: Path,
@@ -119,6 +116,51 @@ def test_resume_preserves_typed_patch_size(
     assert checkpoint is not None
     assert isinstance(trainer.config.patch_size, PatchSize)
     assert trainer.config.patch_size.get_zyx() == config.patch_size.get_zyx()
+
+
+def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing(
+    minimal_train_config: Path,
+    tmp_path: Path,
+) -> None:
+    config = get_cfg(minimal_train_config, {})
+    checkpoint_config = config.model_copy(
+        update={"data": Path("/Projects/deep_learning/input/missing_cluster_dataset")},
+        deep=True,
+    )
+    run_root = tmp_path / "runs"
+    experiment_name = "resume_local_dataset_override"
+    model = build_model_from_config(config)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scaler = torch.GradScaler("cpu", enabled=False)
+    checkpoint_path = run_root / experiment_name / "weights" / "last.pt"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+    save_model_checkpoint(
+        paths=[checkpoint_path],
+        epoch=1,
+        best_fitness=0.25,
+        model=model,
+        ema_updates=1,
+        optimizer=optimizer,
+        scaler=scaler,
+        train_config=checkpoint_config,
+        train_metrics={"metrics/fitness": 0.25},
+    )
+
+    resume_config_path = tmp_path / "resume_train_local_dataset.yaml"
+    with minimal_train_config.open(encoding="utf-8") as file:
+        resume_config = yaml.safe_load(file)
+    resume_config["output_folder_base"] = run_root.as_posix()
+    resume_config["experiment_name"] = experiment_name
+    resume_config["resume"] = True
+    with resume_config_path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(resume_config, file, sort_keys=False)
+
+    trainer = Trainer(cfg=resume_config_path)
+    checkpoint, _ = trainer.setup_model(num_classes=config.num_classes)
+
+    assert checkpoint is not None
+    assert trainer.config.data == config.data
 
 
 def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path) -> None:
