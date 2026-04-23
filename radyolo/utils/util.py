@@ -213,14 +213,14 @@ class ModelEMA:
                     value += (1 - decay) * model_state_dict[key].detach()  # noqa: PLW2901
 
             if any(
-                not torch.isfinite(parameter).all().item()
-                for parameter in self.ema.parameters()
-                if parameter.dtype.is_floating_point
+                not torch.isfinite(value).all().item()
+                for value in ema_state_dict.values()
+                if value.dtype.is_floating_point
             ):
                 for key, value in previous_floating_state.items():
                     ema_state_dict[key].copy_(value)
                 LOGGER.warning(
-                    "Skipping EMA update because EMA parameters became non-finite after update."
+                    "Skipping EMA update because EMA state became non-finite after update."
                 )
                 return
 

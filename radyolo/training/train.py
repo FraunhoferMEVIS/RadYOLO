@@ -647,12 +647,12 @@ class Trainer:
                             batch,
                             run_gpu_augmentations,
                         )
+                        if not torch.isfinite(prepared_batch["img"]).all():
+                            self._log_non_finite_input_batch(prepared_batch)
+                            continue
                         raw_predictions = model(prepared_batch["img"])
                         if isinstance(raw_predictions, torch.Tensor):
                             raise TypeError(raw_predictions)
-                        if self.loss is None:
-                            msg = "Detection loss is not initialized"
-                            raise RuntimeError(msg)
 
                         loss, self.loss_items = cast(
                             "tuple[torch.Tensor, torch.Tensor]",
@@ -861,6 +861,28 @@ class Trainer:
             "cases=%s",
             loss_value,
             loss_items.detach().float().cpu().tolist(),
+            case_text,
+        )
+
+    @staticmethod
+    def _log_non_finite_input_batch(batch: dict) -> None:
+        image = batch["img"]
+        case_names = batch.get("case_names")
+        if isinstance(case_names, (list, tuple)):
+            case_text = ", ".join(str(name) for name in case_names[:4])
+        elif case_names is None:
+            case_text = "<unknown>"
+        else:
+            case_text = str(case_names)
+        nan_count = int(torch.isnan(image).sum().item())
+        pos_inf_count = int(torch.isposinf(image).sum().item())
+        neg_inf_count = int(torch.isneginf(image).sum().item())
+        LOGGER.warning(
+            "Skipping batch because input image tensor became non-finite. "
+            "nan_count=%s pos_inf_count=%s neg_inf_count=%s cases=%s",
+            nan_count,
+            pos_inf_count,
+            neg_inf_count,
             case_text,
         )
 
