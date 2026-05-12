@@ -36,10 +36,12 @@ def export_model(
         msg = f"Unsupported internal ONNX dtype: {internal_dtype}"
         raise ValueError(msg)
 
-    inputs = torch.randn((1, *input_shape)).to("cpu")
+    inputs = torch.zeros((1, *input_shape)).to("cpu")
     model.to("cpu")
     for p in model.parameters():
         p.requires_grad = False
+    model.eval()
+    model.float()
 
     for _ in range(2):
         model(inputs)
@@ -53,7 +55,6 @@ def export_model(
     onnx_path = Path(dest).with_suffix(".onnx")
     export_wrapper = ExportModelWrapper(model)
     export_wrapper.eval()
-    export_wrapper.float()
 
     if model.enable_output_masks and not model.separate_objectness_head:
         output_names = ["boxes", "classScores", "maskCoefficients", "prototypeMasks"]
