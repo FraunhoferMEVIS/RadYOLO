@@ -77,7 +77,6 @@ class Validator:
         self.nt_per_image: npt.NDArray | None = None
         self.metrics = DetMetrics(
             save_dir=self.save_dir,
-            plot=self.config.plots,
             names=self.names,
         )
         self.iouv: torch.Tensor = torch.linspace(0.1, 0.95, 18)  # IoU vector for mAP@0.1:0.95
@@ -85,6 +84,9 @@ class Validator:
         self.lb = []  # for autolabelling
         self.dice_sum = 0.0
         self.dice_count = 0
+        self.plot_batches: list[
+            tuple[torch.Tensor | None, torch.Tensor, torch.Tensor]
+        ] = []
 
     def _get_dice_average(self) -> float:
         if self.dice_count <= 0:
@@ -149,7 +151,6 @@ class Validator:
                 self.plot_validation_cases(batch, preds)
 
         stats = self.get_stats()
-        self.metrics.confusion_matrix = self.confusion_matrix
         self.print_results()
         if self.training:
             model.float()
@@ -192,6 +193,7 @@ class Validator:
         }
         self.dice_sum = 0.0
         self.dice_count = 0
+        self.plot_batches = []
 
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
@@ -304,6 +306,8 @@ class Validator:
             # Count presence per class per-image; ignore negatives already filtered
             stat["target_img"] = classes.unique()
             if num_predictions == 0:
+                if self.config.plots:
+                    self.plot_batches.append((None, bboxes.detach().cpu(), classes.detach().cpu()))
                 if num_labels:
                     for k in self.stats:
                         self.stats[k].append(stat[k])
@@ -315,6 +319,10 @@ class Validator:
 
             # Predictions
             predn = self._prepare_pred(pred_with_scores_and_coefficients, prepared_batch)
+            if self.config.plots:
+                self.plot_batches.append(
+                    (predn.detach().cpu(), bboxes.detach().cpu(), classes.detach().cpu())
+                )
             stat["conf"] = predn[:, 6]
             stat["pred_cls"] = predn[:, 7]
 
@@ -585,6 +593,7 @@ class Validator:
                 conf=stats["conf"],
                 pred_cls=stats["pred_cls"],
                 target_cls=stats["target_cls"],
+                num_images=self.seen,
             )
         # Add Dice metric
         dice_avg = self._get_dice_average()
@@ -624,12 +633,18 @@ class Validator:
                 )
 
         if self.config.plots:
-            for normalize in True, False:
-                self.confusion_matrix.plot(
-                    save_dir=self.save_dir,
-                    names=self.names.values(),
-                    normalize=normalize,
+            f1_confusion_matrix = ConfusionMatrix(
+                nc=self.nc,
+                conf=self.metrics.metrics.best_confidence,
+                iou_thres=self.confusion_matrix.iou_thres,
+            )
+            for detections, gt_bboxes, gt_cls in self.plot_batches:
+                f1_confusion_matrix.process_batch(
+                    detections=detections,
+                    gt_bboxes=gt_bboxes,
+                    gt_cls=gt_cls,
                 )
+            self.metrics.plot_summary(confusion_matrix=f1_confusion_matrix)
 
     def plot_validation_cases(self, batch: Batch, preds: list[torch.Tensor]) -> None:
         """Plot one 2x3 comparison figure per validation case."""

@@ -252,7 +252,7 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
         pred_class_stats.append(pred_cls)
 
     names = _load_names(labels_dir, observed_class_ids)
-    metrics = DetMetrics(plot=False, names=names)
+    metrics = DetMetrics(names=names)
     metrics.process(
         tp=_concat_or_default(tp_stats, shape=(0, IOU_THRESHOLDS.shape[0]), dtype=np.bool_),
         fp=_concat_or_default(fp_stats, shape=(0, IOU_THRESHOLDS.shape[0]), dtype=np.bool_),

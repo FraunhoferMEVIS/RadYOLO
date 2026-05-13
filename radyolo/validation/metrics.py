@@ -246,35 +246,22 @@ class ConfusionMatrix:
                 if not any(m1 == i):
                     self.matrix_[dc, self.background_index] += 1  # false positive (background)
 
-    def matrix(self) -> npt.NDArray[np.float32]:
-        """Returns the confusion matrix."""
-        return self.matrix_
-
-    def plot(
+    def render(
         self,
+        ax: plt.Axes,
         normalize: bool = True,
-        save_dir: Path | str = "",
         names: tuple[str, ...] = (),
     ) -> None:
-        """Plot the confusion matrix using seaborn and save it to a file.
-
-        Args:
-            normalize (bool): Whether to normalize the confusion matrix.
-            save_dir (str): Directory where the plot will be saved.
-            names (tuple): Names of classes, used as labels on the plot.
-        """
+        """Render the confusion matrix into an existing matplotlib axis."""
         array = self.matrix_ / (
             (self.matrix_.sum(0).reshape(1, -1) + 1e-9) if normalize else 1
         )  # normalize columns
         array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
 
-        fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
         # Number of *display* classes excludes background but includes unclassified
         display_nc = self.nc + 1  # include unclassified in display (exclude background)
         sns.set_theme(font_scale=1.0 if display_nc < 50 else 0.8)
-        # Prepare tick labels
         names_list = list(names)
-        # Append unclassified name if not supplied already (len check ensures backward compat)
         if len(names_list) == self.nc:
             names_list.append("unclassified")
         nn = len(names_list)
@@ -297,17 +284,9 @@ class ConfusionMatrix:
                 yticklabels=ticklabels,
             ).set_facecolor((1, 1, 1))
         title = "Confusion Matrix" + " Normalized" * normalize
-        ax.set_xlabel("True")
+        ax.set_xlabel("Reference")
         ax.set_ylabel("Predicted")
         ax.set_title(title)
-        plot_fname = Path(save_dir) / f"{title.lower().replace(' ', '_')}.png"
-        fig.savefig(plot_fname, dpi=250)
-        plt.close(fig)
-
-    def print(self) -> None:
-        """Print the confusion matrix to the console (including unclassified and background)."""
-        for i in range(self.matrix_.shape[0]):
-            LOGGER.info(" ".join(map(str, self.matrix_[i])))
 
 
 def smooth(y: np.ndarray, fraction: float = 0.05) -> np.ndarray:
@@ -319,24 +298,68 @@ def smooth(y: np.ndarray, fraction: float = 0.05) -> np.ndarray:
     return np.convolve(y_padded, smoothing_filter, mode="valid")
 
 
-def plot_pr_curve(
+def _annotate_points(
+    ax: plt.Axes,
+    x_values: list[float],
+    y_values: list[float],
+    labels: list[str],
+    color: str,
+    marker: str = "o",
+) -> None:
+    """Mark and label operating points on an axis."""
+    if not x_values:
+        return
+    ax.scatter(x_values, y_values, color=color, marker=marker, s=40, zorder=5)
+    for x_value, y_value, label in zip(x_values, y_values, labels, strict=True):
+        ax.annotate(
+            label,
+            xy=(x_value, y_value),
+            xytext=(4, 4),
+            textcoords="offset points",
+            fontsize=8,
+            color=color,
+        )
+
+
+def _project_points_onto_pr_curve(
+    recall_values: list[float],
+    recall_axis: npt.NDArray[np.float32],
+    precision_curve: npt.NDArray[np.float32],
+) -> list[float]:
+    """Project recall coordinates onto the plotted all-classes PR curve."""
+    if recall_axis.size == 0 or precision_curve.size == 0:
+        return [0.0 for _ in recall_values]
+    return [
+        float(np.interp(np.clip(recall_value, 0.0, 1.0), recall_axis, precision_curve))
+        for recall_value in recall_values
+    ]
+
+
+def _plot_pr_curve_on_axis(
+    ax: plt.Axes,
     px: npt.NDArray,
     py: npt.NDArray,
     ap: npt.NDArray,
-    save_dir: Path = Path("pr_curve.png"),
-    names: dict[int, str] = {},
+    names: dict[int, str],
+    show_legend: bool = True,
+    legend_loc: str = "upper right",
 ) -> None:
-    """Plots a precision-recall curve."""
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
+    """Plot a precision-recall curve into an existing axis."""
+    if not isinstance(py, np.ndarray) or py.size == 0 or ap.size == 0:
+        ax.set_xlabel("Recall")
+        ax.set_ylabel("Precision")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_title("Precision-Recall Curve")
+        ax.text(0.5, 0.5, "No class-wise PR data", ha="center", va="center", transform=ax.transAxes)
+        return
     py = np.stack(py, axis=1)
 
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py.T):
-            ax.plot(
-                px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}"
-            )  # plot(recall, precision)
+            ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}")
     else:
-        ax.plot(px, py, linewidth=1, color="grey")  # plot(recall, precision)
+        ax.plot(px, py, linewidth=1, color="grey", alpha=0.35)
 
     ax.plot(
         px,
@@ -349,41 +372,113 @@ def plot_pr_curve(
     ax.set_ylabel("Precision")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    if show_legend:
+        ax.legend(loc=legend_loc, fontsize=8, framealpha=0.9)
     ax.set_title("Precision-Recall Curve")
-    fig.savefig(save_dir, dpi=250)
-    plt.close(fig)
 
 
-def plot_mc_curve(
+def _plot_mc_curve_on_axis(
+    ax: plt.Axes,
     px: npt.NDArray,
     py: npt.NDArray,
-    save_dir: Path = Path("mc_curve.png"),
-    names: dict[int, str] = {},
+    names: dict[int, str],
     xlabel: str = "Confidence",
     ylabel: str = "Metric",
+    show_legend: bool = True,
 ) -> None:
-    """Plots a metric-confidence curve."""
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
-
+    """Plot a metric-confidence curve into an existing axis."""
+    if not isinstance(py, np.ndarray) or py.size == 0:
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_title(f"{ylabel}-Confidence Curve")
+        ax.text(
+            0.5,
+            0.5,
+            f"No {ylabel.lower()} curve data",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        return
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py):
-            ax.plot(px, y, linewidth=1, label=f"{names[i]}")  # plot(confidence, metric)
+            ax.plot(px, y, linewidth=1, label=f"{names[i]}")
     else:
-        ax.plot(px, py.T, linewidth=1, color="grey")  # plot(confidence, metric)
+        ax.plot(px, py.T, linewidth=1, color="grey", alpha=0.35)
 
     y = smooth(py.mean(0), 0.05)
     ax.plot(
-        px, y, linewidth=3, color="blue", label=f"all classes {y.max():.2f} at {px[y.argmax()]:.3f}"
+        px,
+        y,
+        linewidth=3,
+        color="blue",
+        label=f"all classes {y.max():.2f} at {px[y.argmax()]:.3f}",
     )
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    if show_legend:
+        ax.legend(loc="lower left", fontsize=8, framealpha=0.9)
     ax.set_title(f"{ylabel}-Confidence Curve")
-    fig.savefig(save_dir, dpi=250)
-    plt.close(fig)
+
+
+def _compute_froc_curve(
+    tp: npt.NDArray[np.floating],
+    fp: npt.NDArray[np.floating],
+    conf: npt.NDArray[np.floating],
+    target_cls: npt.NDArray[np.integer | np.floating],
+    num_images: int,
+    eps: float = 1e-16,
+) -> tuple[
+    npt.NDArray[np.float32],
+    npt.NDArray[np.float32],
+    npt.NDArray[np.float32],
+    npt.NDArray[np.float32],
+    npt.NDArray[np.float32],
+]:
+    """Compute aggregate operating curves for FROC and confidence-based annotations."""
+    if tp.size == 0 or fp.size == 0 or conf.size == 0:
+        zeros = np.zeros((1,), dtype=np.float32)
+        ones = np.ones((1,), dtype=np.float32)
+        return zeros, zeros, ones, zeros, zeros
+
+    indices_sorted: npt.NDArray[np.intp] = np.argsort(-conf)
+    tp_sorted = tp[indices_sorted, 0].astype(np.float32)
+    fp_sorted = fp[indices_sorted, 0].astype(np.float32)
+    conf_sorted = conf[indices_sorted].astype(np.float32)
+
+    tp_accumulated = tp_sorted.cumsum()
+    fp_accumulated = fp_sorted.cumsum()
+    num_targets = max(int(np.count_nonzero(target_cls >= 0)), 1)
+    num_images = max(int(num_images), 1)
+
+    recall = tp_accumulated / (num_targets + eps)
+    precision = tp_accumulated / (tp_accumulated + fp_accumulated + eps)
+    f1 = 2 * precision * recall / (precision + recall + eps)
+    avg_fp = fp_accumulated / num_images
+
+    return (
+        np.concatenate((np.array([0.0], dtype=np.float32), avg_fp)),
+        np.concatenate((np.array([0.0], dtype=np.float32), recall)),
+        np.concatenate((np.array([1.0], dtype=np.float32), conf_sorted)),
+        np.concatenate((np.array([1.0], dtype=np.float32), precision)),
+        np.concatenate((np.array([0.0], dtype=np.float32), f1)),
+    )
+
+
+def _select_froc_target_indices(
+    avg_fp: npt.NDArray[np.float32],
+    targets: tuple[float, ...] = (0.125, 0.25, 0.5, 1.0, 2.0),
+) -> dict[float, int]:
+    """Select operating points that satisfy each average-false-positives target."""
+    indices: dict[float, int] = {}
+    for target in targets:
+        index = int(np.searchsorted(avg_fp, target, side="right") - 1)
+        indices[target] = max(index, 0)
+    return indices
 
 
 def compute_class_agnostic_map(
@@ -391,7 +486,6 @@ def compute_class_agnostic_map(
     fp: npt.NDArray[np.floating],
     conf: npt.NDArray[np.floating],
     target_cls: npt.NDArray[np.integer | np.floating],
-    save_dir: Path = Path(),
 ) -> tuple[float, float]:
     """Compute class-agnostic mAP@0.1 and mAP@0.1:0.95."""
     if tp.size == 0 or fp.size == 0 or target_cls.size == 0:
@@ -405,9 +499,6 @@ def compute_class_agnostic_map(
         conf,
         agnostic_pred_cls,
         agnostic_target_cls,
-        plot=False,
-        save_dir=save_dir,
-        names={0: "all"},
     )
     agnostic_ap = agnostic_results[5]
     if not agnostic_ap.size:
@@ -454,11 +545,7 @@ def ap_per_class(
     conf: npt.NDArray[np.floating],
     pred_cls: npt.NDArray[np.integer],
     target_cls: npt.NDArray[np.integer],
-    plot: bool = False,
-    save_dir: Path = Path(),
-    names: dict = {},
     eps: float = 1e-16,
-    prefix: str = "",
 ):
     """Computes the average precision per class for object detection evaluation.
 
@@ -470,11 +557,7 @@ def ap_per_class(
         conf (np.ndarray): Array of confidence scores of the detections.
         pred_cls (np.ndarray): Array of predicted classes of the detections.
         target_cls (np.ndarray): Array of true classes of the references.
-        plot (bool, optional): Whether to plot PR curves or not. Defaults to False.
-        save_dir (Path, optional): Directory to save the PR curves. Defaults to an empty path.
-        names (dict, optional): Dict of class names to plot PR curves. Defaults to an empty tuple.
         eps (float, optional): A small value to avoid division by zero. Defaults to 1e-16.
-        prefix (str, optional): Prefix string for saving plot files. Defaults to an empty string.
 
     Returns:
         tp (np.ndarray): True positive counts at threshold given by max F1 metric for each class.
@@ -566,39 +649,6 @@ def ap_per_class(
 
     # Compute F1 (harmonic mean of precision and recall)
     f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
-    names_ = [
-        v for k, v in names.items() if k in unique_classes
-    ]  # list: only classes that have data
-    names = dict(enumerate(names_))
-    if plot:
-        plot_pr_curve(
-            x,
-            prec_values,
-            ap,
-            save_dir / f"{prefix}PR_curve.png",
-            names,
-        )
-        plot_mc_curve(
-            x,
-            f1_curve,
-            save_dir / f"{prefix}F1_curve.png",
-            names,
-            ylabel="F1",
-        )
-        plot_mc_curve(
-            x,
-            p_curve,
-            save_dir / f"{prefix}P_curve.png",
-            names,
-            ylabel="Precision",
-        )
-        plot_mc_curve(
-            x,
-            r_curve,
-            save_dir / f"{prefix}R_curve.png",
-            names,
-            ylabel="Recall",
-        )
 
     max_i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
     p, r, f1 = (
@@ -644,8 +694,18 @@ class Metric:
         self.all_ap: npt.NDArray | list = []  # (nc, 18)
         self.ap_class_index: npt.NDArray | list[int] = []  # (nc, )
         self.nc: int = 0
+        self.p_curve: npt.NDArray[np.float32] = np.zeros((0, 1000), dtype=np.float32)
+        self.r_curve: npt.NDArray[np.float32] = np.zeros((0, 1000), dtype=np.float32)
+        self.f1_curve: npt.NDArray[np.float32] = np.zeros((0, 1000), dtype=np.float32)
+        self.px: npt.NDArray[np.float32] = np.linspace(0, 1, 1000, dtype=np.float32)
+        self.prec_values: npt.NDArray[np.float32] = np.zeros((0, 1000), dtype=np.float32)
         self.map10_agnostic_value: float = 0.0
         self.map_agnostic_value: float = 0.0
+        self.best_index: int = 0
+        self.best_confidence: float = 1.0
+        self.froc_avg_fp: npt.NDArray[np.float32] = np.zeros((1,), dtype=np.float32)
+        self.froc_sensitivity: npt.NDArray[np.float32] = np.zeros((1,), dtype=np.float32)
+        self.froc_confidence: npt.NDArray[np.float32] = np.ones((1,), dtype=np.float32)
 
     @property
     def ap10(self) -> npt.NDArray | list:
@@ -739,64 +799,66 @@ class Metric:
 
     def update(
         self,
-        results: tuple[
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            npt.NDArray,
-            list,
-            float,
-            float,
-        ],
+        *,
+        p: npt.NDArray,
+        r: npt.NDArray,
+        f1: npt.NDArray,
+        all_ap: npt.NDArray,
+        ap_class_index: npt.NDArray,
+        p_curve: npt.NDArray,
+        r_curve: npt.NDArray,
+        f1_curve: npt.NDArray,
+        px: npt.NDArray,
+        prec_values: npt.NDArray,
+        map10_agnostic_value: float,
+        map_agnostic_value: float,
+        best_index: int,
+        best_confidence: float,
+        froc_avg_fp: npt.NDArray[np.float32],
+        froc_sensitivity: npt.NDArray[np.float32],
+        froc_confidence: npt.NDArray[np.float32],
     ) -> None:
         """Updates the evaluation metrics of the model with a new set of results.
 
         Args:
-            results (tuple): A tuple containing the following evaluation metrics:
-                - p (list): Precision for each class. Shape: (nc,).
-                - r (list): Recall for each class. Shape: (nc,).
-                - f1 (list): F1 score for each class. Shape: (nc,).
-                - all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 10).
-                - ap_class_index (list): Index of class for each AP score. Shape: (nc,).
+            p: Precision per class at the selected operating point.
+            r: Recall per class at the selected operating point.
+            f1: F1 score per class at the selected operating point.
+            all_ap: AP values per class across IoU thresholds.
+            ap_class_index: Class ids corresponding to rows in the metric arrays.
+            p_curve: Precision-confidence curves per class.
+            r_curve: Recall-confidence curves per class.
+            f1_curve: F1-confidence curves per class.
+            px: Shared x-axis for confidence-based curves.
+            prec_values: Precision-recall curve values at mAP@0.1.
+            map10_agnostic_value: Class-agnostic mAP@0.1.
+            map_agnostic_value: Class-agnostic mAP@0.1:0.95.
+            best_index: Index of the max-F1 operating point on `px`.
+            best_confidence: Confidence threshold at the max-F1 operating point.
+            froc_avg_fp: FROC x-axis values in average false positives per image.
+            froc_sensitivity: FROC sensitivity values.
+            froc_confidence: Confidence thresholds corresponding to FROC points.
 
         Side Effects:
-            Updates the class attributes `self.p`, `self.r`, `self.f1`, `self.all_ap`, and
-            `self.ap_class_index` based on the values provided in the `results` tuple.
+            Updates the stored metric arrays and operating-point metadata on this instance.
         """
-        (
-            self.p,
-            self.r,
-            self.f1,
-            self.all_ap,
-            self.ap_class_index,
-            self.p_curve,
-            self.r_curve,
-            self.f1_curve,
-            self.px,
-            self.prec_values,
-            self.map10_agnostic_value,
-            self.map_agnostic_value,
-        ) = results
-
-    @property
-    def curves(self) -> list:
-        """Returns a list of curves for accessing specific metrics curves."""
-        return []
-
-    @property
-    def curves_results(self) -> list[list[Any | str]]:
-        """Returns a list of curves for accessing specific metrics curves."""
-        return [
-            [self.px, self.prec_values, "Recall", "Precision"],
-            [self.px, self.f1_curve, "Confidence", "F1"],
-            [self.px, self.p_curve, "Confidence", "Precision"],
-            [self.px, self.r_curve, "Confidence", "Recall"],
-        ]
+        self.p = p
+        self.r = r
+        self.f1 = f1
+        self.all_ap = all_ap
+        self.ap_class_index = ap_class_index
+        self.p_curve = p_curve
+        self.r_curve = r_curve
+        self.f1_curve = f1_curve
+        self.px = px
+        self.prec_values = prec_values
+        self.map10_agnostic_value = map10_agnostic_value
+        self.map_agnostic_value = map_agnostic_value
+        self.best_index = best_index
+        self.best_confidence = best_confidence
+        self.froc_avg_fp = froc_avg_fp
+        self.froc_sensitivity = froc_sensitivity
+        self.froc_confidence = froc_confidence
 
 
 class DetMetrics:
@@ -816,28 +878,25 @@ class DetMetrics:
         save_dir (Path): A path to the directory where the output plots will be saved.
         plot (bool): Flag that indicates whether to plot the precision-recall curves for each class.
         names (dict of str): A dict of strings that represents the names of the classes.
-        box (Metric): Instance of the Metric class for storing the results of the detection metrics.
+        metrics (Metric): Instance of Metric class for storing the results of the detection metrics.
         speed (dict): Dictionary for storing execution time of different parts of detection process.
     """
 
     def __init__(
         self,
         save_dir: Path = Path(),
-        plot: bool = False,
         names: dict[int, str] = {},
     ) -> None:
         """Initialize with save directory, plot flag, callback function, and class names."""
         self.save_dir: Path = save_dir
-        self.plot: bool = plot
         self.names: dict[int, str] = names
-        self.box = Metric()
+        self.metrics = Metric()
         self.speed: dict[str, float] = {
             "preprocess": 0.0,
             "inference": 0.0,
             "loss": 0.0,
             "postprocess": 0.0,
         }
-        self.confusion_matrix: ConfusionMatrix | None = None
 
     def process(
         self,
@@ -848,6 +907,7 @@ class DetMetrics:
         conf: npt.NDArray[np.floating],
         pred_cls: npt.NDArray[np.integer],
         target_cls: npt.NDArray[np.integer],
+        num_images: int | None = None,
     ) -> None:
         """Process predicted results for object detection and update metrics."""
         class_sensitive_results = ap_per_class(
@@ -856,20 +916,267 @@ class DetMetrics:
             conf,
             pred_cls,
             target_cls,
-            plot=self.plot,
-            save_dir=self.save_dir,
-            names=self.names,
         )
         map10_agnostic, map_agnostic = compute_class_agnostic_map(
             tp_agnostic,
             fp_agnostic,
             conf,
             target_cls,
-            save_dir=self.save_dir,
         )
-        results = (*class_sensitive_results[2:], map10_agnostic, map_agnostic)
-        self.box.nc = len(self.names)
-        self.box.update(results)
+        _, _, f1_curve, px, _ = class_sensitive_results[7:12]
+        if isinstance(f1_curve, np.ndarray) and f1_curve.size:
+            best_index = int(smooth(f1_curve.mean(0), 0.1).argmax())
+            best_confidence = float(px[best_index])
+        else:
+            best_index = 0
+            best_confidence = 1.0
+        froc_avg_fp, froc_sensitivity, froc_confidence, _, _ = _compute_froc_curve(
+            tp=tp,
+            fp=fp,
+            conf=conf,
+            target_cls=target_cls,
+            num_images=0 if num_images is None else num_images,
+        )
+        self.metrics.nc = len(self.names)
+        self.metrics.update(
+            p=class_sensitive_results[2],
+            r=class_sensitive_results[3],
+            f1=class_sensitive_results[4],
+            all_ap=class_sensitive_results[5],
+            ap_class_index=class_sensitive_results[6],
+            p_curve=class_sensitive_results[7],
+            r_curve=class_sensitive_results[8],
+            f1_curve=class_sensitive_results[9],
+            px=class_sensitive_results[10],
+            prec_values=class_sensitive_results[11],
+            map10_agnostic_value=map10_agnostic,
+            map_agnostic_value=map_agnostic,
+            best_index=best_index,
+            best_confidence=best_confidence,
+            froc_avg_fp=froc_avg_fp,
+            froc_sensitivity=froc_sensitivity,
+            froc_confidence=froc_confidence,
+        )
+
+    def plot_summary(
+        self,
+        confusion_matrix: ConfusionMatrix,
+    ) -> None:
+        """Save one combined validation figure with confusion matrices and metric curves."""
+        plot_names = {
+            metric_index: self.names.get(int(class_id), str(class_id))
+            for metric_index, class_id in enumerate(self.metrics.ap_class_index)
+        }
+        fig = plt.figure(figsize=(14, 16), constrained_layout=True)
+        outer_grid = fig.add_gridspec(2, 2, height_ratios=(1, 2), hspace=0.05, wspace=0.02)
+        ax_cm_norm = fig.add_subplot(outer_grid[0, 0])
+        ax_cm_raw = fig.add_subplot(outer_grid[0, 1])
+
+        curves_grid = outer_grid[1, :].subgridspec(1, 2, width_ratios=(1.15, 1.0), wspace=0.18)
+        left_curves = curves_grid[0, 0].subgridspec(2, 1, hspace=0.04)
+        right_curves = curves_grid[0, 1].subgridspec(3, 1, hspace=0.04)
+        ax_pr = fig.add_subplot(left_curves[0, 0])
+        ax_froc = fig.add_subplot(left_curves[1, 0])
+        ax_f1 = fig.add_subplot(right_curves[0, 0])
+        ax_p = fig.add_subplot(right_curves[1, 0])
+        ax_r = fig.add_subplot(right_curves[2, 0])
+
+        confusion_matrix.render(
+            ax=ax_cm_norm,
+            normalize=True,
+            names=tuple(self.names.values()),
+        )
+        confusion_matrix.render(
+            ax=ax_cm_raw,
+            normalize=False,
+            names=tuple(self.names.values()),
+        )
+
+        _plot_pr_curve_on_axis(
+            ax=ax_pr,
+            px=self.metrics.px,
+            py=self.metrics.prec_values,
+            ap=self.metrics.all_ap,
+            names=plot_names,
+            legend_loc="lower left",
+        )
+        _plot_mc_curve_on_axis(
+            ax=ax_f1,
+            px=self.metrics.px,
+            py=self.metrics.f1_curve,
+            names=plot_names,
+            ylabel="F1",
+            show_legend=False,
+        )
+        _plot_mc_curve_on_axis(
+            ax=ax_p,
+            px=self.metrics.px,
+            py=self.metrics.p_curve,
+            names=plot_names,
+            ylabel="Precision",
+            show_legend=False,
+        )
+        _plot_mc_curve_on_axis(
+            ax=ax_r,
+            px=self.metrics.px,
+            py=self.metrics.r_curve,
+            names=plot_names,
+            ylabel="Recall",
+            show_legend=False,
+        )
+
+        froc_ticks = np.array([1 / 16, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0], dtype=np.float32)
+        positive_froc_mask = self.metrics.froc_avg_fp > 0
+        if positive_froc_mask.any():
+            ax_froc.plot(
+                self.metrics.froc_avg_fp[positive_froc_mask],
+                self.metrics.froc_sensitivity[positive_froc_mask],
+                linewidth=3,
+                color="blue",
+            )
+        ax_froc.set_xlabel("Average False Positives per Image")
+        ax_froc.set_ylabel("Sensitivity")
+        ax_froc.set_xscale("log", base=2)
+        ax_froc.set_xlim(float(froc_ticks[0]), float(froc_ticks[-1]))
+        ax_froc.set_xticks(froc_ticks)
+        ax_froc.set_xticklabels(["0.0625", "0.125", "0.25", "0.5", "1", "2", "4", "8"])
+        ax_froc.set_ylim(0, 1)
+        ax_froc.grid(True, which="both", axis="x", alpha=0.25)
+        ax_froc.set_title("FROC Curve")
+
+        target_indices = _select_froc_target_indices(self.metrics.froc_avg_fp)
+        target_confidences = [
+            float(self.metrics.froc_confidence[index]) for index in target_indices.values()
+        ]
+        target_labels = [f"{confidence:.3f}" for confidence in target_confidences]
+
+        mean_precision_curve = (
+            self.metrics.p_curve.mean(0)
+            if self.metrics.p_curve.size
+            else np.zeros_like(self.metrics.px)
+        )
+        mean_recall_curve = (
+            self.metrics.r_curve.mean(0)
+            if self.metrics.r_curve.size
+            else np.zeros_like(self.metrics.px)
+        )
+        mean_f1_curve = (
+            self.metrics.f1_curve.mean(0)
+            if self.metrics.f1_curve.size
+            else np.zeros_like(self.metrics.px)
+        )
+        mean_pr_curve = (
+            self.metrics.prec_values.mean(0)
+            if self.metrics.prec_values.size
+            else np.zeros_like(self.metrics.px)
+        )
+        target_curve_indices = [
+            int(np.abs(self.metrics.px - confidence).argmin()) for confidence in target_confidences
+        ]
+        target_pr_recalls = [float(mean_recall_curve[index]) for index in target_curve_indices]
+        target_pr_precisions = _project_points_onto_pr_curve(
+            recall_values=target_pr_recalls,
+            recall_axis=self.metrics.px,
+            precision_curve=mean_pr_curve,
+        )
+
+        _annotate_points(
+            ax=ax_pr,
+            x_values=target_pr_recalls,
+            y_values=target_pr_precisions,
+            labels=target_labels,
+            color="tab:red",
+        )
+        _annotate_points(
+            ax=ax_f1,
+            x_values=target_confidences,
+            y_values=[float(mean_f1_curve[index]) for index in target_curve_indices],
+            labels=target_labels,
+            color="tab:red",
+        )
+        _annotate_points(
+            ax=ax_p,
+            x_values=target_confidences,
+            y_values=[float(mean_precision_curve[index]) for index in target_curve_indices],
+            labels=target_labels,
+            color="tab:red",
+        )
+        _annotate_points(
+            ax=ax_r,
+            x_values=target_confidences,
+            y_values=[float(mean_recall_curve[index]) for index in target_curve_indices],
+            labels=target_labels,
+            color="tab:red",
+        )
+        _annotate_points(
+            ax=ax_froc,
+            x_values=[
+                max(float(self.metrics.froc_avg_fp[index]), float(froc_ticks[0]))
+                for index in target_indices.values()
+            ],
+            y_values=[
+                float(self.metrics.froc_sensitivity[index]) for index in target_indices.values()
+            ],
+            labels=target_labels,
+            color="tab:red",
+        )
+
+        best_confidence = float(self.metrics.best_confidence)
+        best_curve_index = (
+            int(np.abs(self.metrics.px - best_confidence).argmin()) if self.metrics.px.size else 0
+        )
+        best_froc_index = int(np.abs(self.metrics.froc_confidence - best_confidence).argmin())
+        best_label = f"F1 max {best_confidence:.3f}"
+        best_pr_recall = float(mean_recall_curve[best_curve_index])
+        best_pr_precision = _project_points_onto_pr_curve(
+            recall_values=[best_pr_recall],
+            recall_axis=self.metrics.px,
+            precision_curve=mean_pr_curve,
+        )[0]
+        _annotate_points(
+            ax=ax_pr,
+            x_values=[best_pr_recall],
+            y_values=[best_pr_precision],
+            labels=[best_label],
+            color="tab:green",
+            marker="*",
+        )
+        _annotate_points(
+            ax=ax_f1,
+            x_values=[best_confidence],
+            y_values=[float(mean_f1_curve[best_curve_index])],
+            labels=[best_label],
+            color="tab:green",
+            marker="*",
+        )
+        _annotate_points(
+            ax=ax_p,
+            x_values=[best_confidence],
+            y_values=[float(mean_precision_curve[best_curve_index])],
+            labels=[best_label],
+            color="tab:green",
+            marker="*",
+        )
+        _annotate_points(
+            ax=ax_r,
+            x_values=[best_confidence],
+            y_values=[float(mean_recall_curve[best_curve_index])],
+            labels=[best_label],
+            color="tab:green",
+            marker="*",
+        )
+        _annotate_points(
+            ax=ax_froc,
+            x_values=[max(float(self.metrics.froc_avg_fp[best_froc_index]), float(froc_ticks[0]))],
+            y_values=[float(self.metrics.froc_sensitivity[best_froc_index])],
+            labels=[best_label],
+            color="tab:green",
+            marker="*",
+        )
+
+        plot_fname = self.save_dir / "validation_summary.png"
+        fig.savefig(plot_fname, dpi=250)
+        plt.close(fig)
 
     @property
     def keys(self) -> list[str]:
@@ -885,7 +1192,7 @@ class DetMetrics:
 
     def mean_results(self) -> list[float]:
         """Calculate mean detection metrics including class-agnostic mAP10-95."""
-        return self.box.mean_results()
+        return self.metrics.mean_results()
 
     @property
     def summary_keys(self) -> list[str]:
@@ -899,21 +1206,21 @@ class DetMetrics:
 
     def summary_mean_results(self) -> list[float]:
         """Calculate mean detection metrics shown in the terminal summary."""
-        return [self.box.mp, self.box.mr, self.box.map10, self.box.map]
+        return [self.metrics.mp, self.metrics.mr, self.metrics.map10, self.metrics.map]
 
     def class_result(self, i: int) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
         """Return performance of an object detection model on a specific class."""
-        return self.box.class_result(i)
+        return self.metrics.class_result(i)
 
     @property
     def maps(self) -> npt.NDArray:
         """Returns mean Average Precision (mAP) scores per class."""
-        return self.box.maps
+        return self.metrics.maps
 
     @property
     def ap_class_index(self) -> npt.NDArray | list[int]:
         """Returns the average precision index per class."""
-        return self.box.ap_class_index
+        return self.metrics.ap_class_index
 
     @property
     def results_dict(self) -> dict[str, float]:
@@ -929,8 +1236,3 @@ class DetMetrics:
             "Precision-Confidence",
             "Recall-Confidence",
         ]
-
-    @property
-    def curves_results(self) -> list[list[Any | str]]:
-        """Returns dictionary of computed performance metrics and statistics."""
-        return self.box.curves_results
