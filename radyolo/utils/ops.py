@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
 import torch
-
-from radyolo.validation.metrics import bbox_iou
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -19,6 +18,92 @@ if TYPE_CHECKING:
     from radyolo.models.layers import ModelOutput
 
 LOGGER = logging.getLogger(__name__)
+
+
+def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """Calculate intersection-over-union (IoU) of boxes.
+
+    Both sets of boxes are expected to be in (x1, y1, z1, x2, y2, z2) format.
+    Based on https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py.
+    """
+    (a1, a2), (b1, b2) = (
+        box1.float().unsqueeze(1).chunk(2, 2),
+        box2.float().unsqueeze(0).chunk(2, 2),
+    )
+    inter = (torch.min(a2, b2) - torch.max(a1, b1)).clamp_(0).prod(2)
+    return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
+
+
+def bbox_iou(
+    box1: torch.Tensor,
+    box2: torch.Tensor,
+    xyzwhd: bool = True,
+    GIoU: bool = False,  # noqa: N803
+    DIoU: bool = False,  # noqa: N803
+    CIoU: bool = False,  # noqa: N803
+    eps: float = 1e-7,
+) -> torch.Tensor:
+    """Calculate Intersection over Union (IoU) of box1(1, 6) to box2(n, 6)."""
+    if xyzwhd:
+        (x1, y1, z1, w1, h1, d1), (x2, y2, z2, w2, h2, d2) = box1.chunk(6, -1), box2.chunk(6, -1)
+        w1_, h1_, d1_, w2_, h2_, d2_ = w1 / 2, h1 / 2, d1 / 2, w2 / 2, h2 / 2, d2 / 2
+        b1_x1, b1_x2, b1_y1, b1_y2, b1_z1, b1_z2 = (
+            x1 - w1_,
+            x1 + w1_,
+            y1 - h1_,
+            y1 + h1_,
+            z1 - d1_,
+            z1 + d1_,
+        )
+        b2_x1, b2_x2, b2_y1, b2_y2, b2_z1, b2_z2 = (
+            x2 - w2_,
+            x2 + w2_,
+            y2 - h2_,
+            y2 + h2_,
+            z2 - d2_,
+            z2 + d2_,
+        )
+    else:
+        b1_x1, b1_y1, b1_z1, b1_x2, b1_y2, b1_z2 = box1.chunk(6, -1)
+        b2_x1, b2_y1, b2_z1, b2_x2, b2_y2, b2_z2 = box2.chunk(6, -1)
+        w1, h1, d1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps, b1_z2 - b1_z1 + eps
+        w2, h2, d2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps, b2_z2 - b2_z1 + eps
+
+    inter = (
+        (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0)
+        * (b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)).clamp_(0)
+        * (b1_z2.minimum(b2_z2) - b1_z1.maximum(b2_z1)).clamp_(0)
+    )
+    union = w1 * h1 * d1 + w2 * h2 * d2 - inter + eps
+    iou = inter / union
+    if CIoU or DIoU or GIoU:
+        convex_width = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)
+        convex_height = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)
+        convex_depth = b1_z2.maximum(b2_z2) - b1_z1.minimum(b2_z1)
+        if CIoU or DIoU:
+            c2 = convex_width.pow(2) + convex_height.pow(2) + convex_depth.pow(2) + eps
+            rho2 = (
+                (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2)
+                + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
+                + (b2_z1 + b2_z2 - b1_z1 - b1_z2).pow(2)
+            ) / 4
+            if CIoU:
+                v = (
+                    (2 / math.pi)
+                    * (
+                        ((w2 / h2).atan() - (w1 / h1).atan()).abs()
+                        + ((w2 / d2).atan() - (w1 / d1).atan()).abs()
+                        + ((h2 / d2).atan() - (h1 / d1).atan()).abs()
+                    )
+                    / 3
+                ).pow(2)
+                with torch.no_grad():
+                    alpha = v / (v - iou + (1 + eps))
+                return iou - (rho2 / c2 + v * alpha)
+            return iou - rho2 / c2
+        c_volume = convex_width * convex_height * convex_depth + eps
+        return iou - (c_volume - union) / c_volume
+    return iou
 
 
 def prepare_model_output_for_nms(

@@ -13,10 +13,10 @@ from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DetectionPostprocessConfig
 from radyolo.utils import ops
+from radyolo.utils.ops import box_iou
 from radyolo.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
-    box_iou,
 )
 from radyolo.validation.plotting import plot_validation_case
 

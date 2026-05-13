@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
-from radyolo.validation.metrics import bbox_iou
+from radyolo.utils.ops import bbox_iou
 
 LOGGER = logging.getLogger(__name__)
 

@@ -7,7 +7,8 @@ import numpy as np
 import torch
 import yaml
 
-from radyolo.validation.metrics import DetMetrics, box_iou
+from radyolo.utils.ops import box_iou
+from radyolo.validation.metrics import DetMetrics
 
 if TYPE_CHECKING:
     from pathlib import Path

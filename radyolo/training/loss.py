@@ -17,9 +17,8 @@ from radyolo.training.tal import (
     encode_bbox_targets,
     make_anchors,
 )
-from radyolo.utils.ops import reconstruct_mask_logits, xyzwhd2xyzxyz
+from radyolo.utils.ops import bbox_iou, xyzwhd2xyzxyz
 from radyolo.utils.util import unwrap_model
-from radyolo.validation.metrics import bbox_iou
 
 if TYPE_CHECKING:
     from radyolo.config.config import DefaultConfig
