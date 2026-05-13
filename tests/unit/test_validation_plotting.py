@@ -72,7 +72,7 @@ def test_plot_results_warns_when_results_png_is_busy(
         index=False,
     )
 
-    busy_target = tmp_path / "results.png"
+    busy_target = tmp_path / "loss_curves.png"
 
     original_savefig = Figure.savefig
 

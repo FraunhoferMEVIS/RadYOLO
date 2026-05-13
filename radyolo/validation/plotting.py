@@ -741,7 +741,7 @@ def plot_results(
 ) -> None:
     """Plot training results from a results CSV file.
 
-    Plots are saved as 'results.png' in the directory where the CSV is located.
+    Plots are saved as 'loss_curves.png' in the directory where the CSV is located.
 
     Args:
         file (str, optional): Path to the CSV file containing the training results. Defaults to
@@ -778,7 +778,7 @@ def plot_results(
             except Exception as e:
                 LOGGER.warning("WARNING: Plotting error for %s (%s): %s", f, column_name, e)
         ax[0].legend()
-    fname = save_dir / "results.png"
+    fname = save_dir / "loss_curves.png"
     try:
         fig.savefig(fname, dpi=200)
     except OSError as e:
