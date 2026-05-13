@@ -7,17 +7,19 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import seaborn as sns
 import torch
+from matplotlib import patheffects
+from matplotlib import pyplot as plt
 
 from radyolo.utils.ops import box_iou
 
 plt.switch_backend("Agg")
 
 LOGGER = logging.getLogger(__name__)
+MC_CURVE_SMOOTHING_FRACTION = 0.05
 
 
 class ConfusionMatrix:
@@ -135,7 +137,6 @@ class ConfusionMatrix:
 
         # Number of *display* classes excludes background but includes unclassified
         display_nc = self.nc + 1  # include unclassified in display (exclude background)
-        sns.set_theme(font_scale=1.0 if display_nc < 50 else 0.8)
         names_list = list(names)
         if len(names_list) == self.nc:
             names_list.append("unclassified")
@@ -173,6 +174,16 @@ def smooth(y: np.ndarray, fraction: float = 0.05) -> np.ndarray:
     return np.convolve(y_padded, smoothing_filter, mode="valid")
 
 
+def _smoothed_mean_confidence_curve(
+    py: npt.NDArray,
+    px: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    """Return the smoothed mean curve used for the bold confidence plot line."""
+    if not isinstance(py, np.ndarray) or py.size == 0:
+        return np.zeros_like(px)
+    return smooth(py.mean(0), MC_CURVE_SMOOTHING_FRACTION).astype(np.float32, copy=False)
+
+
 def _annotate_points(
     ax: plt.Axes,
     x_values: list[float],
@@ -186,13 +197,16 @@ def _annotate_points(
         return
     ax.scatter(x_values, y_values, color=color, marker=marker, s=40, zorder=5)
     for x_value, y_value, label in zip(x_values, y_values, labels, strict=True):
-        ax.annotate(
+        annotation = ax.annotate(
             label,
             xy=(x_value, y_value),
             xytext=(4, 4),
             textcoords="offset points",
-            fontsize=8,
+            fontsize=12,
             color=color,
+        )
+        annotation.set_path_effects(
+            [patheffects.withStroke(linewidth=3, foreground=(1, 1, 1, 0.9))]
         )
 
 
@@ -247,6 +261,7 @@ def _plot_pr_curve_on_axis(
     ax.set_ylabel("Precision")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
+    ax.grid(True, axis="both", alpha=0.2, linewidth=0.6)
     if show_legend:
         ax.legend(loc=legend_loc, fontsize=8, framealpha=0.9)
     ax.set_title("Precision-Recall Curve")
@@ -283,7 +298,7 @@ def _plot_mc_curve_on_axis(
     else:
         ax.plot(px, py.T, linewidth=1, color="grey", alpha=0.35)
 
-    y = smooth(py.mean(0), 0.05)
+    y = _smoothed_mean_confidence_curve(py, px)
     ax.plot(
         px,
         y,
@@ -295,6 +310,7 @@ def _plot_mc_curve_on_axis(
     ax.set_ylabel(ylabel)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
+    ax.grid(True, axis="both", alpha=0.2, linewidth=0.6)
     if show_legend:
         ax.legend(loc="lower left", fontsize=8, framealpha=0.9)
     ax.set_title(f"{ylabel}-Confidence Curve")
@@ -308,8 +324,6 @@ def _compute_froc_curve(
     num_images: int,
     eps: float = 1e-16,
 ) -> tuple[
-    npt.NDArray[np.float32],
-    npt.NDArray[np.float32],
     npt.NDArray[np.float32],
     npt.NDArray[np.float32],
     npt.NDArray[np.float32],
@@ -331,16 +345,12 @@ def _compute_froc_curve(
     num_images = max(int(num_images), 1)
 
     recall = tp_accumulated / (num_targets + eps)
-    precision = tp_accumulated / (tp_accumulated + fp_accumulated + eps)
-    f1 = 2 * precision * recall / (precision + recall + eps)
     avg_fp = fp_accumulated / num_images
 
     return (
         np.concatenate((np.array([0.0], dtype=np.float32), avg_fp)),
         np.concatenate((np.array([0.0], dtype=np.float32), recall)),
         np.concatenate((np.array([1.0], dtype=np.float32), conf_sorted)),
-        np.concatenate((np.array([1.0], dtype=np.float32), precision)),
-        np.concatenate((np.array([0.0], dtype=np.float32), f1)),
     )
 
 
@@ -800,12 +810,12 @@ class DetMetrics:
         )
         _, _, f1_curve, px, _ = class_sensitive_results[7:12]
         if isinstance(f1_curve, np.ndarray) and f1_curve.size:
-            best_index = int(smooth(f1_curve.mean(0), 0.1).argmax())
+            best_index = int(_smoothed_mean_confidence_curve(f1_curve, px).argmax())
             best_confidence = float(px[best_index])
         else:
             best_index = 0
             best_confidence = 1.0
-        froc_avg_fp, froc_sensitivity, froc_confidence, _, _ = _compute_froc_curve(
+        froc_avg_fp, froc_sensitivity, froc_confidence = _compute_froc_curve(
             tp=tp,
             fp=fp,
             conf=conf,
@@ -843,11 +853,11 @@ class DetMetrics:
             for metric_index, class_id in enumerate(self.metrics.ap_class_index)
         }
         fig = plt.figure(figsize=(14, 16), constrained_layout=True)
-        outer_grid = fig.add_gridspec(2, 2, height_ratios=(1, 2), hspace=0.05, wspace=0.02)
-        ax_cm_norm = fig.add_subplot(outer_grid[0, 0])
-        ax_cm_raw = fig.add_subplot(outer_grid[0, 1])
+        outer_grid = fig.add_gridspec(2, 2, height_ratios=(2, 1), hspace=0.05, wspace=0.02)
+        ax_cm_norm = fig.add_subplot(outer_grid[1, 0])
+        ax_cm_raw = fig.add_subplot(outer_grid[1, 1])
 
-        curves_grid = outer_grid[1, :].subgridspec(1, 2, width_ratios=(1.15, 1.0), wspace=0.18)
+        curves_grid = outer_grid[0, :].subgridspec(1, 2, width_ratios=(1.15, 1.0), wspace=0.18)
         left_curves = curves_grid[0, 0].subgridspec(2, 1, hspace=0.04)
         right_curves = curves_grid[0, 1].subgridspec(3, 1, hspace=0.04)
         ax_pr = fig.add_subplot(left_curves[0, 0])
@@ -916,7 +926,7 @@ class DetMetrics:
         ax_froc.set_xticks(froc_ticks)
         ax_froc.set_xticklabels(["0.0625", "0.125", "0.25", "0.5", "1", "2", "4", "8"])
         ax_froc.set_ylim(0, 1)
-        ax_froc.grid(True, which="both", axis="x", alpha=0.25)
+        ax_froc.grid(True, which="both", axis="both", alpha=0.2, linewidth=0.6)
         ax_froc.set_title("FROC Curve")
 
         target_indices = _select_froc_target_indices(self.metrics.froc_avg_fp)
@@ -925,20 +935,17 @@ class DetMetrics:
         ]
         target_labels = [f"{confidence:.3f}" for confidence in target_confidences]
 
-        mean_precision_curve = (
-            self.metrics.p_curve.mean(0)
-            if self.metrics.p_curve.size
-            else np.zeros_like(self.metrics.px)
+        mean_precision_curve = _smoothed_mean_confidence_curve(
+            self.metrics.p_curve,
+            self.metrics.px,
         )
-        mean_recall_curve = (
-            self.metrics.r_curve.mean(0)
-            if self.metrics.r_curve.size
-            else np.zeros_like(self.metrics.px)
+        mean_recall_curve = _smoothed_mean_confidence_curve(
+            self.metrics.r_curve,
+            self.metrics.px,
         )
-        mean_f1_curve = (
-            self.metrics.f1_curve.mean(0)
-            if self.metrics.f1_curve.size
-            else np.zeros_like(self.metrics.px)
+        mean_f1_curve = _smoothed_mean_confidence_curve(
+            self.metrics.f1_curve,
+            self.metrics.px,
         )
         mean_pr_curve = (
             self.metrics.prec_values.mean(0)
@@ -960,28 +967,28 @@ class DetMetrics:
             x_values=target_pr_recalls,
             y_values=target_pr_precisions,
             labels=target_labels,
-            color="tab:red",
+            color="salmon",
         )
         _annotate_points(
             ax=ax_f1,
             x_values=target_confidences,
             y_values=[float(mean_f1_curve[index]) for index in target_curve_indices],
             labels=target_labels,
-            color="tab:red",
+            color="salmon",
         )
         _annotate_points(
             ax=ax_p,
             x_values=target_confidences,
             y_values=[float(mean_precision_curve[index]) for index in target_curve_indices],
             labels=target_labels,
-            color="tab:red",
+            color="salmon",
         )
         _annotate_points(
             ax=ax_r,
             x_values=target_confidences,
             y_values=[float(mean_recall_curve[index]) for index in target_curve_indices],
             labels=target_labels,
-            color="tab:red",
+            color="salmon",
         )
         _annotate_points(
             ax=ax_froc,
@@ -993,7 +1000,7 @@ class DetMetrics:
                 float(self.metrics.froc_sensitivity[index]) for index in target_indices.values()
             ],
             labels=target_labels,
-            color="tab:red",
+            color="salmon",
         )
 
         best_confidence = float(self.metrics.best_confidence)

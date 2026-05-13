@@ -11,6 +11,8 @@ from radyolo.validation.metrics import (
     DetMetrics,
     Metric,
     _project_points_onto_pr_curve,
+    _smoothed_mean_confidence_curve,
+    smooth,
 )
 
 
@@ -158,3 +160,21 @@ def test_project_points_onto_pr_curve_uses_pr_curve_values() -> None:
     )
 
     assert projected == pytest.approx([0.85, 0.7, 0.55])
+
+
+def test_smoothed_mean_confidence_curve_matches_plot_line_definition() -> None:
+    px = np.linspace(0, 1, 5, dtype=np.float32)
+    py = np.array(
+        [
+            [0.1, 0.3, 0.7, 0.2, 0.1],
+            [0.2, 0.4, 0.6, 0.3, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    smoothed_curve = _smoothed_mean_confidence_curve(py, px)
+
+    assert smoothed_curve == pytest.approx(smooth(py.mean(0), 0.05))
+    assert _smoothed_mean_confidence_curve(np.zeros((0, 5), dtype=np.float32), px) == pytest.approx(
+        np.zeros_like(px)
+    )

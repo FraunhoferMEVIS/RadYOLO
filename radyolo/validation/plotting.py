@@ -766,6 +766,7 @@ def plot_results(
                 y = data[column_name].to_numpy(dtype=float)
                 ax[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
                 ax[plot_index].set_ylabel(column_name)
+                ax[plot_index].grid(True, axis="both", alpha=0.2, linewidth=0.6)
                 if "metrics" in column_name:
                     ax[plot_index].set_xlabel("Epochs")
                 if "loss" in column_name:
