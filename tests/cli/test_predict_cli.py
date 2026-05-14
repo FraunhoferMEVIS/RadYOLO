@@ -216,7 +216,7 @@ def test_predict_cli_uses_shared_preprocessing(
     synthetic_dataset,
     tmp_path,
 ) -> None:
-    model_path = trained_run / "weights" / "best.pt"
+    model_path = trained_run / "weights_best.pt"
     input_dir = tmp_path / "prediction_input"
     input_dir.mkdir()
     source_image = next(iter(sorted((synthetic_dataset / "images").glob("*.nii.gz"))))

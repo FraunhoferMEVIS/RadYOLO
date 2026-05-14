@@ -787,7 +787,7 @@ def _run_trial(
         output_folder_base = dataset_dir / "runs"
         train_output_dir = output_folder_base / "train"
         results_csv_path = train_output_dir / "results.csv"
-        last_checkpoint_path = train_output_dir / "weights" / "last.pt"
+        last_checkpoint_path = train_output_dir / "weights_last.pt"
         output_folder_base.mkdir(parents=True, exist_ok=True)
 
         run_config = _deep_merge(template_config, common_overrides)

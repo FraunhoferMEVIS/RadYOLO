@@ -6,7 +6,7 @@ from radyolo import main
 
 
 def test_test_cli(trained_run, synthetic_dataset) -> None:
-    model_path = trained_run / "weights" / "best.pt"
+    model_path = trained_run / "weights_best.pt"
     runner = CliRunner()
 
     result = runner.invoke(

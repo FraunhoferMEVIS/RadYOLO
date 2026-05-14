@@ -51,7 +51,7 @@ def _load_onnx_model(onnx_path: Path) -> onnx.ModelProto:
 
 
 def test_onnx_export_cli_defaults_to_float16_internal_ops(trained_run: Path) -> None:
-    model_path = trained_run / "weights" / "last.pt"
+    model_path = trained_run / "weights_last.pt"
     runner = CliRunner()
 
     result = runner.invoke(main, ["onnx-export", str(model_path)])
@@ -74,7 +74,7 @@ def test_onnx_export_cli_defaults_to_float16_internal_ops(trained_run: Path) -> 
 
 
 def test_onnx_export_cli_allows_float32_internal_ops(trained_run: Path) -> None:
-    model_path = trained_run / "weights" / "last.pt"
+    model_path = trained_run / "weights_last.pt"
     runner = CliRunner()
 
     result = runner.invoke(main, ["onnx-export", str(model_path), "--internal-dtype", "float32"])

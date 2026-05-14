@@ -162,11 +162,9 @@ class Trainer:
         output_folder_base.mkdir(parents=True, exist_ok=True)
 
         self.save_dir = output_folder_base / str(self.config.experiment_name)
-        self.wdir = self.save_dir / "weights"
         self.save_dir.mkdir(parents=True, exist_ok=self.config.exist_ok)
-        self.wdir.mkdir(parents=True, exist_ok=self.config.exist_ok)
-        self.last_model_path = self.wdir / "last.pt"
-        self.best_model_path = self.wdir / "best.pt"
+        self.last_model_path = self.save_dir / "weights_last.pt"
+        self.best_model_path = self.save_dir / "weights_best.pt"
         self.save_period = self.config.save_period
         self.csv_path = self.save_dir / "results.csv"
 
@@ -1020,7 +1018,7 @@ class Trainer:
         if best_fitness == fitness:
             save_paths.append(self.best_model_path)
         if (self.save_period > 0) and (self.epoch % self.save_period == 0):
-            save_paths.append(self.wdir / f"epoch{self.epoch}.pt")
+            save_paths.append(self.save_dir / f"epoch{self.epoch}.pt")
         save_model_checkpoint(
             save_paths,
             self.epoch,

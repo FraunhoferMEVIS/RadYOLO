@@ -117,7 +117,7 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
 def trained_run(minimal_train_config: Path) -> Path:
     """Train a minimal model and return the run directory.
 
-    Fails fast if training does not produce both last.pt and best.pt.
+    Fails fast if training does not produce both weights_last.pt and weights_best.pt.
     """
     cfg = minimal_train_config
     trainer = Trainer(cfg=cfg)
@@ -125,12 +125,11 @@ def trained_run(minimal_train_config: Path) -> Path:
     with cfg.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
     run_dir = Path(data["output_folder_base"]) / str(data["experiment_name"])
-    weights_dir = run_dir / "weights"
-    if not (weights_dir / "last.pt").exists():
-        msg_last = "last.pt missing after training"
+    if not (run_dir / "weights_last.pt").exists():
+        msg_last = "weights_last.pt missing after training"
         raise FileNotFoundError(msg_last)
-    if not (weights_dir / "best.pt").exists():
-        msg_best = "best.pt missing after training"
+    if not (run_dir / "weights_best.pt").exists():
+        msg_best = "weights_best.pt missing after training"
         raise FileNotFoundError(msg_best)
     return run_dir
 

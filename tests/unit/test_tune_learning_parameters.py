@@ -117,7 +117,7 @@ def test_alphabetical_restore_trial_sort_key_orders_trial_ids_alphabetically() -
 
 def test_should_resume_dataset_run_uses_matching_incomplete_progress_entry(tmp_path: Path) -> None:
     config_signature = _compute_run_config_signature({"epochs": 10, "resume": False})
-    checkpoint_path = tmp_path / "runs" / "train" / "weights" / "last.pt"
+    checkpoint_path = tmp_path / "runs" / "train" / "weights_last.pt"
     checkpoint_path.parent.mkdir(parents=True)
     checkpoint_path.write_text("checkpoint", encoding="utf-8")
 
@@ -139,7 +139,7 @@ def test_should_resume_dataset_run_uses_existing_train_config_for_legacy_runs(tm
         "epochs: 10\nresume: false\nbatch_size: 2\n",
         encoding="utf-8",
     )
-    checkpoint_path = tmp_path / "runs" / "train" / "weights" / "last.pt"
+    checkpoint_path = tmp_path / "runs" / "train" / "weights_last.pt"
     checkpoint_path.parent.mkdir(parents=True)
     checkpoint_path.write_text("checkpoint", encoding="utf-8")
 

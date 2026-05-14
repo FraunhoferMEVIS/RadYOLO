@@ -86,7 +86,7 @@ def test_resume_preserves_typed_patch_size(
     model = build_model_from_config(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scaler = torch.GradScaler("cpu", enabled=False)
-    checkpoint_path = run_root / experiment_name / "weights" / "last.pt"
+    checkpoint_path = run_root / experiment_name / "weights_last.pt"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     save_model_checkpoint(
@@ -132,7 +132,7 @@ def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing
     model = build_model_from_config(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scaler = torch.GradScaler("cpu", enabled=False)
-    checkpoint_path = run_root / experiment_name / "weights" / "last.pt"
+    checkpoint_path = run_root / experiment_name / "weights_last.pt"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     save_model_checkpoint(
