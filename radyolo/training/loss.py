@@ -17,6 +17,7 @@ from radyolo.training.tal import (
     encode_bbox_targets,
     make_anchors,
 )
+from radyolo.utils.logging_utils import EpochWarningStats, MaskEpochWarningStats
 from radyolo.utils.ops import bbox_iou, xyzwhd2xyzxyz
 from radyolo.utils.util import unwrap_model
 
@@ -246,6 +247,19 @@ class v8DetectionLoss:  # noqa: N801
         self.enable_mask_loss = enable_mask_loss
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
+        self.reset_epoch_warning_stats()
+
+    def reset_epoch_warning_stats(self) -> None:
+        self._epoch_warning_stats = MaskEpochWarningStats()
+        self.assigner.reset_epoch_warning_stats()
+
+    def pop_epoch_warning_stats(self) -> EpochWarningStats:
+        stats = EpochWarningStats(
+            tal=self.assigner.pop_epoch_warning_stats(),
+            mask=self._epoch_warning_stats,
+        )
+        self._epoch_warning_stats = MaskEpochWarningStats()
+        return stats
 
     @staticmethod
     def interpolate_tal_topk(
@@ -264,7 +278,7 @@ class v8DetectionLoss:  # noqa: N801
     def preprocess(
         self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor
     ) -> torch.Tensor:
-        """Preprocesses the target counts and matches with the input batch size to output a tensor."""
+        """Preprocesses target counts and matches with input batch size to output a tensor."""
         nl, ne = targets.shape
         if nl == 0:
             out: torch.Tensor = torch.zeros(batch_size, 0, ne - 1, device=self.device)
@@ -441,15 +455,16 @@ class v8DetectionLoss:  # noqa: N801
                         masks_resampled = F.interpolate(
                             masks[None, :], prototype_masks_batch.shape[1:], mode="nearest-exact"
                         )[0]
+                        self._epoch_warning_stats.total_objects += int(masks_resampled.shape[0])
                         for mask_index, gt_mask in enumerate(masks_resampled):
                             if not gt_mask.any():
-                                LOGGER.warning("Empty mask after downsampling. Skipping this mask.")
+                                self._epoch_warning_stats.empty_after_downsampling += 1
                                 continue
                             grid_cell_indices = torch.nonzero(
                                 (target_gt_idx_batch == mask_index) & (fg_mask_batch > 0)
                             ).squeeze(1)
                             if not grid_cell_indices.any():
-                                LOGGER.warning("No assinged grid cells. Skipping this mask.")
+                                self._epoch_warning_stats.without_assigned_grid_cells += 1
                                 continue
                             mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
                             pred_masks_logits = torch.einsum(
@@ -465,7 +480,8 @@ class v8DetectionLoss:  # noqa: N801
                             mask_bce_loss = self.mask_bce_loss(pred_masks_logits, gt_mask_expanded)
                             if not torch.isfinite(mask_dice_loss + mask_bce_loss):
                                 LOGGER.warning(
-                                    "Skipping one mask-loss term because Dice/BCE became non-finite. "
+                                    "Skipping one mask-loss term because Dice/BCE became "
+                                    "non-finite. "
                                     "batch_index=%s mask_index=%s",
                                     batch_index,
                                     mask_index,

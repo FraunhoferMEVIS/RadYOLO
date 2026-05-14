@@ -38,6 +38,7 @@ from radyolo.data.data import (
 )
 from radyolo.models.model import HardcodedModel, build_model_from_config, get_model_min_stride
 from radyolo.training.loss import build_detection_loss_from_config
+from radyolo.utils.logging_utils import EpochWarningStats, format_epoch_warning_summary
 from radyolo.utils.torch_utils import EarlyStopping
 from radyolo.utils.util import (
     ModelEMA,
@@ -213,6 +214,29 @@ class Trainer:
         # Stateful validation fitness: exponentially weighted metric aggregate across epochs.
         self.ewa_fitness = None
         self.ewa_alpha = 0.6
+
+    def _log_epoch_warning_summary(self) -> None:
+        if self.loss is None:
+            return
+
+        warning_stats = self.loss.pop_epoch_warning_stats()
+        warning_counts = torch.tensor(
+            warning_stats.as_list(),
+            device=self.device,
+            dtype=torch.int64,
+        )
+        if dist.is_available() and dist.is_initialized():
+            dist.reduce(warning_counts, dst=0, op=dist.ReduceOp.SUM)
+
+        if not self.is_main_process:
+            return
+
+        reduced_warning_stats = EpochWarningStats.from_list(
+            [int(value) for value in warning_counts.tolist()]
+        )
+        summary = format_epoch_warning_summary(reduced_warning_stats)
+        if summary is not None:
+            LOGGER.warning(summary)
 
     def _configure_file_logging(self) -> None:
         time_now = datetime.datetime.now(tz=datetime.UTC)
@@ -577,6 +601,7 @@ class Trainer:
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(self.epoch)
             timing_values = self._create_epoch_timing_values()
+            self.loss.reset_epoch_warning_stats()
 
             if self.is_main_process:
                 LOGGER.info(
@@ -717,6 +742,7 @@ class Trainer:
             ema.advance_updates()
             scheduler.step()
             self._barrier()
+            self._log_epoch_warning_summary()
 
             if self.is_main_process and tloss is not None:
                 LOGGER.info(

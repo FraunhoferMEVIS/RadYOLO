@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
 
+from radyolo.utils.logging_utils import TaskAlignedEpochWarningStats
 from radyolo.utils.ops import bbox_iou
 
 LOGGER = logging.getLogger(__name__)
@@ -54,6 +55,15 @@ class TaskAlignedAssigner(nn.Module):
         self.eps = eps
         self.use_fallback_if_alignment_zero = use_fallback_if_alignment_zero
         self.anchor_inclusion_distance = anchor_inclusion_distance
+        self.reset_epoch_warning_stats()
+
+    def reset_epoch_warning_stats(self) -> None:
+        self._epoch_warning_stats = TaskAlignedEpochWarningStats()
+
+    def pop_epoch_warning_stats(self) -> TaskAlignedEpochWarningStats:
+        stats = self._epoch_warning_stats
+        self.reset_epoch_warning_stats()
+        return stats
 
     @torch.no_grad()
     def forward(
@@ -237,11 +247,12 @@ class TaskAlignedAssigner(nn.Module):
         # Boolean mask: (B, M) True if all align_metric entries are zero for this GT box
         zero_mask = (align_metric.sum(dim=2) == 0) & (ground_truth__mask.sum(dim=2) > 0)
 
-        if self.use_fallback_if_alignment_zero and zero_mask.any():
-            LOGGER.warning(
-                f"Using fall back mechanism to assign alignment metrics because alignment for all "
-                f"grid cells was zero for {zero_mask.sum().item()} objects."
-            )
+        self._epoch_warning_stats.total_gt_objects += int(
+            (ground_truth__mask.sum(dim=2) > 0).sum().item()
+        )
+        zero_fallback_count = int(zero_mask.sum().item())
+        if self.use_fallback_if_alignment_zero and zero_fallback_count:
+            self._epoch_warning_stats.alignment_zero_fallback_objects += zero_fallback_count
             batch_size, max_num_objects, num_anchors = align_metric.shape
 
             # Expand GT and predicted boxes for broadcasting
@@ -284,12 +295,7 @@ class TaskAlignedAssigner(nn.Module):
         mask_pos = mask_topk * anchors_in_gts__mask * ground_truth__mask
 
         boxes_without_anchor = ground_truth__mask.sum(2).gt(mask_pos.sum(2)).sum().item()
-        if boxes_without_anchor:
-            LOGGER.warning(
-                f"Did not find anchor points for {boxes_without_anchor} ground-truth bounding "
-                f"boxes. Your bounding boxes could be too small for the configured heads and "
-                f"input resolution."
-            )
+        self._epoch_warning_stats.boxes_without_anchor += int(boxes_without_anchor)
 
         return mask_pos, align_metric, overlaps
 
@@ -454,8 +460,8 @@ class TaskAlignedAssigner(nn.Module):
         pos_anchors = bbox_deltas.amin(3).gt_(anchor_inclusion_distance)
         return pos_anchors  # noqa: RET504
 
-    @staticmethod
     def select_highest_overlaps(
+        self,
         mask_pos: torch.Tensor, overlaps: torch.Tensor, n_max_boxes: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Select anchor boxes with highest IoU when assigned to multiple ground truths.
@@ -515,10 +521,7 @@ class TaskAlignedAssigner(nn.Module):
             if need_assign.numel() == 0:
                 continue
 
-            LOGGER.warning(
-                f"Using fall back mechanism to assign targets for {need_assign.numel()} objects "
-                f"because they had no anchors left after highest overlap filtering."
-            )
+            self._epoch_warning_stats.target_assignment_fallback_objects += need_assign.numel()
 
             # For fast lookup of current owner per anchor (unique after conflict resolution)
             # owner[j] = gt index that currently owns anchor j, or -1 if unassigned
