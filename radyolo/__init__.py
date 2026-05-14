@@ -61,10 +61,18 @@ class StdoutFilter(logging.Filter):
 
 @click.group("radyolo")
 @click.version_option()
-@click.option("-v", "--verbose", "verbose", is_flag=True, help="Enable verbose logging.")
+@click.option(
+    "-v", "--verbose", "verbose", is_flag=True, help="Enable verbose logging (deprecated)."
+)
+@click.option("-q", "--quiet", "quiet", is_flag=True, help="Enable quiet logging.")
 @click.option("-d", "--debug", "debug", is_flag=True, help="Enable debug logging.")
-def main(verbose: bool, debug: bool) -> None:
-    level = logging.DEBUG if debug else logging.INFO if verbose else logging.WARNING
+def main(verbose: bool, quiet: bool, debug: bool) -> None:
+    if debug:
+        level = logging.DEBUG
+    elif quiet:
+        level = logging.WARNING
+    else:
+        level = logging.INFO
 
     simple_formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(message)s",
@@ -100,8 +108,14 @@ def main(verbose: bool, debug: bool) -> None:
 
     if debug:
         LOGGER.debug("Debug logging enabled.")
-    elif verbose:
-        LOGGER.info("Verbose logging enabled.")
+    elif quiet:
+        LOGGER.info("Quiet logging enabled.")
+
+    if verbose:
+        LOGGER.warning(
+            "Verbose logging is deprecated and the new default. "
+            "Use '--debug' or '--quiet' to change logging level."
+        )
 
     # Note: Do not register subcommands here; Click builds help before invoking this.
 
@@ -193,9 +207,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
         ema = ModelEMA(model)
 
         dataset_class = (
-            PatchWiseDataset
-            if train_config.training_mode == "patchwise"
-            else WholeImageDataset
+            PatchWiseDataset if train_config.training_mode == "patchwise" else WholeImageDataset
         )
         foreground_oversampling = (
             train_config.foreground_oversampling
