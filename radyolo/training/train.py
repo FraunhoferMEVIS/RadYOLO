@@ -36,7 +36,11 @@ from radyolo.data.data import (
     apply_configured_augmentations_to_batch,
     build_dataloader,
 )
-from radyolo.models.model import HardcodedModel, build_model_from_config, get_model_min_stride
+from radyolo.models.model import (
+    HardcodedModel,
+    build_model_from_config,
+    get_model_min_stride,
+)
 from radyolo.training.loss import build_detection_loss_from_config
 from radyolo.utils.logging_utils import EpochWarningStats, format_epoch_warning_summary
 from radyolo.utils.torch_utils import EarlyStopping
@@ -47,6 +51,7 @@ from radyolo.utils.util import (
     select_device,
     wrap_model_for_training,
 )
+from radyolo.validation.nms_optimization import run_nms_threshold_optimization
 from radyolo.validation.plotting import plot_results
 from radyolo.validation.validate import Validator
 
@@ -810,6 +815,15 @@ class Trainer:
             seconds = time.time() - train_time_start
             msg = f"\n{self.epoch + 1} epochs completed in {seconds / 3600:.3f} hours."
             LOGGER.info(msg)
+            if validator is not None and self.config.val:
+                run_nms_threshold_optimization(
+                    validator=validator,
+                    config=self.config,
+                    save_dir=self.save_dir,
+                    last_model_path=self.last_model_path,
+                    best_model_path=self.best_model_path,
+                    device=self.device,
+                )
 
         self._clear_memory()
 
@@ -1042,7 +1056,7 @@ class Trainer:
         ema: ModelEMA,
         best_fitness: float | None,
     ) -> tuple[dict[str, float], float, float]:
-        metrics = validator(self, ema=ema)
+        metrics = validator(self, model=cast("HardcodedModel", ema.ema))
         current_fitness = self._compute_validation_fitness(metrics)
         if self.ewa_fitness is None:
             self.ewa_fitness = current_fitness

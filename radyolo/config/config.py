@@ -178,6 +178,9 @@ class DefaultConfig(BaseModel):
     agnostic_nms: bool = False  # class-agnostic NMS
     max_det: int = 300  # maximum number of detections per image
     clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds during validation/prediction
+    nms_iou_threshold_candidates: list[float] = Field(
+        default_factory=lambda: [0.02, 0.04, 0.06, 0.1, 0.15, 0.2]
+    )  # NMS IoU thresholds evaluated after training for best/last checkpoints
     fitness_metric_weights: tuple[float, float, float] = (
         0.4,
         0.4,
@@ -257,6 +260,22 @@ class DefaultConfig(BaseModel):
     intensity_gamma_p_invert: float = 0.25
     intensity_gamma_p_retain_stats: float = 1.0
     intensity_gamma_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    @model_validator(mode="after")
+    def validate_nms_optimization_candidates(self) -> Self:
+        candidates = [float(candidate) for candidate in self.nms_iou_threshold_candidates]
+        if not candidates:
+            msg = "nms_iou_threshold_candidates must contain at least one value"
+            raise ValueError(msg)
+        invalid_candidates = [candidate for candidate in candidates if not 0.0 <= candidate <= 1.0]
+        if invalid_candidates:
+            msg = (
+                "nms_iou_threshold_candidates must be between 0.0 and 1.0 inclusive; "
+                f"got {invalid_candidates}"
+            )
+            raise ValueError(msg)
+        self.nms_iou_threshold_candidates = sorted(set(candidates))
+        return self
 
     # GIN augmentation
     gin_layers: int = 4

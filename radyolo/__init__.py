@@ -204,7 +204,6 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
         model = loaded_model.model
         train_config = loaded_model.train_config
         device = loaded_model.device
-        ema = ModelEMA(model)
 
         dataset_class = (
             PatchWiseDataset if train_config.training_mode == "patchwise" else WholeImageDataset
@@ -245,7 +244,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             save_predictions=True,
         )
 
-        validator(trainer=None, ema=ema)
+        validator(trainer=None, model=model)
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1

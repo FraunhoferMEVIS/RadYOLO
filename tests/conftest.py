@@ -241,8 +241,7 @@ def run_validation(best_model_path: Path, group: str) -> Path:
         names=dataset_config.names or {0: "class_0"},
         save_predictions=True,
     )
-    ema = ModelEMA(model)
-    validator(trainer=None, ema=ema)
+    validator(trainer=None, model=model)
     return save_dir
 
 

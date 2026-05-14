@@ -16,6 +16,7 @@ def test_train_cli(minimal_train_config: Path, tmp_path: Path) -> None:
     config["output_folder_base"] = (tmp_path / "runs").as_posix()
     config["experiment_name"] = "e2e_separate_objectness"
     config["separate_objectness_head"] = True
+    config["nms_iou_threshold_candidates"] = [0.1, 0.2]
     with test_config.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
@@ -27,9 +28,15 @@ def test_train_cli(minimal_train_config: Path, tmp_path: Path) -> None:
     run_dir = Path(config["output_folder_base"]) / str(config["experiment_name"])
     best_path = run_dir / "weights" / "best.pt"
     copied_config = run_dir / "train_config.yaml"
+    nms_optimization_csv = run_dir / "nms_optimization.csv"
     assert best_path.exists(), "best.pt missing"
     assert (run_dir / "results.csv").exists(), "results.csv missing"
+    assert nms_optimization_csv.exists(), "nms_optimization.csv missing"
     assert copied_config.exists(), "train_config.yaml missing"
     assert copied_config.read_text(encoding="utf-8") == test_config.read_text(encoding="utf-8")
+    nms_rows = nms_optimization_csv.read_text(encoding="utf-8").strip().splitlines()
+    assert len(nms_rows) == 5
+    assert any("last,last.pt,0.1" in row for row in nms_rows[1:])
+    assert any("best,best.pt,0.2" in row for row in nms_rows[1:])
     checkpoint = load_model_checkpoint(best_path)
     assert checkpoint["train_config"].separate_objectness_head is True

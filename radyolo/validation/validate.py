@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
@@ -31,8 +31,6 @@ if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
     from radyolo.training.loss import v8DetectionLoss
     from radyolo.training.train import Trainer
-    from radyolo.utils.util import ModelEMA
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -102,11 +100,10 @@ class Validator:
     def __call__(
         self,
         trainer: Trainer | None,
-        ema: ModelEMA,
+        model: HardcodedModel,
         loss: v8DetectionLoss | None = None,
     ) -> dict[str, float]:
         """Execute validation process, run inference on dataloader and compute metrics."""
-        model = cast("HardcodedModel", ema.ema)
         self.training = trainer is not None
         if self.training and trainer is not None:
             self.device = trainer.device
