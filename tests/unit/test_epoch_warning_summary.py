@@ -23,10 +23,16 @@ def test_format_epoch_warning_summary_lists_only_nonzero_warning_categories() ->
     )
 
     assert summary == (
-        "TAL alignment fallback for 3/12 ground-truth objects; "
-        "TAL target-assignment fallback for 1/12 ground-truth objects; "
-        "no anchor points found for 2/12 ground-truth objects; "
-        "empty masks after downsampling for 2/5 masks."
+        "TaskAlignedAssinger fallback for 3/12 reference objects because they had 0 "
+        "alignment with all predictions; "
+        "TaskAlignedAssinger fallback for 1/12 reference objects becaue they had no "
+        "assigned anchor after assignment conflict resolution; "
+        "no anchors found for 2/12 reference objects; "
+        "empty references for 2/5 masks which can happen because the segmentation acts "
+        "on half the input image resolution or due to data augmentation; "
+        "TaskAlignedAssinger fallbacks or empty masks can be caused by small or "
+        "overlapping reference objects - the model can still learn, but increasing the "
+        "input resolution might help to improve it."
     )
 
 
