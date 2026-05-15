@@ -236,9 +236,10 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             device=device,
         )
 
+        run_dir = model_path.parent.parent if model_path.parent.name == "weights" else model_path.parent
         validator = Validator(
             dataloader=dataloader,
-            save_dir=model_path.parents[1] / "validation" / group,
+            save_dir=run_dir / "validation" / group,
             config=train_config,
             names=dataset_config.names,
             save_predictions=True,
