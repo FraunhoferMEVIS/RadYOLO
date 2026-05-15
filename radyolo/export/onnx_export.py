@@ -79,6 +79,7 @@ def export_model(
         input_names=["images"],
         output_names=output_names,
         dynamic_axes=None,
+        external_data=False,
     )
 
     if internal_dtype == "float16":
