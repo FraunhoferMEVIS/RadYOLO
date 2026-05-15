@@ -28,7 +28,7 @@ def test_default_config_uses_split_validation_and_plotting_thresholds(tmp_path: 
 
     assert cfg.confidence_threshold_validation == 0.001
     assert cfg.confidence_threshold_plotting == 0.1
-    assert cfg.nms_iou_threshold_candidates == [0.033, 0.066, 0.1, 0.15, 0.2, 0.25]
+    assert cfg.nms_iou_threshold_candidates == [0.02, 0.04, 0.06, 0.1, 0.15, 0.2]
 
 
 def test_split_thresholds_can_be_overridden_explicitly(tmp_path: Path) -> None:

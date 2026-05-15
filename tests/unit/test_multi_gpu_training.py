@@ -19,7 +19,22 @@ from radyolo.training.train import (
     _distributed_train_worker,
     _select_distributed_backend,
 )
-from radyolo.utils.util import ModelEMA, wrap_model_for_training, select_device
+from radyolo.utils.logging_utils import EpochWarningStats
+from radyolo.utils.util import ModelEMA, select_device, wrap_model_for_training
+
+
+class RecordingLoss:
+    def __init__(self, loss_fn) -> None:
+        self.loss_fn = loss_fn
+
+    def __call__(self, predictions, batch, current_epoch):
+        return self.loss_fn(predictions, batch, current_epoch)
+
+    def reset_epoch_warning_stats(self) -> None:
+        return None
+
+    def pop_epoch_warning_stats(self) -> EpochWarningStats:
+        return EpochWarningStats()
 
 
 def test_select_device_accepts_multiple_cuda_devices(monkeypatch) -> None:
@@ -369,9 +384,11 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
         "mask_loss",
         "cls_sep_loss",
     )
-    trainer.loss = lambda _predictions, _batch, current_epoch: (
-        torch.tensor(float(current_epoch), dtype=torch.float32, requires_grad=True),
-        torch.zeros(5, dtype=torch.float32),
+    trainer.loss = RecordingLoss(
+        lambda _predictions, _batch, current_epoch: (
+            torch.tensor(float(current_epoch), dtype=torch.float32, requires_grad=True),
+            torch.zeros(5, dtype=torch.float32),
+        )
     )
 
     class FakeModel(torch.nn.Module):
@@ -486,7 +503,7 @@ def test_trainer_skips_non_finite_loss_batch(minimal_train_config, monkeypatch) 
             torch.ones(5, dtype=torch.float32),
         )
 
-    trainer.loss = _loss
+    trainer.loss = RecordingLoss(_loss)
 
     class FakeModel(torch.nn.Module):
         def __init__(self) -> None:
@@ -602,7 +619,7 @@ def test_trainer_skips_non_finite_input_batch(
             torch.ones(5, dtype=torch.float32),
         )
 
-    trainer.loss = _loss
+    trainer.loss = RecordingLoss(_loss)
 
     class FakeModel(torch.nn.Module):
         def __init__(self) -> None:
