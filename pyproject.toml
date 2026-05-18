@@ -57,7 +57,7 @@ torchvision = [{ index = "pytorch" }]
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu130"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.hatch.metadata]
