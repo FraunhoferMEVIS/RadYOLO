@@ -18,15 +18,14 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import tqdm_loggable
 import tqdm_loggable.utils
-import yaml
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import (
-    DatasetConfig,
     ModelCheckpoint,
     get_cfg,
+    get_dataset_config,
     load_model_checkpoint,
     save_model_checkpoint,
 )
@@ -204,7 +203,7 @@ class Trainer:
 
         self.model: torch.nn.Module | None = None
         self.loss: v8DetectionLoss | None = None
-        self.data = self.get_dataset_config(self.config.data)
+        self.data = get_dataset_config(self.config.data)
 
         self.lf: Callable[[int], float] | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
@@ -943,16 +942,6 @@ class Trainer:
             return
         else:
             torch.cuda.empty_cache()
-
-    @staticmethod
-    def get_dataset_config(
-        dataset_folder: Path,
-    ) -> DatasetConfig:
-        """Reduction of get_dataset(), check_file() and validation included in Pydantic model."""
-        dataset_config_path = dataset_folder / "dataset.yaml"
-        with Path(dataset_config_path).open() as f:
-            yaml_config = yaml.safe_load(f)
-        return DatasetConfig.model_validate(yaml_config)
 
     def get_dataloader(
         self,

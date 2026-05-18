@@ -177,6 +177,77 @@ def test_default_config_uses_epoch_based_ema_tau_default(minimal_train_config: P
     assert config.ema_tau == 400.0
 
 
+def test_get_cfg_infers_num_classes_from_dataset_names(minimal_train_config: Path) -> None:
+    with minimal_train_config.open(encoding="utf-8") as file:
+        config_data = yaml.safe_load(file)
+    config_data.pop("num_classes", None)
+    config_path = minimal_train_config.parent / "inferred_num_classes.yaml"
+    config_path.write_text(yaml.safe_dump(config_data, sort_keys=False), encoding="utf-8")
+
+    config = get_cfg(config_path, {})
+
+    assert config.num_classes == 1
+
+
+def test_get_cfg_warns_when_num_classes_is_set_in_config(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config_path = tmp_path / "deprecated_num_classes.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "input_channels: 1",
+                "num_classes: 99",
+                "model_scale: n",
+                f"data: {synthetic_dataset.as_posix()}",
+                "fold: 0",
+                "epochs: 2",
+                "nominal_batch_size: 1",
+                "warmup_epochs: 0.5",
+                "patience: 1",
+                "batch_size: 1",
+                "patch_size: {x: 32, y: 32, z: 64}",
+                "normalization: {type: 'none'}",
+                "device: cpu",
+                "workers: 0",
+                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: e2e",
+                "exist_ok: True",
+                "optimizer: Adam",
+                "verbose: False",
+                "seed: 0",
+                "deterministic: True",
+                "resume: False",
+                "amp: False",
+                "use_cudnn_benchmark: False",
+                "val: True",
+                "plots: False",
+                "augment: False",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        config = get_cfg(config_path, {})
+
+    assert config.num_classes == 1
+    assert "Config field 'num_classes' is deprecated and ignored" in caplog.text
+
+
+def test_get_cfg_rejects_relative_dataset_path(minimal_train_config: Path, tmp_path: Path) -> None:
+    with minimal_train_config.open(encoding="utf-8") as file:
+        config_data = yaml.safe_load(file)
+    config_data["data"] = "relative/dataset"
+    config_path = tmp_path / "relative_dataset_path.yaml"
+    config_path.write_text(yaml.safe_dump(config_data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="dataset.yaml"):
+        get_cfg(config_path, {})
+
+
 def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) -> None:
     trainer = Trainer(cfg=minimal_train_config)
     trainer.config = trainer.config.model_copy(update={"fitness_metric_weights": (0.5, 0.25, 0.25)})

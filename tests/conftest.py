@@ -81,7 +81,6 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
     cfg_path.write_text(
         (
             f"input_channels: 1\n"
-            f"num_classes: 1\n"
             f"model_scale: n\n"
             f"data: {synthetic_dataset.as_posix()}\n"
             f"fold: 0\n"

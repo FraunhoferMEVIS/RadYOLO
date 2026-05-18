@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+DEPRECATED_CONFIG_KEYS = {"num_classes"}
+
 
 @dataclass(frozen=True)
 class DetectionPostprocessConfig:
@@ -86,7 +88,7 @@ class DefaultConfig(BaseModel):
 
     # Model Parameters
     input_channels: int  # number of input channels for model
-    num_classes: int  # number of classes to predict
+    num_classes: int = 0  # deprecated in config.yaml; inferred from dataset.yaml names
     model_scale: Literal["n", "s", "m", "l", "x"]  # allowed values: (n, s, m, l, x)
 
     # Optional Segmentation Head
@@ -314,6 +316,9 @@ class DefaultConfig(BaseModel):
                 f"{len(self.channel_dropout_probabilities)} and {self.input_channels}"
             )
             raise ValueError(msg)
+        if self.num_classes < 1:
+            msg = "num_classes must be inferred from dataset.yaml names and be at least 1"
+            raise ValueError(msg)
         if self.bbox_parametrization == "center_extents" and self.dfl_reg_max > 1:
             msg = "bbox_parametrization='center_extents' requires dfl_reg_max=1"
             raise ValueError(msg)
@@ -456,11 +461,39 @@ def save_model_checkpoint(  # noqa: PLR0913
         torch.save(_sanitize_checkpoint_value(checkpoint), path)
 
 
+def get_dataset_config(dataset_folder: str | Path) -> DatasetConfig:
+    return get_dataset_cfg(Path(dataset_folder) / "dataset.yaml")
+
+
+def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
+    dataset_root = yaml_config.get("data")
+    if dataset_root is None:
+        return int(yaml_config.get("num_classes", 0))
+    dataset_cfg = get_dataset_config(dataset_root)
+    if dataset_cfg.names is None:
+        msg = "dataset.yaml must define 'names' so num_classes can be inferred"
+        raise ValueError(msg)
+    return len(dataset_cfg.names)
+
+
 def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:
-    with Path(config_path).open() as f:
-        yaml_config = yaml.safe_load(f)
+    config_path = Path(config_path)
+    with config_path.open() as f:
+        yaml_config = yaml.safe_load(f) or {}
+    deprecated_config_keys = DEPRECATED_CONFIG_KEYS.intersection(yaml_config)
     if overrides:
         yaml_config = {**yaml_config, **overrides}
+
+    yaml_config["num_classes"] = _num_classes_from_dataset(yaml_config)
+    if "num_classes" in deprecated_config_keys:
+        LOGGER.warning(
+            (
+                "Config field 'num_classes' is deprecated and ignored; "
+                "using %d classes from %s instead."
+            ),
+            yaml_config["num_classes"],
+            Path(yaml_config["data"]) / "dataset.yaml",
+        )
 
     return DefaultConfig.model_validate(yaml_config)
 

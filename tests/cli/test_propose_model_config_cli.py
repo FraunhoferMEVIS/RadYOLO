@@ -47,7 +47,7 @@ def test_propose_model_config_cli_autoruns_analysis_and_proposes_ct_config(
     with output_path.open(encoding="utf-8") as file:
         config = yaml.safe_load(file)
     assert config["input_channels"] == 1
-    assert config["num_classes"] == 1
+    assert "num_classes" not in config
     assert config["model_scale"] == "s"
     assert config["segmentation_output"] is True
     assert config["normalization"]["type"] == "ct"

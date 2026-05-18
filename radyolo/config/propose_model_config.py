@@ -929,7 +929,6 @@ def propose_model_config(
     proposed_config.update(
         {
             "input_channels": input_channels,
-            "num_classes": dataset_cfg.nc,
             "model_scale": model_scale,
             "data": dataset_path.as_posix(),
             "batch_size": batch_size,
@@ -964,7 +963,7 @@ def propose_model_config(
         dataset_path, model_scale, gpu_ram_limit_gb
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    DefaultConfig.model_validate(proposed_config)
+    DefaultConfig.model_validate({**proposed_config, "num_classes": dataset_cfg.nc})
     with output_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(proposed_config, file, sort_keys=False)
 
