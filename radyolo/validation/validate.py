@@ -150,7 +150,6 @@ class Validator:
         stats = self.get_stats()
         self.print_results()
         if self.training:
-            model.float()
             results = {
                 **stats,
                 **trainer.label_loss_items(
@@ -452,18 +451,9 @@ class Validator:
         )
         if gt_idx.size == 0:
             return
-        # Prepare shapes (D, W, H)
-        proto_dhw = prototypes.shape[1:]
         for g_i, d_i in zip(gt_idx, det_idx, strict=True):
             gt_mask = gt_masks_list[g_i]
-            if gt_mask is None:
-                continue
-            gt_mask_downsampled = F.interpolate(
-                gt_mask[None, None, :].to(device=prototypes.device, dtype=torch.float32),
-                proto_dhw,
-                mode="nearest-exact",
-            )[0, 0]
-            if not gt_mask_downsampled.any():
+            if gt_mask is None or not gt_mask.any():
                 continue
             # Reconstruct predicted mask logits from coefficients and prototypes
             coeff = pred_with_coeffs[d_i, 8 : 8 + nm].to(device=prototypes.device)
@@ -474,9 +464,14 @@ class Validator:
                     "mask probabilites contain non-finite values."
                 )
                 continue
-            pred_mask = pred_prob >= 0.5
-            intersection = (pred_mask * gt_mask_downsampled).sum().item()
-            denom = (pred_mask.sum() + gt_mask_downsampled.sum()).item()
+            pred_prob_upsampled = F.interpolate(
+                pred_prob[None, None, :],
+                gt_mask.shape,
+                mode="trilinear",
+            )[0, 0]
+            pred_mask = pred_prob_upsampled >= 0.5
+            intersection = (pred_mask * gt_mask).sum().item()
+            denom = (pred_mask.sum() + gt_mask.sum()).item()
             dice = (2.0 * intersection) / (denom + 1e-7)
             self.dice_sum += float(dice)
             self.dice_count += 1
