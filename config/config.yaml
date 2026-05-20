@@ -19,12 +19,12 @@ deterministic: False      # (bool) whether to enable deterministic mode
 
 # Model Parameters
 input_channels: 1 # number of input channels for model
-model_scale: m    # allowed values: (n, s, m, l, x)
+model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Optional Segmentation Head
-segmentation_output: True          # (bool) add segmentation output to model
-prototype_masks: 8                 # (int) number of prototype masks for segmentation output
-higher_resolution_prototypes: True # (bool) use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
+segmentation_output: True            # (bool) add segmentation output to model
+prototype_masks: 8                   # (int) number of prototype masks for segmentation output
+prototype_layer: "higher_resolution" # (literal) choose one of [higher_resolution, full_resolution, half_resolution]
 
 # Detection Head Options
 separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits

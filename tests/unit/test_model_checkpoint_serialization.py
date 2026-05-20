@@ -268,3 +268,23 @@ def test_default_config_defaults_tal_topk_schedule_to_static_value(minimal_train
 
     assert config.tal_topk_final == config.tal_topk
     assert config.tal_topk_final_epoch == config.epochs
+
+
+def test_default_config_migrates_legacy_prototype_booleans() -> None:
+    config = DefaultConfig.model_validate(
+        {
+            "data": Path("/tmp/dataset"),
+            "fold": 0,
+            "experiment_name": "legacy_prototype_layer",
+            "input_channels": 1,
+            "num_classes": 1,
+            "model_scale": "n",
+            "patch_size": {"x": 32, "y": 32, "z": 64},
+            "normalization": {"type": "none"},
+            "full_resolution_prototypes": False,
+            "half_resolution_prototypes": True,
+            "higher_resolution_prototypes": False,
+        }
+    )
+
+    assert config.prototype_layer == "half_resolution"

@@ -127,6 +127,40 @@ class Conv(nn.Module):
         return self.activation(self.batch_norm(self.conv(x)))
 
 
+class ConvTransposed(nn.Module):
+    default_activation = nn.SiLU(inplace=True)
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int | tuple[int, int, int] = 1,
+        stride: int = 1,
+        padding: int = 0,
+        activation: bool | nn.Module = True,
+    ) -> None:
+        super().__init__()
+        self.conv = nn.ConvTranspose3d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            bias=False,
+        )
+        self.batch_norm = nn.BatchNorm3d(out_channels, eps=1e-3, momentum=0.03)
+        self.activation = (
+            self.default_activation
+            if activation is True
+            else activation
+            if isinstance(activation, nn.Module)
+            else nn.Identity()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.activation(self.batch_norm(self.conv(x)))
+
+
 class DWConv(Conv):
     def __init__(
         self,
@@ -529,9 +563,7 @@ class Detect(nn.Module):
             )
         self.dfl = DFL(self.dfl_bins, min_value=self.dfl_min) if self.use_dfl else nn.Identity()
 
-    def forward(
-        self, pred_raw: list[torch.Tensor]
-    ) -> ModelOutput:
+    def forward(self, pred_raw: list[torch.Tensor]) -> ModelOutput:
         for i in range(self.nl):
             reg = self.cv_boxes[i](pred_raw[i])
             cls = self.cv_classes[i](pred_raw[i])
@@ -622,33 +654,105 @@ class Detect(nn.Module):
         )
 
 
-class PrototypeMasks(nn.Module):
+class PrototypeMasksFullResolution(nn.Module):
     """PrototypeMasks module for segmentation models."""
 
     def __init__(
         self,
-        input_channels: int,
-        intermediate_channels: int = 256,
-        prototypes: int = 32,
+        input_channels_full: int,
+        input_channels_half: int,
+        input_channels_quarter: int,
+        input_channels_eigth: int,
+        input_channels_sixteenth: int,
+        prototypes: int = 8,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes.
-
-        Args:
-            input_channels (int): Input channels.
-            intermediate_channels (int): Intermediate channels.
-            prototypes (int): Output channels (number of protos).
-        """
+        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
-        self.cv1 = Conv(input_channels, intermediate_channels, kernel_size=3)
-        self.upsample = nn.ConvTranspose3d(
-            intermediate_channels, intermediate_channels, 2, 2, 0, bias=True
-        )
-        self.cv2 = Conv(intermediate_channels, intermediate_channels, kernel_size=3)
-        self.cv3 = Conv(intermediate_channels, prototypes)
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
+        self.upsample_half = ConvTransposed(prototypes*2, prototypes, 2, 2)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        return self.cv3(self.cv2(self.upsample(self.cv1(x))))
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+        self.reshape_full = Conv(input_channels_full, prototypes, kernel_size=3)
+
+        self.cv_eigth = Conv(prototypes * 8, prototypes * 8, kernel_size=3)
+        self.cv_quater = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
+        self.cv_half = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
+        self.cv_final_1 = Conv(prototypes, prototypes, kernel_size=3)
+        self.cv_final_2 = Conv(prototypes, prototypes, kernel_size=3)
+
+    def forward(
+        self,
+        x_full: torch.Tensor,
+        x_half: torch.Tensor,
+        x_quater: torch.Tensor,
+        x_eight: torch.Tensor,
+        x_sixteenth: torch.Tensor,
+    ) -> torch.Tensor:
+        """Perform a forward pass through layers using multi-scale input feature maps."""
+        x = self.upsample_sixteenth(x_sixteenth)
+        x = self.reshape_eigth(x_eight) + x
+        x = self.cv_eigth(x)
+        x = self.upsample_eigth(x)
+        x = self.reshape_quater(x_quater) + x
+        x = self.cv_quater(x)
+        x = self.upsample_quater(x)
+        x = self.reshape_half(x_half) + x
+        x = self.cv_half(x)
+        x = self.upsample_half(x)
+        x = self.reshape_full(x_full) + x
+        x = self.cv_final_1(x)
+        return self.cv_final_2(x)
+
+
+class PrototypeMasksHalfResolution(nn.Module):
+    """PrototypeMasks module for segmentation models."""
+
+    def __init__(
+        self,
+        input_channels_half: int,
+        input_channels_quarter: int,
+        input_channels_eigth: int,
+        input_channels_sixteenth: int,
+        prototypes: int = 8,
+    ) -> None:
+        """Initialize the PrototypeMasks module with specified number of prototypes."""
+        super().__init__()
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
+        self.upsample_half = ConvTransposed(prototypes*2, prototypes, 2, 2)
+
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+
+        self.cv_eigth = Conv(prototypes*8, prototypes*8, kernel_size=3)
+        self.cv_quater = Conv(prototypes*4, prototypes*4, kernel_size=3)
+        self.cv_half = Conv(prototypes*2, prototypes, kernel_size=3)
+        self.cv_final = Conv(prototypes, prototypes, kernel_size=3)
+
+    def forward(
+        self,
+        x_half: torch.Tensor,
+        x_quater: torch.Tensor,
+        x_eight: torch.Tensor,
+        x_sixteenth: torch.Tensor,
+    ) -> torch.Tensor:
+        """Perform a forward pass through layers using multi-scale input feature maps."""
+        x = self.upsample_sixteenth(x_sixteenth)
+        x = self.reshape_eigth(x_eight) + x
+        x = self.cv_eigth(x)
+        x = self.upsample_eigth(x)
+        x = self.reshape_quater(x_quater) + x
+        x = self.cv_quater(x)
+        x = self.upsample_quater(x)
+        x = self.reshape_half(x_half) + x
+        x = self.cv_half(x)
+        return self.cv_final(x)
 
 
 class PrototypeMasksHighResolution(nn.Module):
@@ -656,24 +760,17 @@ class PrototypeMasksHighResolution(nn.Module):
 
     def __init__(
         self,
-        input_channels: int,
-        input_channels_skip_connection_low: int,
-        input_channels_skip_connection_high: int,
+        channels_half_resolution: int,
+        channels_quater_resolution: int,
+        channels_eigth_resolution: int,
         prototypes: int = 32,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes.
-
-        Args:
-            input_channels (int): Input channels.
-            input_channels_skip_connection_low (int): Input channels of low resolution skip connection,
-            input_channels_skip_connection_high (int): Input channels of high resolution skip connection,
-            prototypes (int): Output channels (number of protos).
-        """
+        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
-        self.cv1 = Conv(input_channels, prototypes * 4, kernel_size=3)
+        self.cv1 = Conv(channels_eigth_resolution, prototypes * 4, kernel_size=3)
         self.upsample1 = nn.ConvTranspose3d(prototypes * 4, prototypes * 4, 2, 2, 0, bias=True)
 
-        self.cv_skip_low_1 = Conv(input_channels_skip_connection_low, prototypes * 4, kernel_size=3)
+        self.cv_skip_low_1 = Conv(channels_quater_resolution, prototypes * 4, kernel_size=3)
         self.cv_skip_low_2 = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
 
         self.cv2 = Conv(prototypes * 4, prototypes * 2, kernel_size=3)
@@ -681,7 +778,7 @@ class PrototypeMasksHighResolution(nn.Module):
         self.upsample2 = nn.ConvTranspose3d(prototypes * 2, prototypes * 2, 2, 2, 0, bias=True)
 
         self.cv_skip_high_1 = Conv(
-            input_channels_skip_connection_high, prototypes * 2, kernel_size=3
+            channels_half_resolution, prototypes * 2, kernel_size=3
         )
         self.cv_skip_high_2 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
 
@@ -690,15 +787,15 @@ class PrototypeMasksHighResolution(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
-        skip_connection_low_res: torch.Tensor,
-        skip_connection_high_res: torch.Tensor,
+        input_half_resolution: torch.Tensor,
+        input_quater_resolution: torch.Tensor,
+        input_eigth_resolution: torch.Tensor,
     ) -> torch.Tensor:
         """Perform a forward pass through layers using an upsampled input image."""
-        x = self.cv1(x)
+        x = self.cv1(input_eigth_resolution)
         x = self.upsample1(x)
 
-        skip_low = self.cv_skip_low_1(skip_connection_low_res)
+        skip_low = self.cv_skip_low_1(input_quater_resolution)
         skip_low = self.cv_skip_low_2(skip_low)
         x = x + skip_low
 
@@ -706,49 +803,8 @@ class PrototypeMasksHighResolution(nn.Module):
         x = self.cv3(x)
         x = self.upsample2(x)
 
-        skip_high = self.cv_skip_high_1(skip_connection_high_res)
+        skip_high = self.cv_skip_high_1(input_half_resolution)
         skip_high = self.cv_skip_high_2(skip_high)
-
-        out = self.cv_out_1(x + skip_high)
-        return self.cv_out_2(out)
-
-
-class PrototypeMasksHighResolutionOneSkip(nn.Module):
-    """PrototypeMasks module for segmentation models."""
-
-    def __init__(
-        self,
-        input_channels: int,
-        input_channels_skip_connection: int,
-        prototypes: int = 32,
-    ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes.
-
-        Args:
-            input_channels (int): Input channels.
-            input_channels_skip_connection (int): Input channels of skip connection,
-            prototypes (int): Output channels (number of protos).
-        """
-        super().__init__()
-
-        self.cv1 = Conv(input_channels, prototypes * 4, kernel_size=3)
-        self.cv2 = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
-        self.upsample2 = nn.ConvTranspose3d(prototypes * 4, prototypes * 2, 2, 2, 0, bias=True)
-
-        self.cv_skip_1 = Conv(input_channels_skip_connection, prototypes * 2, kernel_size=3)
-        self.cv_skip_2 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
-
-        self.cv_out_1 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
-        self.cv_out_2 = Conv(prototypes * 2, prototypes)
-
-    def forward(self, x: torch.Tensor, skip_connection: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
-        x = self.cv1(x)
-        x = self.cv2(x)
-        x = self.upsample2(x)
-
-        skip_high = self.cv_skip_1(skip_connection)
-        skip_high = self.cv_skip_2(skip_high)
 
         out = self.cv_out_1(x + skip_high)
         return self.cv_out_2(out)

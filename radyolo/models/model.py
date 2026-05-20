@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 import torch
 from torch import nn
 
-from radyolo.config.config import DefaultConfig, ModelCheckpoint, load_model_checkpoint
+from radyolo.config.config import (
+    DefaultConfig,
+    ModelCheckpoint,
+    PrototypeLayer,
+    load_model_checkpoint,
+)
 from radyolo.models.layers import (
     C2PSA,
     SPPF,
@@ -15,9 +20,9 @@ from radyolo.models.layers import (
     Conv,
     Detect,
     ModelOutput,
-    PrototypeMasks,
+    PrototypeMasksFullResolution,
+    PrototypeMasksHalfResolution,
     PrototypeMasksHighResolution,
-    PrototypeMasksHighResolutionOneSkip,
 )
 from radyolo.utils.util import intersect_dicts, make_divisible, select_device, unwrap_model
 
@@ -61,7 +66,7 @@ class HardcodedModel(nn.Module):
         bbox_center_offset_limit: float,
         enable_output_masks: bool = True,
         num_prototype_masks: int = 8,
-        higher_resolution_prototypes: bool = True,
+        prototype_layer: PrototypeLayer = "higher_resolution",
         separate_objectness_head: bool = False,
         include_stride4_output: bool = False,
     ) -> None:
@@ -81,20 +86,17 @@ class HardcodedModel(nn.Module):
 
         self.enable_output_masks = enable_output_masks
         self.num_prototype_masks = num_prototype_masks
-        self.higher_resolution_prototypes = higher_resolution_prototypes
+        self.prototype_layer_mode = prototype_layer
         self.separate_objectness_head = separate_objectness_head
         self.include_stride4_output = include_stride4_output
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
-        output_channels: list[int] = [input_channels]
-
         # BACKBONE
 
-        in_channels = output_channels[-1]
         out_channels = resolve_channel_size(64)
-        self.l0 = Conv(in_channels, out_channels, 3, 2)
-        output_channels = [out_channels]
+        self.l0 = Conv(input_channels, out_channels, 3, 2)
+        output_channels: list[int] = [out_channels]
 
         in_channels = output_channels[-1]
         out_channels = resolve_channel_size(128)
@@ -224,26 +226,35 @@ class HardcodedModel(nn.Module):
         self.l22 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
+        detect_chs: list[int] = (
+            [c_p2, c_p3, c_p4, c_p5] if self.include_stride4_output else [c_p3, c_p4, c_p5]
+        )
+
         if self.enable_output_masks:
-            if self.higher_resolution_prototypes:
-                self.prototype_layer = PrototypeMasksHighResolution(
-                    output_channels[16], output_channels[1], output_channels[0], num_prototype_masks
+            if self.prototype_layer_mode == "full_resolution":
+                self.prototype_layer = PrototypeMasksFullResolution(
+                    input_channels,
+                    output_channels[0],
+                    output_channels[2],
+                    output_channels[16],
+                    output_channels[19],
+                    num_prototype_masks,
+                )
+            elif self.prototype_layer_mode == "half_resolution":
+                self.prototype_layer = PrototypeMasksHalfResolution(
+                    output_channels[0],
+                    output_channels[2],
+                    output_channels[16],
+                    output_channels[19],
+                    num_prototype_masks,
                 )
             else:
-                self.prototype_layer = PrototypeMasks(
-                    output_channels[16], num_prototype_masks * 4, num_prototype_masks
+                self.prototype_layer = PrototypeMasksHighResolution(
+                    output_channels[0], output_channels[2], output_channels[16], num_prototype_masks
                 )
 
             c4 = max(output_channels[16] // 4, num_prototype_masks)
             # Build coefficient heads dynamically for 3 or 4 detection levels
-            detect_chs: list[int]
-            if self.include_stride4_output:
-                detect_chs = [c_p2, c_p3, c_p4, c_p5]
-                self.prototype_layer = PrototypeMasksHighResolutionOneSkip(
-                    c_p2, output_channels[0], num_prototype_masks
-                )
-            else:
-                detect_chs = [c_p3, c_p4, c_p5]
             self.mask_coefficient_layer = nn.ModuleList(
                 nn.Sequential(
                     Conv(ch, c4, 3),
@@ -253,10 +264,6 @@ class HardcodedModel(nn.Module):
                 for ch in detect_chs
             )
 
-        # Detect head: order from highest resolution to lowest
-        detect_chs = [c_p3, c_p4, c_p5]
-        if self.include_stride4_output:
-            detect_chs = [c_p2, *detect_chs]
         self.l23 = Detect(
             num_classes,
             detect_chs,
@@ -267,16 +274,14 @@ class HardcodedModel(nn.Module):
         )
         s = 256
         sample_output = self.forward(torch.zeros(1, input_channels, s, s, s))
-        self.l23.stride = torch.tensor(
-            [s / x.shape[-2] for x in sample_output.raw_predictions]
-        )
+        self.l23.stride = torch.tensor([s / x.shape[-2] for x in sample_output.raw_predictions])
         self.stride = self.l23.stride
         self.l23.bias_init()
 
-    def forward(self, x: torch.Tensor) -> ModelOutput:
+    def forward(self, x_input: torch.Tensor) -> ModelOutput:
         # BACKBONE
-        x = o0 = self.l0(x)
-        x = o1 = self.l1(x)
+        x = o0 = self.l0(x_input)
+        x = self.l1(x)
         x = o2 = self.l2(x)
         x = self.l3(x)
         x = o4 = self.l4(x)
@@ -314,12 +319,12 @@ class HardcodedModel(nn.Module):
             output = self.l23([o16, o19, o22])
 
         if self.enable_output_masks:
-            if self.include_stride4_output:
-                output.prototype_masks = self.prototype_layer(p2, o0)
-            elif self.higher_resolution_prototypes:
-                output.prototype_masks = self.prototype_layer(o16, o1, o0)
+            if self.prototype_layer_mode == "full_resolution":
+                output.prototype_masks = self.prototype_layer(x_input, o0, o2, o16, o19)
+            elif self.prototype_layer_mode == "half_resolution":
+                output.prototype_masks = self.prototype_layer(o0, o2, o16, o19)
             else:
-                output.prototype_masks = self.prototype_layer(o16)
+                output.prototype_masks = self.prototype_layer(o0, o2, o16)
             if output.prototype_masks is None:
                 msg = "Prototype masks are not available"
                 raise RuntimeError(msg)
@@ -379,7 +384,7 @@ def build_model_from_config(
         bbox_center_offset_limit=train_config.bbox_center_offset_limit,
         enable_output_masks=train_config.segmentation_output,
         num_prototype_masks=train_config.prototype_masks,
-        higher_resolution_prototypes=train_config.higher_resolution_prototypes,
+        prototype_layer=train_config.prototype_layer,
         separate_objectness_head=train_config.separate_objectness_head,
         include_stride4_output=train_config.include_stride4_output,
     )

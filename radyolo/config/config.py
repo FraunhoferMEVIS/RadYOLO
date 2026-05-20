@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 DEPRECATED_CONFIG_KEYS = {"num_classes"}
+PrototypeLayer = Literal["higher_resolution", "full_resolution", "half_resolution"]
 
 
 @dataclass(frozen=True)
@@ -94,8 +95,7 @@ class DefaultConfig(BaseModel):
     # Optional Segmentation Head
     segmentation_output: bool = True  # add segmentation output to model
     prototype_masks: int = 8  # number of prototype masks for segmentation output
-    # use higher vs. lower resolution prototype masks (half vs. quarter input resolution)
-    higher_resolution_prototypes: bool = True
+    prototype_layer: PrototypeLayer = "higher_resolution"
 
     # Detection Head Options
     # if True, add a separate objectness output and use CCE loss for class logits
@@ -262,6 +262,33 @@ class DefaultConfig(BaseModel):
     intensity_gamma_p_invert: float = 0.25
     intensity_gamma_p_retain_stats: float = 1.0
     intensity_gamma_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_prototype_layer_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "prototype_layer" in data:
+            return data
+
+        legacy_modes = [
+            ("full_resolution_prototypes", "full_resolution"),
+            ("half_resolution_prototypes", "half_resolution"),
+            ("higher_resolution_prototypes", "higher_resolution"),
+        ]
+        enabled_modes = [mode for key, mode in legacy_modes if data.get(key) is True]
+        if len(enabled_modes) > 1:
+            msg = (
+                "prototype selection fields are mutually exclusive; got multiple legacy "
+                f"values enabled: {enabled_modes}"
+            )
+            raise ValueError(msg)
+
+        migrated = dict(data)
+        migrated["prototype_layer"] = enabled_modes[0] if enabled_modes else "higher_resolution"
+        for key, _ in legacy_modes:
+            migrated.pop(key, None)
+        return migrated
 
     @model_validator(mode="after")
     def validate_nms_optimization_candidates(self) -> Self:
