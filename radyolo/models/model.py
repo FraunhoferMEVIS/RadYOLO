@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import torch
 from torch import nn
@@ -43,6 +43,14 @@ def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
 
 
 class HardcodedModel(nn.Module):
+    MODEL_SCALES: ClassVar[dict[str, tuple[float, float, int]]] = {
+        "n": (0.50, 0.25, 256),
+        "s": (0.50, 0.50, 512),
+        "m": (0.50, 1.00, 512),
+        "l": (1.00, 1.00, 512),
+        "x": (1.00, 1.50, 768),
+    }
+
     def __init__(
         self,
         input_channels: int,
@@ -63,18 +71,10 @@ class HardcodedModel(nn.Module):
         self.bbox_parametrization = bbox_parametrization
         self.bbox_center_offset_limit = bbox_center_offset_limit
 
-        scales: dict[str, tuple[float, float, int]] = {
-            "n": (0.50, 0.25, 1024),
-            "s": (0.50, 0.50, 1024),
-            "m": (0.50, 1.00, 512),
-            "l": (1.00, 1.00, 512),
-            "x": (1.00, 1.50, 512),
-        }
+        depth_multiplier, width_multiplier, max_channels = HardcodedModel.MODEL_SCALES[scale]
 
-        depth_multiplier, width_multiplier, max_channels = scales[scale]
-
-        def make_divisible_(x: int) -> int:
-            return make_divisible(min(x, max_channels) * width_multiplier, 8)
+        def resolve_channel_size(x: int) -> int:
+            return make_divisible(min(x * width_multiplier, max_channels), 8)
 
         def num_repeats_(n: int) -> int:
             return max(round(n * depth_multiplier), 1)
@@ -92,62 +92,62 @@ class HardcodedModel(nn.Module):
         # BACKBONE
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(64)
+        out_channels = resolve_channel_size(64)
         self.l0 = Conv(in_channels, out_channels, 3, 2)
         output_channels = [out_channels]
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(128)
+        out_channels = resolve_channel_size(128)
         self.l1 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(256)
+        out_channels = resolve_channel_size(256)
         self.l2 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k, 0.25)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(256)
+        out_channels = resolve_channel_size(256)
         self.l3 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(512)
+        out_channels = resolve_channel_size(512)
         self.l4 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k, 0.25)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(512)
+        out_channels = resolve_channel_size(512)
         self.l5 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(512)
+        out_channels = resolve_channel_size(512)
         self.l6 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(1024)
+        out_channels = resolve_channel_size(1024)
         self.l7 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(1024)
+        out_channels = resolve_channel_size(1024)
         self.l8 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(1024)
+        out_channels = resolve_channel_size(1024)
         self.l9 = SPPF(in_channels, out_channels, 5)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(1024)
+        out_channels = resolve_channel_size(1024)
         self.l10 = C2PSA(in_channels, out_channels, num_repeats)
         output_channels.append(out_channels)
 
@@ -163,7 +163,7 @@ class HardcodedModel(nn.Module):
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(512)
+        out_channels = resolve_channel_size(512)
         self.l13 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
@@ -177,16 +177,16 @@ class HardcodedModel(nn.Module):
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(256)
+        out_channels = resolve_channel_size(256)
         self.l16 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
         # Optional P2 (stride-4) output branch: upsample P3 and fuse with stride-4 backbone (l2)
         # Channel sizes used across pyramid
-        c_p2 = make_divisible_(128)
-        c_p3 = make_divisible_(256)
-        c_p4 = make_divisible_(512)
-        c_p5 = make_divisible_(1024)
+        c_p2 = resolve_channel_size(128)
+        c_p3 = resolve_channel_size(256)
+        c_p4 = resolve_channel_size(512)
+        c_p5 = resolve_channel_size(1024)
         if self.include_stride4_output:
             # These layers operate on feature maps produced in forward; we define them here
             self.p2_upsample = nn.Upsample(None, 2, "nearest")
@@ -195,7 +195,7 @@ class HardcodedModel(nn.Module):
             self.p2_c3k2 = C3k2(c_p3 + c_p3, c_p2, num_repeats_(2), c3k2_use_c3k)
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(256)
+        out_channels = resolve_channel_size(256)
         self.l17 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
@@ -205,12 +205,12 @@ class HardcodedModel(nn.Module):
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(512)
+        out_channels = resolve_channel_size(512)
         self.l19 = C3k2(in_channels, out_channels, num_repeats, c3k2_use_c3k)
         output_channels.append(out_channels)
 
         in_channels = output_channels[-1]
-        out_channels = make_divisible_(512)
+        out_channels = resolve_channel_size(512)
         self.l20 = Conv(in_channels, out_channels, 3, 2)
         output_channels.append(out_channels)
 
@@ -220,7 +220,7 @@ class HardcodedModel(nn.Module):
 
         in_channels = output_channels[-1]
         num_repeats = num_repeats_(2)
-        out_channels = make_divisible_(1024)
+        out_channels = resolve_channel_size(1024)
         self.l22 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
