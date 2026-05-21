@@ -90,10 +90,16 @@ def test_non_max_suppression_accepts_model_output(monkeypatch) -> None:
     )
     captured: dict[str, object] = {}
 
-    def fake_nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+    def fake_nms(
+        boxes: torch.Tensor,
+        scores: torch.Tensor,
+        iou_threshold: float,
+        max_detections: int,
+    ) -> torch.Tensor:
         captured["boxes"] = boxes
         captured["scores"] = scores
         captured["iou_threshold"] = iou_threshold
+        captured["max_detections"] = max_detections
         return torch.tensor([0], dtype=torch.int64)
 
     monkeypatch.setattr("radyolo.utils.ops.nms", fake_nms)
@@ -108,6 +114,7 @@ def test_non_max_suppression_accepts_model_output(monkeypatch) -> None:
     assert len(result) == 1
     assert result[0].shape[1] == 9
     assert captured["iou_threshold"] == 0.2
+    assert captured["max_detections"] == 300
 
 
 def test_scale_boxes_can_skip_clipping() -> None:
@@ -201,7 +208,6 @@ class _DummyTrainConfig:
     num_classes: int = 1
     agnostic_nms: bool = False
     max_det: int = 300
-    nms_time_limit: float = 0.0
     training_mode: str = "wholeimage"
 
     def __post_init__(self) -> None:

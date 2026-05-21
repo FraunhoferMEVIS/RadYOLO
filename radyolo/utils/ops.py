@@ -146,7 +146,6 @@ def postprocess_model_output(
         multi_label=postprocess_config.multi_label,
         agnostic=postprocess_config.agnostic_nms,
         max_det=postprocess_config.max_det,
-        nms_time_limit=postprocess_config.nms_time_limit,
         nc=postprocess_config.nc,
     )
 
@@ -229,22 +228,25 @@ def scale_boxes(
         return clip_boxes(boxes, img0_shape)
     return boxes
 
-
-def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+def nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    iou_threshold: float,
+    max_detections: int
+) -> torch.Tensor:
+    boxes = boxes.to(dtype=torch.float16)
+    scores = scores.to(dtype=torch.float16)
     sorted_indices = torch.argsort(-scores)
     keep = []
-
     while len(sorted_indices) > 0:
         current_max_index = sorted_indices[0]
         keep.append(current_max_index)
         sorted_indices = sorted_indices[1:]
 
-        # sanity check
-        if len(sorted_indices) == 0:
+        if len(sorted_indices) == 0 or len(keep) > max_detections:
             break
 
         iou = bbox_iou(boxes[current_max_index], boxes[sorted_indices], xyzwhd=False).squeeze(-1)
-
         mask = iou <= iou_threshold
         sorted_indices = sorted_indices[mask]
 
@@ -261,8 +263,7 @@ def non_max_suppression(
     labels: list[list[int | float | torch.Tensor]] | list[torch.Tensor] = (),
     max_det: int = 300,
     nc: int = 0,  # number of classes (optional)
-    nms_time_limit: float | None = 1.0,
-    max_nms: int = 30000,
+    max_nms: int = 5000,
     max_wh: int = 7680,
     in_place: bool = True,
 ) -> list[torch.Tensor]:
@@ -286,8 +287,7 @@ def non_max_suppression(
         max_det (int): The maximum number of boxes to keep after NMS.
         nc (int, optional): The number of classes output by the model. Any indices after this
             will be considered masks.
-        nms_time_limit (float | None): Hard cap (seconds) for NMS execution per image.
-        max_nms (int): The maximum number of boxes into torchvision.ops.nms().
+        max_nms (int): The maximum number of boxes going into nms().
         max_wh (int): The maximum box width and height in pixels.
         in_place (bool): If True, the input prediction tensor will be modified in place.
 
@@ -311,7 +311,6 @@ def non_max_suppression(
     xc = prediction[:, 6:mi].amax(1) > conf_thres  # candidates
 
     # Settings
-    time_limit = nms_time_limit * bs
     multi_label &= nc > 1  # multiple labels per box
 
     prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
@@ -320,7 +319,6 @@ def non_max_suppression(
     else:
         prediction = torch.cat((xyzwhd2xyzxyz(prediction[..., :6]), prediction[..., 6:]), dim=-1)
 
-    t = time.time()
     output = [torch.zeros((0, 8 + nm), device=prediction.device)] * bs
     for index, prediction_i in enumerate(prediction):  # image index, image inference
         # Apply constraints
@@ -365,13 +363,10 @@ def non_max_suppression(
         c = x[:, 7:8] * (0 if agnostic else max_wh)  # classes
         scores = x[:, 6]
         boxes = x[:, :6] + c  # boxes (offset by class)
-        i = nms(boxes, scores, iou_thres)
-        i = i[:max_det]  # limit detections
+        selected_indices = nms(boxes, scores, iou_thres, max_det)
+        selected_indices = selected_indices[:max_det]  # limit detections
 
-        output[index] = x[i]
-        if (time.time() - t) > time_limit:
-            LOGGER.warning(f"NMS time limit {time_limit:.3f}s exceeded.")
-            break
+        output[index] = x[selected_indices]
 
     return output
 

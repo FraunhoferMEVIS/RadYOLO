@@ -279,7 +279,7 @@ def _merge_patch_detections(
         order = order[:max_det]
 
     class_offsets = merged[:, 7:8] * (0 if agnostic_nms else 7680)
-    keep = ops.nms(merged[:, :6] + class_offsets, merged[:, 6], iou_threshold)
+    keep = ops.nms(merged[:, :6] + class_offsets, merged[:, 6], iou_threshold, max_det)
     keep = keep[:max_det]
     keep_indices = order[keep].tolist()
     return merged[keep], keep_indices
@@ -374,7 +374,6 @@ def _postprocess_single(
             nms_iou_threshold=prediction_config.nms_iou_threshold,
             agnostic_nms=train_config.agnostic_nms,
             max_det=train_config.max_det,
-            nms_time_limit=train_config.nms_time_limit,
             nc=num_classes,
             multi_label=False,
         ),

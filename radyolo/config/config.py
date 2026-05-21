@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DEPRECATED_CONFIG_KEYS = {"num_classes"}
+DEPRECATED_CONFIG_KEYS = {"num_classes", "nms_time_limit"}
 PrototypeLayer = Literal["higher_resolution", "full_resolution", "half_resolution"]
 
 
@@ -38,7 +38,6 @@ class DetectionPostprocessConfig:
     nms_iou_threshold: float
     agnostic_nms: bool
     max_det: int
-    nms_time_limit: float | None
     nc: int
     multi_label: bool = False
 
@@ -176,7 +175,6 @@ class DefaultConfig(BaseModel):
         0.001  # object confidence threshold for validation/detection metrics
     )
     nms_iou_threshold: float = 0.2  # intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
-    nms_time_limit: float = 0.5  # maximum time in seconds per image for NMS before early exit
     agnostic_nms: bool = False  # class-agnostic NMS
     max_det: int = 300  # maximum number of detections per image
     clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds during validation/prediction
@@ -521,6 +519,8 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
             yaml_config["num_classes"],
             Path(yaml_config["data"]) / "dataset.yaml",
         )
+    if "nms_time_limit" in deprecated_config_keys:
+        LOGGER.warning("Config field 'nms_time_limit' is deprecated and ignored.")
 
     return DefaultConfig.model_validate(yaml_config)
 

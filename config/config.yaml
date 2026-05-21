@@ -73,7 +73,6 @@ bbox_parametrization: "center_extents" # (literal) bbox prediction format, choic
 val: True                              # (bool) validate/test during training
 confidence_threshold_validation: 0.001 # (float) object confidence threshold used for validation metrics/detection postprocessing
 nms_iou_threshold: 0.1                 # (float) intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
-nms_time_limit: 0.5                    # (float) maximum time in seconds per image for NMS before early exit
 nms_iou_threshold_candidates: [0.02, 0.04, 0.06, 0.1, 0.15, 0.2] # (list[float]) candidate NMS IoU thresholds evaluated after training; results are written to nms_optimization.csv
 agnostic_nms: False                    # (bool) class-agnostic NMS
 max_det: 300                           # (int) maximum number of detections per image

@@ -237,6 +237,54 @@ def test_get_cfg_warns_when_num_classes_is_set_in_config(
     assert "Config field 'num_classes' is deprecated and ignored" in caplog.text
 
 
+def test_get_cfg_warns_when_nms_time_limit_is_set_in_config(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config_path = tmp_path / "deprecated_nms_time_limit.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "input_channels: 1",
+                "model_scale: n",
+                f"data: {synthetic_dataset.as_posix()}",
+                "fold: 0",
+                "epochs: 2",
+                "nominal_batch_size: 1",
+                "warmup_epochs: 0.5",
+                "patience: 1",
+                "batch_size: 1",
+                "patch_size: {x: 32, y: 32, z: 64}",
+                "normalization: {type: 'none'}",
+                "device: cpu",
+                "workers: 0",
+                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: e2e",
+                "exist_ok: True",
+                "optimizer: Adam",
+                "verbose: False",
+                "seed: 0",
+                "deterministic: True",
+                "resume: False",
+                "amp: False",
+                "use_cudnn_benchmark: False",
+                "val: True",
+                "plots: False",
+                "augment: False",
+                "nms_time_limit: 0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        config = get_cfg(config_path, {})
+
+    assert config.nms_iou_threshold == 0.2
+    assert "Config field 'nms_time_limit' is deprecated and ignored" in caplog.text
+
+
 def test_get_cfg_rejects_relative_dataset_path(minimal_train_config: Path, tmp_path: Path) -> None:
     with minimal_train_config.open(encoding="utf-8") as file:
         config_data = yaml.safe_load(file)
