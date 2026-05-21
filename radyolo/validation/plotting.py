@@ -772,10 +772,10 @@ def plot_results(
                 if "loss" in column_name:
                     clean = y[np.isfinite(y)]
                     if clean.size > 0:
-                        ax[plot_index].set_ylim(
-                            np.min(clean) * 0.95,
-                            np.percentile(clean, 95) * 1.1,
-                        )
+                        y_min = np.min(clean) * 0.95
+                        y_max = np.percentile(clean, 95) * 1.1
+                        if y_min < y_max:
+                            ax[plot_index].set_ylim(y_min, y_max)
             except Exception as e:
                 LOGGER.warning("WARNING: Plotting error for %s (%s): %s", f, column_name, e)
         ax[0].legend()
