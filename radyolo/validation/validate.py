@@ -464,6 +464,7 @@ class Validator:
                     "mask probabilites contain non-finite values."
                 )
                 continue
+            pred_prob = pred_prob.to(dtype=torch.float16)
             pred_prob_upsampled = F.interpolate(
                 pred_prob[None, None, :],
                 gt_mask.shape,
