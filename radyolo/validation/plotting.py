@@ -769,6 +769,7 @@ def plot_results(
                 ax[plot_index].grid(True, axis="both", alpha=0.2, linewidth=0.6)
                 if "metrics" in column_name:
                     ax[plot_index].set_xlabel("Epochs")
+                    ax[plot_index].set_ylim(0, 1)
                 if "loss" in column_name:
                     clean = y[np.isfinite(y)]
                     if clean.size > 0:
