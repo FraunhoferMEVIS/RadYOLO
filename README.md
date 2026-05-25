@@ -14,7 +14,7 @@ This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-
 
 After installation this project provides a cli `radyolo` with built-in help.
 
-Available commands are `train`, `test`, `predict`, `evaluate-predictions`, `analyze-dataset`, `propose-model-config`, `create-data-splits`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
+Available commands are `train`, `test`, `predict`, `evaluate-predictions`, `analyze-dataset`, `propose-model-config`, `create-k-fold-split`, `create-train-val-test-split`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
@@ -127,12 +127,12 @@ uv run -m radyolo propose-model-config <path-to-dataset-folder> --model-scale m 
 
 The command reuses `dataset_fingerprint.json` when present, otherwise it runs `analyze-dataset` first. It then copies the reference training config from `config/config.yaml`, fills in the dataset-specific class count, input channel count, normalization setup, segmentation head setting and a stride-compatible patch size sized against the requested GPU memory budget.
 
-### Create data splits
+### Create k-fold split
 
-To automtically create a data split file, you can call:
+To automatically create a k-fold split file, you can call:
 
 ```
-uv run -m radyolo create-data-splits <path-to-dataset-folder>
+uv run -m radyolo create-k-fold-split <path-to-dataset-folder>
 ```
 
 By default it splits the data using a 5-fold cross validation scheme, where each group uses three of the folds as `train` set, one as `val` set and one as `test` set. The `val` set is used to compute the validation metrics during training and select the best model, while the `test` set is left out of the training to serve as independent test data in the end.

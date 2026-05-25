@@ -18,7 +18,7 @@ from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from radyolo.data.data import PatchWiseDataset, WholeImageDataset, build_dataloader
-from radyolo.data.data_splits import k_fold_data_splits
+from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
@@ -326,7 +326,7 @@ def plot_results(result_path: Path) -> int:
         return 0
 
 
-@main.command("create-data-splits")
+@main.command("create-k-fold-split")
 @click.argument(
     "dataset_path",
     metavar="DATASET-PATH",
@@ -342,7 +342,18 @@ def plot_results(result_path: Path) -> int:
 @click.option(
     "--seed", default=42, show_default=True, help="RNG seed for shuffling before splitting."
 )
-@click.option("--k", default=5, show_default=True, help="Number of folds to generate. Must be >=3.")
+@click.option(
+    "--k",
+    default=5,
+    show_default=True,
+    help="Number of folds to generate. Must be >=3 when test groups are enabled, otherwise >=2.",
+)
+@click.option(
+    "--create-test-group/--no-create-test-group",
+    default=True,
+    show_default=True,
+    help="Reserve a separate test group per fold. Disable this to generate train/val-only folds.",
+)
 @click.option(
     "--group-by-prefix/--no-group-by-prefix",
     default=False,
@@ -356,7 +367,12 @@ def plot_results(result_path: Path) -> int:
     help="Separator used to extract the prefix (text before first occurrence).",
 )
 def create_data_splits(
-    dataset_path: Path, seed: int, k: int, group_by_prefix: bool, prefix_sep: str
+    dataset_path: Path,
+    seed: int,
+    k: int,
+    create_test_group: bool,
+    group_by_prefix: bool,
+    prefix_sep: str,
 ) -> int:
     """Create k-fold data splits from DATASET_PATH/images and write data_splits.json."""
     try:
@@ -364,12 +380,90 @@ def create_data_splits(
             dataset_path=dataset_path,
             seed=seed,
             k=k,
+            create_test_group=create_test_group,
             group_by_prefix=group_by_prefix,
             prefix_sep=prefix_sep,
         )
         LOGGER.info("Data splits written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to create data splits", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("create-train-val-test-split")
+@click.argument(
+    "dataset_path",
+    metavar="DATASET-PATH",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--seed", default=42, show_default=True, help="RNG seed for shuffling before splitting."
+)
+@click.option(
+    "--train-percentage",
+    default=70.0,
+    show_default=True,
+    type=float,
+    help="Percentage of cases assigned to the training split.",
+)
+@click.option(
+    "--val-percentage",
+    default=15.0,
+    show_default=True,
+    type=float,
+    help="Percentage of cases assigned to the validation split.",
+)
+@click.option(
+    "--test-percentage",
+    default=15.0,
+    show_default=True,
+    type=float,
+    help="Percentage of cases assigned to the test split. May be 0 to keep the test split empty.",
+)
+@click.option(
+    "--group-by-prefix/--no-group-by-prefix",
+    default=False,
+    show_default=True,
+    help="If enabled, keep all cases sharing the same prefix in the same split.",
+)
+@click.option(
+    "--prefix-sep",
+    default="_",
+    show_default=True,
+    help="Separator used to extract the prefix (text before first occurrence).",
+)
+def create_train_val_test_split(
+    dataset_path: Path,
+    seed: int,
+    train_percentage: float,
+    val_percentage: float,
+    test_percentage: float,
+    group_by_prefix: bool,
+    prefix_sep: str,
+) -> int:
+    """Create one train/val/test split from DATASET_PATH/images and write data_splits.json."""
+    try:
+        out_path = train_val_test_data_split(
+            dataset_path=dataset_path,
+            seed=seed,
+            train_percentage=train_percentage,
+            val_percentage=val_percentage,
+            test_percentage=test_percentage,
+            group_by_prefix=group_by_prefix,
+            prefix_sep=prefix_sep,
+        )
+        LOGGER.info("Data splits written to %s", out_path)
+    except Exception as e:
+        LOGGER.exception("Failed to create train/val/test split", exc_info=e)
         return 1
     else:
         return 0
