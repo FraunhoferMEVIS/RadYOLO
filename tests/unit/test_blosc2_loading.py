@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+
 import torch
 
 from radyolo.config.spatial import PatchSize
@@ -49,3 +52,81 @@ def test_whole_image_dataset_length_includes_foreground_oversamples(
     assert len(dataset.cases) == 3
     assert dataset.foreground_oversample_count == 3
     assert len(dataset) == 6
+
+
+def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
+    synthetic_dataset,
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "dataset_with_image_labels"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    (dataset_path / "labels_image").mkdir()
+    (dataset_path / "labels_image" / "case1.json").write_text(
+        json.dumps({"tumor_stage": 2, "survival_days": 418.5}),
+        encoding="utf-8",
+    )
+    (dataset_path / "dataset.yaml").write_text(
+        "nc: 1\n"
+        "names: {0: lesion}\n"
+        "image_label_tasks:\n"
+        "  tumor_stage:\n"
+        "    type: multiclass\n"
+        "    classes: {0: stage_i, 1: stage_ii, 2: stage_iii}\n"
+        "  survival_days:\n"
+        "    type: regression\n",
+        encoding="utf-8",
+    )
+
+    preprocessed_dataset = preprocess_dataset(
+        dataset_path=dataset_path,
+        output_path=tmp_path / "preprocessed_blosc2_dataset_with_image_labels",
+        workers=0,
+    )
+
+    dataset = WholeImageDataset(
+        src_path=preprocessed_dataset,
+        patch_size=PatchSize(x=32, y=32, z=64),
+        augment=False,
+    )
+
+    sample = dataset.load_image_label_and_mask(0)
+
+    assert sample["image_labels"] == {"tumor_stage": 2, "survival_days": 418.5}
+    assert dataset.collate_fn([sample])["image_labels"] == (
+        {"tumor_stage": 2, "survival_days": 418.5},
+    )
+    assert (preprocessed_dataset / "labels_image" / "case1.json").exists()
+
+
+def test_dataset_loads_null_global_image_labels_as_none(
+    synthetic_dataset,
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "dataset_with_missing_image_labels"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    (dataset_path / "labels_image").mkdir()
+    (dataset_path / "labels_image" / "case1.json").write_text(
+        json.dumps({"tumor_stage": None, "survival_days": None}),
+        encoding="utf-8",
+    )
+    (dataset_path / "dataset.yaml").write_text(
+        "nc: 1\n"
+        "names: {0: lesion}\n"
+        "image_label_tasks:\n"
+        "  tumor_stage:\n"
+        "    type: multiclass\n"
+        "    classes: {0: stage_i, 1: stage_ii, 2: stage_iii}\n"
+        "  survival_days:\n"
+        "    type: regression\n",
+        encoding="utf-8",
+    )
+
+    dataset = WholeImageDataset(
+        src_path=dataset_path,
+        patch_size=PatchSize(x=32, y=32, z=64),
+        augment=False,
+    )
+
+    sample = dataset.load_image_label_and_mask(0)
+
+    assert sample["image_labels"] == {"tumor_stage": None, "survival_days": None}

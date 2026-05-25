@@ -14,6 +14,11 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from radyolo.config.spatial import PatchSize, VoxelSize
+from radyolo.data.image_labels import (
+    ImageLabelTaskSpec,
+    load_case_image_labels,
+    load_image_label_task_specs,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -57,6 +62,7 @@ class DatasetFingerprint:
     n_images_with_masks: int
     n_images_with_objects: int
     n_images_without_objects: int
+    image_label_tasks: dict[str, dict[str, object]]
 
 
 def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str, object]:
@@ -86,7 +92,72 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "n_images_with_masks": fingerprint.n_images_with_masks,
         "n_images_with_objects": fingerprint.n_images_with_objects,
         "n_images_without_objects": fingerprint.n_images_without_objects,
+        "image_label_tasks": fingerprint.image_label_tasks,
     }
+
+
+def _infer_image_label_task_type(values: list[int | float]) -> str:
+    if values and all(float(value).is_integer() for value in values):
+        return "multiclass"
+    return "regression"
+
+
+def _summarize_image_labels(
+    dataset_path: Path,
+    case_ids: list[str],
+    task_specs: dict[str, ImageLabelTaskSpec],
+) -> dict[str, dict[str, object]]:
+    values_by_task: dict[str, list[int | float]] = {}
+    missing_counts_by_task: dict[str, int] = {}
+    for case_id in case_ids:
+        image_labels = load_case_image_labels(dataset_path, case_id, task_specs or None)
+        for task_name, value in image_labels.items():
+            if value is None:
+                missing_counts_by_task[task_name] = missing_counts_by_task.get(task_name, 0) + 1
+                continue
+            values_by_task.setdefault(task_name, []).append(value)
+
+    summaries: dict[str, dict[str, object]] = {}
+    total_cases = len(case_ids)
+    for task_name in sorted(set(task_specs) | set(values_by_task)):
+        task_spec = task_specs.get(task_name)
+        values = values_by_task.get(task_name, [])
+        task_type = (
+            task_spec.type
+            if task_spec is not None
+            else _infer_image_label_task_type(values)
+        )
+        summary: dict[str, object] = {
+            "type": task_type,
+            "n_labeled": len(values),
+            "n_missing": total_cases - len(values),
+        }
+        if task_type == "multiclass":
+            class_counts: dict[str, int] = {}
+            for value in values:
+                class_id = int(float(value))
+                class_counts[str(class_id)] = class_counts.get(str(class_id), 0) + 1
+            summary["class_counts"] = class_counts
+            if task_spec is not None and task_spec.classes is not None:
+                summary["classes"] = {str(key): value for key, value in task_spec.classes.items()}
+        else:
+            if values:
+                numeric_values = np.asarray([float(value) for value in values], dtype=np.float64)
+                summary.update(
+                    {
+                        "min": float(numeric_values.min()),
+                        "p05": float(np.percentile(numeric_values, 5)),
+                        "median": float(np.median(numeric_values)),
+                        "p95": float(np.percentile(numeric_values, 95)),
+                        "max": float(numeric_values.max()),
+                        "mean": float(numeric_values.mean()),
+                        "std": float(numeric_values.std()),
+                    }
+                )
+            if task_spec is not None and task_spec.unit is not None:
+                summary["unit"] = task_spec.unit
+        summaries[task_name] = summary
+    return summaries
 
 
 def _foreground_channel_stats_and_samples(
@@ -349,7 +420,8 @@ def analyze_dataset(
 ) -> Path:
     """Compute dataset statistics and save dataset_fingerprint.json in the requested location.
 
-    Expects subfolders images/ (.nii.gz), labels/ (.txt), optional masks/ (.nii.gz).
+    Expects subfolders images/ (.nii.gz), labels/ (.txt), optional masks/ (.nii.gz),
+    and optional labels_image/ (.json).
     """
     dataset_path = Path(dataset_path)
     images_dir = dataset_path / "images"
@@ -362,6 +434,8 @@ def analyze_dataset(
     if not labels_dir.exists():
         msg = f"Missing labels directory: {labels_dir}"
         raise FileNotFoundError(msg)
+
+    image_label_task_specs = load_image_label_task_specs(dataset_path)
 
     cases = list(_iter_cases(dataset_path))
     if not cases:
@@ -587,6 +661,11 @@ def analyze_dataset(
         n_images_with_masks=n_masks,
         n_images_with_objects=n_images_with_objects,
         n_images_without_objects=n_images_without_objects,
+        image_label_tasks=_summarize_image_labels(
+            dataset_path,
+            [case_id for case_id, _image_path in cases],
+            image_label_task_specs,
+        ),
     )
 
     out_path = (

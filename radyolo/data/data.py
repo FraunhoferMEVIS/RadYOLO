@@ -26,6 +26,12 @@ from radyolo.data.augmentations import (
     tensor_cutout,
 )
 from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME, get_split_file_path
+from radyolo.data.image_labels import (
+    ImageLabelTaskSpec,
+    ImageLabelValue,
+    load_case_image_labels,
+    load_image_label_task_specs,
+)
 from radyolo.data.preprocessing import preprocess_image, resample_mask
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
@@ -432,6 +438,7 @@ class Sample(TypedDict):
     bboxes: torch.Tensor
     masks: torch.Tensor | None
     case_name: str
+    image_labels: dict[str, ImageLabelValue]
 
 
 class Batch(TypedDict):
@@ -447,6 +454,19 @@ class Batch(TypedDict):
     batch_idx: torch.Tensor
     masks: tuple[torch.Tensor | None, ...]
     case_names: tuple[str, ...]
+    image_labels: tuple[dict[str, ImageLabelValue], ...]
+
+
+def _load_image_label_tasks(src_path: Path) -> dict[str, ImageLabelTaskSpec]:
+    return load_image_label_task_specs(src_path)
+
+
+def _load_image_labels(
+    src_path: Path,
+    case_name: str,
+    image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
+) -> dict[str, ImageLabelValue]:
+    return load_case_image_labels(src_path, case_name, image_label_tasks)
 
 
 def _get_spatial_axis_offset(array_shape: tuple[int, ...]) -> int:
@@ -841,6 +861,7 @@ def _collate_samples(batch: list[Sample]) -> Batch:
             ),
             "masks": tuple(sample["masks"] for sample in batch),
             "case_names": tuple(sample["case_name"] for sample in batch),
+            "image_labels": tuple(sample["image_labels"] for sample in batch),
         }
 
 
@@ -1108,6 +1129,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
             group,
             self.split_file_name,
         )
+        self.image_label_tasks = _load_image_label_tasks(self.src_path)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_oversample_count = _compute_foreground_oversample_count(
@@ -1148,6 +1170,9 @@ class WholeImageDataset(Dataset[Sample], Sized):
             self.image_format,
             load_masks=self.load_masks,
         )
+
+    def _load_image_labels(self, case_name: str) -> dict[str, ImageLabelValue]:
+        return _load_image_labels(self.src_path, case_name, self.image_label_tasks)
 
     def _detect_image_format(self) -> Literal["nifti", "blosc2"]:
         return _detect_image_format(self.src_path, self.cases)
@@ -1190,6 +1215,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         )
         pad = (0, 0, 0)
         classes, bboxes, masks = self.load_labels_and_masks(case_name)
+        image_labels = self._load_image_labels(case_name)
 
         return Sample(
             image=image,
@@ -1200,6 +1226,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
             bboxes=bboxes,
             masks=masks,
             case_name=case_name,
+            image_labels=image_labels,
         )
 
     def load_image(self, case_name: str) -> torch.Tensor:
@@ -1293,6 +1320,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             group,
             self.split_file_name,
         )
+        self.image_label_tasks = _load_image_label_tasks(self.src_path)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_oversample_count = _compute_foreground_oversample_count(
@@ -1324,6 +1352,9 @@ class PatchWiseDataset(Dataset[Sample], Sized):
     @staticmethod
     def collate_fn(batch: list[Sample]) -> Batch:
         return _collate_samples(batch)
+
+    def _load_image_labels(self, case_name: str) -> dict[str, ImageLabelValue]:
+        return _load_image_labels(self.src_path, case_name, self.image_label_tasks)
 
     def _sample_patch_center(
         self,
@@ -1579,6 +1610,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             bboxes=bboxes,
             masks=masks,
             case_name=case_name,
+            image_labels=self._load_image_labels(case_name),
         )
 
 

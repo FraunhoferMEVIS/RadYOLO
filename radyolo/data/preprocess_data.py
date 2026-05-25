@@ -58,6 +58,11 @@ def _copy_file_if_exists(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def _copy_tree_if_exists(src: Path, dst: Path) -> None:
+    if src.exists():
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
 def _load_nifti_tensor(nifti_path: Path, *, squeeze: bool = False) -> tuple[torch.Tensor, VoxelSize]:
     nifti_image = nib.loadsave.load(nifti_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
@@ -505,6 +510,7 @@ def preprocess_dataset(  # noqa: PLR0913
         out_masks_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(labels_dir, output_path / "labels", dirs_exist_ok=True)
+    _copy_tree_if_exists(dataset_path / "labels_image", output_path / "labels_image")
 
     _copy_file_if_exists(dataset_path / "dataset.yaml", output_path / "dataset.yaml")
     _copy_file_if_exists(
