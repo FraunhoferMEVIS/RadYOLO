@@ -1,5 +1,5 @@
 # Data and Output Settings
-data: "D:/datasets/AMOS22/radyolo_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/HECKTOR_2026/radyolo_hecktor_2026" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
 split_file_name: "data_splits.json" # (str) split file name inside the dataset folder
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
@@ -19,7 +19,7 @@ seed: 0                   # (int) random seed for reproducibility
 deterministic: False      # (bool) whether to enable deterministic mode
 
 # Model Parameters
-input_channels: 1 # number of input channels for model
+input_channels: 2 # number of input channels for model
 model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Optional Segmentation Head
@@ -32,7 +32,7 @@ separate_objectness_head: True # (bool) if True, add a separate objectness outpu
 include_stride4_output: False  # (bool) if True, add a detection head on stride 4 level (otherwise only on stride levels 8, 16, 32)
 
 # Global Image-Label Head
-enable_image_label_head: False                 # (bool) enable the global image-label head for dataset.yaml image_label_tasks
+enable_image_label_head: True                  # (bool) enable the global image-label head for dataset.yaml image_label_tasks
 image_label_head_feature_maps: ["o10", "o16", "o19", "o22"] # (list[literal]) selectable inputs from [o10, o16, o19, o22]
 image_label_head_projection_channels: 128      # (int) shared projection width for each selected feature map via 1x1x1 convolutions
 image_label_head_mlp_hidden_layers: 1          # (int) number of hidden layers in the shared MLP trunk
@@ -40,6 +40,8 @@ image_label_head_mlp_hidden_channels: 256      # (int) width of each hidden MLP 
 image_label_head_dropout: 0.1                  # (float) dropout applied after each hidden MLP layer
 image_label_multiclass_cce_gain: 1.0           # (float) gain for multiclass cross-entropy image-label loss; ignored when 0
 image_label_multiclass_cce_class_weights: {}   # (dict[str, list[float]]) optional per-task class weights keyed by dataset.yaml image_label_tasks name
+image_label_regression_init_mean: {"rfs": 1267} # (dict[str, float]) optional per-task regression head bias initialization keyed by dataset.yaml image_label_tasks name
+image_label_regression_init_std: {"rfs": 260}  # (dict[str, float]) optional per-task regression head output std initialization keyed by dataset.yaml image_label_tasks name
 image_label_regression_l1_gain: 0.1            # (float) gain for regression L1 image-label loss; ignored when 0
 
 # Hyperparameters
@@ -48,8 +50,8 @@ patience: 300                     # (int) epochs to wait for no observable impro
 training_mode: "wholeimage"       # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
 patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
 voxel_size: null                  # optional resampling target in x, y, z: {x: 0.8, y: 0.8, z: 1.5} or null, only used for patchwise training
-normalization: {type: "none"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
-apply_preprocessing: False        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
+normalization: [{type: "zscore"}, {type: "zscore"}]     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
+apply_preprocessing: True        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
 foreground_oversampling: 0.0      # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 min_box_crop_fraction: 0.5        # (float) minimum fraction of a box volume that must stay inside a sampled patch to keep it
 batch_size: 2                     # (int) number of images per batch

@@ -202,3 +202,22 @@ def test_image_label_multiclass_loss_supports_class_weights() -> None:
     assert loss_fn.loss_names == ["image_label_multiclass_cce_loss"]
     assert torch.isclose(total_loss, expected)
     assert torch.isclose(loss_items[0], expected)
+
+
+def test_build_model_from_config_initializes_regression_head_from_config(tmp_path: Path) -> None:
+    dataset_path = _write_image_label_dataset(tmp_path / "dataset")
+    config_path = _write_train_config(
+        tmp_path / "train.yaml",
+        dataset_path,
+        overrides={
+            "image_label_regression_init_mean": {"survival_months": 18.5},
+            "image_label_regression_init_std": {"survival_months": 0.0},
+        },
+    )
+    config = get_cfg(config_path, {})
+
+    model = build_model_from_config(config)
+    regression_head = model.image_label_head.task_heads["survival_months"]
+
+    assert torch.allclose(regression_head.bias.detach(), torch.tensor([18.5]))
+    assert torch.count_nonzero(regression_head.weight.detach()) == 0

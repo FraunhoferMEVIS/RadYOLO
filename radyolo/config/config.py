@@ -116,6 +116,8 @@ class DefaultConfig(BaseModel):
     image_label_multiclass_cce_class_weights: dict[str, list[float]] = Field(
         default_factory=dict
     )
+    image_label_regression_init_mean: dict[str, float] = Field(default_factory=dict)
+    image_label_regression_init_std: dict[str, float] = Field(default_factory=dict)
     image_label_regression_l1_gain: float = Field(0.1, ge=0.0)
 
     # Hyperparameters
@@ -406,6 +408,32 @@ class DefaultConfig(BaseModel):
                 msg = (
                     "image_label_multiclass_cce_class_weights entries must contain at least "
                     f"one positive weight, but '{task_name}' contains {class_weights}"
+                )
+                raise ValueError(msg)
+        for task_name, init_mean in self.image_label_regression_init_mean.items():
+            if not task_name:
+                msg = "image_label_regression_init_mean keys must be non-empty"
+                raise ValueError(msg)
+            if not np.isfinite(init_mean):
+                msg = (
+                    "image_label_regression_init_mean entries must be finite, but "
+                    f"'{task_name}' contains {init_mean}"
+                )
+                raise ValueError(msg)
+        for task_name, init_std in self.image_label_regression_init_std.items():
+            if not task_name:
+                msg = "image_label_regression_init_std keys must be non-empty"
+                raise ValueError(msg)
+            if not np.isfinite(init_std):
+                msg = (
+                    "image_label_regression_init_std entries must be finite, but "
+                    f"'{task_name}' contains {init_std}"
+                )
+                raise ValueError(msg)
+            if init_std < 0.0:
+                msg = (
+                    "image_label_regression_init_std entries must be non-negative, but "
+                    f"'{task_name}' contains {init_std}"
                 )
                 raise ValueError(msg)
         self.image_label_head_feature_maps = list(dict.fromkeys(self.image_label_head_feature_maps))
