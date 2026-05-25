@@ -31,6 +31,17 @@ prototype_layer: "higher_resolution" # (literal) choose one of [higher_resolutio
 separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits
 include_stride4_output: False  # (bool) if True, add a detection head on stride 4 level (otherwise only on stride levels 8, 16, 32)
 
+# Global Image-Label Head
+enable_image_label_head: False                 # (bool) enable the global image-label head for dataset.yaml image_label_tasks
+image_label_head_feature_maps: ["o10", "o16", "o19", "o22"] # (list[literal]) selectable inputs from [o10, o16, o19, o22]
+image_label_head_projection_channels: 128      # (int) shared projection width for each selected feature map via 1x1x1 convolutions
+image_label_head_mlp_hidden_layers: 1          # (int) number of hidden layers in the shared MLP trunk
+image_label_head_mlp_hidden_channels: 256      # (int) width of each hidden MLP layer
+image_label_head_dropout: 0.1                  # (float) dropout applied after each hidden MLP layer
+image_label_multiclass_cce_gain: 1.0           # (float) gain for multiclass cross-entropy image-label loss; ignored when 0
+image_label_multiclass_cce_class_weights: {}   # (dict[str, list[float]]) optional per-task class weights keyed by dataset.yaml image_label_tasks name
+image_label_regression_l1_gain: 0.1            # (float) gain for regression L1 image-label loss; ignored when 0
+
 # Hyperparameters
 epochs: 1000                      # (int) number of epochs to train for
 patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training

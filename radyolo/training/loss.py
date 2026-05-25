@@ -24,10 +24,19 @@ from radyolo.utils.util import unwrap_model
 if TYPE_CHECKING:
     from radyolo.config.config import DefaultConfig
     from radyolo.data.data import Batch
+    from radyolo.data.image_labels import ImageLabelTaskSpec
     from radyolo.models.layers import Detect, ModelOutput
     from radyolo.models.model import HardcodedModel
 
 LOGGER = logging.getLogger(__name__)
+
+DETECTION_LOSS_NAMES = (
+    "box_loss",
+    "cls_obj_loss",
+    "dfl_loss",
+    "mask_loss",
+    "cls_sep_loss",
+)
 
 
 class QualityFocalLoss(nn.Module):
@@ -168,7 +177,154 @@ class BboxLoss(nn.Module):
         return loss_iou, loss_dfl
 
 
-class v8DetectionLoss:  # noqa: N801
+class ImageLabelLoss:
+    MULTICLASS_LOSS_NAME = "img_cce"
+    REGRESSION_LOSS_NAME = "img_l1"
+
+    def __init__(
+        self,
+        device: torch.device,
+        image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
+        image_label_multiclass_cce_gain: float = 1.0,
+        image_label_multiclass_cce_class_weights: dict[str, list[float]] | None = None,
+        image_label_regression_l1_gain: float = 1.0,
+    ) -> None:
+        self.device = device
+        self.image_label_tasks = dict(image_label_tasks or {})
+        self.regression_l1 = nn.L1Loss(reduction="mean")
+        self.image_label_multiclass_cce_gain = image_label_multiclass_cce_gain
+        self.image_label_multiclass_cce_class_weights = self._build_multiclass_class_weights(
+            image_label_multiclass_cce_class_weights or {}
+        )
+        self.image_label_regression_l1_gain = image_label_regression_l1_gain
+        self.has_multiclass_tasks = any(
+            task_spec.type == "multiclass" for task_spec in self.image_label_tasks.values()
+        )
+        self.has_regression_tasks = any(
+            task_spec.type == "regression" for task_spec in self.image_label_tasks.values()
+        )
+        self.loss_names: list[str] = []
+        if self.has_multiclass_tasks and self.image_label_multiclass_cce_gain > 0.0:
+            self.loss_names.append(self.MULTICLASS_LOSS_NAME)
+        if self.has_regression_tasks and self.image_label_regression_l1_gain > 0.0:
+            self.loss_names.append(self.REGRESSION_LOSS_NAME)
+        self.num_loss_terms = len(self.loss_names)
+        self.loss_indices = {name: idx for idx, name in enumerate(self.loss_names)}
+        self.enabled = bool(self.loss_names)
+
+    def _build_multiclass_class_weights(
+        self,
+        raw_class_weights: dict[str, list[float]],
+    ) -> dict[str, torch.Tensor]:
+        task_class_weights: dict[str, torch.Tensor] = {}
+        for task_name, class_weights in raw_class_weights.items():
+            task_spec = self.image_label_tasks.get(task_name)
+            if task_spec is None:
+                msg = (
+                    "image_label_multiclass_cce_class_weights configured an unknown image-label "
+                    f"task '{task_name}'"
+                )
+                raise ValueError(msg)
+            if task_spec.type != "multiclass":
+                msg = (
+                    "image_label_multiclass_cce_class_weights can only be set for multiclass "
+                    f"tasks, but '{task_name}' is '{task_spec.type}'"
+                )
+                raise ValueError(msg)
+            if task_spec.classes is None:
+                msg = f"Multiclass task '{task_name}' is missing class definitions"
+                raise ValueError(msg)
+            if len(class_weights) != len(task_spec.classes):
+                msg = (
+                    "image_label_multiclass_cce_class_weights length must match the number of "
+                    f"classes for task '{task_name}', got {len(class_weights)} and "
+                    f"{len(task_spec.classes)}"
+                )
+                raise ValueError(msg)
+            task_class_weights[task_name] = torch.tensor(
+                class_weights,
+                device=self.device,
+                dtype=torch.float32,
+            )
+        return task_class_weights
+
+    def __call__(
+        self,
+        model_output: ModelOutput,
+        batch: Batch,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        loss_items = torch.zeros(self.num_loss_terms, device=self.device)
+        image_label_outputs = model_output.image_label_outputs
+        if image_label_outputs is None:
+            return torch.zeros((), device=self.device), loss_items
+
+        multiclass_task_losses: list[torch.Tensor] = []
+        regression_task_losses: list[torch.Tensor] = []
+        for task_name, task_spec in self.image_label_tasks.items():
+            predictions = image_label_outputs.get(task_name)
+            if predictions is None:
+                msg = f"Missing image-label output for task '{task_name}'"
+                raise RuntimeError(msg)
+
+            labeled_batch_indices: list[int] = []
+            target_values: list[int | float] = []
+            for batch_index, image_labels in enumerate(batch["image_labels"]):
+                target_value = image_labels.get(task_name)
+                if target_value is None:
+                    continue
+                labeled_batch_indices.append(batch_index)
+                target_values.append(target_value)
+
+            if not labeled_batch_indices:
+                continue
+
+            task_predictions = predictions[labeled_batch_indices]
+            if task_spec.type == "multiclass":
+                if self.image_label_multiclass_cce_gain <= 0.0:
+                    continue
+                targets = torch.tensor(target_values, device=self.device, dtype=torch.long)
+                multiclass_task_losses.append(
+                    self.image_label_multiclass_cce_gain
+                    * F.cross_entropy(
+                        task_predictions,
+                        targets,
+                        weight=self.image_label_multiclass_cce_class_weights.get(task_name),
+                        reduction="mean",
+                    )
+                )
+                continue
+
+            if self.image_label_regression_l1_gain <= 0.0:
+                continue
+            regression_targets = torch.tensor(
+                target_values,
+                device=self.device,
+                dtype=task_predictions.dtype,
+            ).view(-1, 1)
+            regression_task_losses.append(
+                self.image_label_regression_l1_gain
+                * self.regression_l1(task_predictions, regression_targets)
+            )
+
+        total_task_count = len(multiclass_task_losses) + len(regression_task_losses)
+        if total_task_count == 0:
+            return torch.zeros((), device=self.device), loss_items
+
+        if multiclass_task_losses:
+            multiclass_loss = torch.stack(multiclass_task_losses).mean()
+            loss_items[self.loss_indices[self.MULTICLASS_LOSS_NAME]] = multiclass_loss * (
+                len(multiclass_task_losses) / total_task_count
+            )
+        if regression_task_losses:
+            regression_loss = torch.stack(regression_task_losses).mean()
+            loss_items[self.loss_indices[self.REGRESSION_LOSS_NAME]] = regression_loss * (
+                len(regression_task_losses) / total_task_count
+            )
+
+        return loss_items.sum(), loss_items.detach()
+
+
+class DetectionSegmentationLoss:  # noqa: N801
     """Class for computing training losses."""
 
     def __init__(
@@ -247,6 +403,9 @@ class v8DetectionLoss:  # noqa: N801
         self.enable_mask_loss = enable_mask_loss
         self.mask_dice_loss = DiceLoss()
         self.mask_bce_loss = nn.BCEWithLogitsLoss()
+        self.loss_names = list(DETECTION_LOSS_NAMES)
+        self.loss_indices = {name: idx for idx, name in enumerate(self.loss_names)}
+        self.num_loss_terms = len(self.loss_names)
         self.reset_epoch_warning_stats()
 
     def reset_epoch_warning_stats(self) -> None:
@@ -319,7 +478,7 @@ class v8DetectionLoss:  # noqa: N801
         current_epoch: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the detection loss multiplied by batch size."""
-        loss = torch.zeros(5, device=self.device)  # box, cls_obj, dfl, mask, cls_sep
+        loss = torch.zeros(self.num_loss_terms, device=self.device)
         feats = model_output.raw_predictions
         flat = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2)
         if self.separate_objectness_head:
@@ -414,22 +573,25 @@ class v8DetectionLoss:  # noqa: N801
             # Only count fg anchors
             denom = fg_mask.sum().clamp_min(1)
             ce_loss = (ce_loss * fg_mask).sum() / denom
-            loss[4] = ce_loss
+            loss[self.loss_indices["cls_sep_loss"]] = ce_loss
             # BCE-with-logits on objectness score
-            loss[1] = (
+            loss[self.loss_indices["cls_obj_loss"]] = (
                 self.objectness_loss(pred_objectness_logit, target_objectness_scores)
                 / target_objectness_scores_sum
             )
         else:
             # BCE-with-logits on multi-label scores as in YOLO
-            loss[1] = (
+            loss[self.loss_indices["cls_obj_loss"]] = (
                 self.objectness_loss(pred_class_logits, target_scores.to(dtype)) / target_scores_sum
             )
 
         # Bbox loss
         if fg_mask.sum():
             target_bboxes /= stride_tensor
-            loss[0], loss[2] = self.bbox_loss(
+            (
+                loss[self.loss_indices["box_loss"]],
+                loss[self.loss_indices["dfl_loss"]],
+            ) = self.bbox_loss(
                 pred_distri,
                 pred_bboxes,
                 anchor_points,
@@ -487,27 +649,67 @@ class v8DetectionLoss:  # noqa: N801
                                     mask_index,
                                 )
                                 continue
-                            loss[3] += mask_dice_loss + mask_bce_loss
+                            loss[self.loss_indices["mask_loss"]] += mask_dice_loss + mask_bce_loss
                             mask_loss_count += 1
                 if mask_loss_count > 0:
-                    loss[3] = loss[3] / mask_loss_count
+                    loss[self.loss_indices["mask_loss"]] = (
+                        loss[self.loss_indices["mask_loss"]] / mask_loss_count
+                    )
 
-        loss[0] *= self.box_gain
-        loss[1] *= self.classification_gain
-        loss[2] *= self.dfl_gain
-        loss[3] *= self.mask_loss_gain
-        loss[4] *= self.class_separate_loss_gain
+        loss[self.loss_indices["box_loss"]] *= self.box_gain
+        loss[self.loss_indices["cls_obj_loss"]] *= self.classification_gain
+        loss[self.loss_indices["dfl_loss"]] *= self.dfl_gain
+        loss[self.loss_indices["mask_loss"]] *= self.mask_loss_gain
+        loss[self.loss_indices["cls_sep_loss"]] *= self.class_separate_loss_gain
 
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl, mask, cls_sep)
+
+
+class ComposedTrainingLoss:
+    def __init__(
+        self,
+        detection_loss: DetectionSegmentationLoss,
+        image_label_loss: ImageLabelLoss,
+    ) -> None:
+        self.detection_loss = detection_loss
+        self.image_label_loss = image_label_loss
+        self.loss_names = [*self.detection_loss.loss_names, *self.image_label_loss.loss_names]
+        self.num_loss_terms = len(self.loss_names)
+
+    def reset_epoch_warning_stats(self) -> None:
+        self.detection_loss.reset_epoch_warning_stats()
+
+    def pop_epoch_warning_stats(self) -> EpochWarningStats:
+        return self.detection_loss.pop_epoch_warning_stats()
+
+    def __call__(
+        self,
+        model_output: ModelOutput,
+        batch: Batch,
+        current_epoch: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        detection_total_loss, detection_loss_items = self.detection_loss(
+            model_output,
+            batch,
+            current_epoch=current_epoch,
+        )
+        image_label_total_loss, image_label_loss_items = self.image_label_loss(model_output, batch)
+        batch_size = int(batch["img"].shape[0])
+        total_loss = detection_total_loss + image_label_total_loss * batch_size
+        loss_items = torch.cat((detection_loss_items, image_label_loss_items))
+        return total_loss, loss_items
+
+
+type TrainingLoss = DetectionSegmentationLoss | ComposedTrainingLoss
 
 
 def build_detection_loss_from_config(
     train_config: DefaultConfig,
     model: nn.Module,
     device: torch.device,
-) -> v8DetectionLoss:
+) -> TrainingLoss:
     unwrapped_model = cast("HardcodedModel", unwrap_model(model))
-    return v8DetectionLoss(
+    detection_loss = DetectionSegmentationLoss(
         box=train_config.box_loss_gain,
         cls=train_config.class_loss_gain,
         dfl=train_config.dfl_loss_gain,
@@ -530,3 +732,15 @@ def build_detection_loss_from_config(
         objectness_loss=train_config.objectness_loss,
         bbox_parametrization=train_config.bbox_parametrization,
     )
+    image_label_loss = ImageLabelLoss(
+        device=device,
+        image_label_tasks=unwrapped_model.image_label_task_specs,
+        image_label_multiclass_cce_gain=train_config.image_label_multiclass_cce_gain,
+        image_label_multiclass_cce_class_weights=(
+            train_config.image_label_multiclass_cce_class_weights
+        ),
+        image_label_regression_l1_gain=train_config.image_label_regression_l1_gain,
+    )
+    if not image_label_loss.enabled:
+        return detection_loss
+    return ComposedTrainingLoss(detection_loss, image_label_loss)

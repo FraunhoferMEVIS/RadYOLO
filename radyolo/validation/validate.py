@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from radyolo.data.data import Batch
     from radyolo.models.layers import ModelOutput
     from radyolo.models.model import HardcodedModel
-    from radyolo.training.loss import v8DetectionLoss
+    from radyolo.training.loss import TrainingLoss
     from radyolo.training.train import Trainer
 LOGGER = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class Validator:
         self,
         trainer: Trainer | None,
         model: HardcodedModel,
-        loss: v8DetectionLoss | None = None,
+        loss: TrainingLoss | None = None,
     ) -> dict[str, float]:
         """Execute validation process, run inference on dataloader and compute metrics."""
         self.training = trainer is not None

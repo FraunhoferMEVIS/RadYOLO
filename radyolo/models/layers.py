@@ -21,6 +21,7 @@ class ModelOutput:
     objectness_probabilities: torch.Tensor | None = None
     mask_coefficients: torch.Tensor | None = None
     prototype_masks: torch.Tensor | None = None
+    image_label_outputs: dict[str, torch.Tensor] | None = None
 
     def to_prediction_components(self) -> tuple[torch.Tensor, ...]:
         if self.decoded_boxes is None or self.class_probabilities is None:

@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
     from torch.utils.data import DataLoader
 
-    from radyolo.training.loss import v8DetectionLoss
+    from radyolo.training.loss import TrainingLoss
 
 
 LOGGER = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ class Trainer:
             self.config.workers = 0
 
         self.model: torch.nn.Module | None = None
-        self.loss: v8DetectionLoss | None = None
+        self.loss: TrainingLoss | None = None
         self.data = get_dataset_config(self.config.data)
 
         self.lf: Callable[[int], float] | None = None
@@ -455,6 +455,7 @@ class Trainer:
         )
         model = model.to(self.device)
         self.loss = build_detection_loss_from_config(self.config, model, self.device)
+        self.loss_names = tuple(self.loss.loss_names)
 
         # Freeze layers
         freeze_layer_names = [".dfl"]
@@ -621,7 +622,7 @@ class Trainer:
                 )
             else:
                 pbar = enumerate(train_loader)
-            tloss: torch.Tensor | None = torch.zeros(5, dtype=torch.float64)
+            tloss: torch.Tensor | None = torch.zeros(self.loss.num_loss_terms, dtype=torch.float64)
             loss_length: int = 1
             loss: torch.Tensor | None = None
             previous_gpu_steps_end: float | None = None
@@ -1029,7 +1030,6 @@ class Trainer:
         save_dir: Path,
         names: dict[int, str],
     ) -> Validator:
-        self.loss_names = "box_loss", "cls_obj_loss", "dfl_loss", "mask_loss", "cls_sep_loss"
         return Validator(
             test_loader,
             save_dir=save_dir,

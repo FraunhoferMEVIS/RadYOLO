@@ -30,6 +30,7 @@ LOGGER = logging.getLogger(__name__)
 
 DEPRECATED_CONFIG_KEYS = {"num_classes", "nms_time_limit"}
 PrototypeLayer = Literal["higher_resolution", "full_resolution", "half_resolution"]
+ImageLabelHeadFeature = Literal["o10", "o16", "o19", "o22"]
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,21 @@ class DefaultConfig(BaseModel):
     # if True, add a separate objectness output and use CCE loss for class logits
     separate_objectness_head: bool = False
     include_stride4_output: bool = False  # if True, add a detection head on stride 4 level
+
+    # Global image-label head
+    enable_image_label_head: bool = False
+    image_label_head_feature_maps: list[ImageLabelHeadFeature] = Field(
+        default_factory=lambda: ["o10", "o16", "o19", "o22"]
+    )
+    image_label_head_projection_channels: int = Field(128, ge=1)
+    image_label_head_mlp_hidden_layers: int = Field(1, ge=0)
+    image_label_head_mlp_hidden_channels: int = Field(256, ge=1)
+    image_label_head_dropout: float = Field(0.1, ge=0.0, lt=1.0)
+    image_label_multiclass_cce_gain: float = Field(1.0, ge=0.0)
+    image_label_multiclass_cce_class_weights: dict[str, list[float]] = Field(
+        default_factory=dict
+    )
+    image_label_regression_l1_gain: float = Field(0.1, ge=0.0)
 
     # Hyperparameters
     epochs: int = 1000  # number of epochs to train for
@@ -361,6 +377,38 @@ class DefaultConfig(BaseModel):
         if sum(self.fitness_metric_weights) <= 0:
             msg = "fitness_metric_weights must sum to a positive value"
             raise ValueError(msg)
+        if self.enable_image_label_head and not self.image_label_head_feature_maps:
+            msg = "image_label_head_feature_maps must contain at least one feature map when enabled"
+            raise ValueError(msg)
+        for task_name, class_weights in self.image_label_multiclass_cce_class_weights.items():
+            if not task_name:
+                msg = "image_label_multiclass_cce_class_weights keys must be non-empty"
+                raise ValueError(msg)
+            if not class_weights:
+                msg = (
+                    "image_label_multiclass_cce_class_weights entries must contain at least "
+                    f"one weight, but '{task_name}' is empty"
+                )
+                raise ValueError(msg)
+            if any(not np.isfinite(weight) for weight in class_weights):
+                msg = (
+                    "image_label_multiclass_cce_class_weights entries must be finite, but "
+                    f"'{task_name}' contains {class_weights}"
+                )
+                raise ValueError(msg)
+            if any(weight < 0.0 for weight in class_weights):
+                msg = (
+                    "image_label_multiclass_cce_class_weights entries must be non-negative, "
+                    f"but '{task_name}' contains {class_weights}"
+                )
+                raise ValueError(msg)
+            if not any(weight > 0.0 for weight in class_weights):
+                msg = (
+                    "image_label_multiclass_cce_class_weights entries must contain at least "
+                    f"one positive weight, but '{task_name}' contains {class_weights}"
+                )
+                raise ValueError(msg)
+        self.image_label_head_feature_maps = list(dict.fromkeys(self.image_label_head_feature_maps))
         return self
 
     def uses_gpu_augmentations(self) -> bool:

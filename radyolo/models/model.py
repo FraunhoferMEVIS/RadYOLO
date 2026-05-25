@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Literal
+from pathlib import Path
+from typing import ClassVar, Literal
 
 import torch
 from torch import nn
 
 from radyolo.config.config import (
     DefaultConfig,
+    ImageLabelHeadFeature,
     ModelCheckpoint,
     PrototypeLayer,
     load_model_checkpoint,
 )
+from radyolo.data.image_labels import ImageLabelTaskSpec, load_image_label_task_specs
 from radyolo.models.layers import (
     C2PSA,
     SPPF,
@@ -25,9 +28,6 @@ from radyolo.models.layers import (
     PrototypeMasksHighResolution,
 )
 from radyolo.utils.util import intersect_dicts, make_divisible, select_device, unwrap_model
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,89 @@ def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
     if isinstance(stride, torch.Tensor):
         return int(stride.min().item())
     return default
+
+
+class GlobalImageLabelHead(nn.Module):
+    def __init__(
+        self,
+        feature_channels: dict[str, int],
+        task_specs: dict[str, ImageLabelTaskSpec],
+        selected_feature_maps: list[ImageLabelHeadFeature],
+        projection_channels: int,
+        mlp_hidden_layers: int,
+        mlp_hidden_channels: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        if not task_specs:
+            msg = "Global image-label head requires at least one declared image label task"
+            raise ValueError(msg)
+        if not selected_feature_maps:
+            msg = "Global image-label head requires at least one selected feature map"
+            raise ValueError(msg)
+
+        self.selected_feature_maps = tuple(selected_feature_maps)
+        self.projectors = nn.ModuleDict(
+            {
+                feature_name: Conv(feature_channels[feature_name], projection_channels, 1)
+                for feature_name in self.selected_feature_maps
+            }
+        )
+        pooled_feature_width = len(self.selected_feature_maps) * projection_channels * 2
+
+        mlp_layers: list[nn.Module] = []
+        mlp_input_width = pooled_feature_width
+        for _ in range(mlp_hidden_layers):
+            mlp_layers.extend(
+                [
+                    nn.Linear(mlp_input_width, mlp_hidden_channels),
+                    nn.SiLU(),
+                    nn.Dropout(p=dropout),
+                ]
+            )
+            mlp_input_width = mlp_hidden_channels
+        self.shared_mlp = nn.Sequential(*mlp_layers) if mlp_layers else nn.Identity()
+
+        self.avg_pool = nn.AdaptiveAvgPool3d(1)
+        self.max_pool = nn.AdaptiveMaxPool3d(1)
+        self.task_heads = nn.ModuleDict()
+        for task_name, task_spec in task_specs.items():
+            if task_spec.type == "multiclass":
+                if task_spec.classes is None:
+                    msg = f"Multiclass task '{task_name}' requires declared class names"
+                    raise ValueError(msg)
+                output_width = len(task_spec.classes)
+            else:
+                output_width = 1
+            self.task_heads[task_name] = nn.Linear(mlp_input_width, output_width)
+
+    def forward(self, feature_maps: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        pooled_features: list[torch.Tensor] = []
+        for feature_name in self.selected_feature_maps:
+            projected = self.projectors[feature_name](feature_maps[feature_name])
+            pooled_features.append(self.avg_pool(projected).flatten(1))
+            pooled_features.append(self.max_pool(projected).flatten(1))
+        shared_features = self.shared_mlp(torch.cat(pooled_features, dim=1))
+        return {
+            task_name: task_head(shared_features)
+            for task_name, task_head in self.task_heads.items()
+        }
+
+
+def _resolve_image_label_tasks(
+    train_config: DefaultConfig,
+    image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
+) -> dict[str, ImageLabelTaskSpec]:
+    if image_label_tasks is not None:
+        return dict(image_label_tasks)
+
+    task_specs = load_image_label_task_specs(Path(train_config.data))
+    if train_config.enable_image_label_head and not task_specs:
+        msg = (
+            "enable_image_label_head=True requires dataset.yaml to declare image_label_tasks"
+        )
+        raise ValueError(msg)
+    return task_specs
 
 
 class HardcodedModel(nn.Module):
@@ -69,12 +152,23 @@ class HardcodedModel(nn.Module):
         prototype_layer: PrototypeLayer = "higher_resolution",
         separate_objectness_head: bool = False,
         include_stride4_output: bool = False,
+        image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
+        enable_image_label_head: bool = False,
+        image_label_head_feature_maps: list[ImageLabelHeadFeature] | None = None,
+        image_label_head_projection_channels: int = 128,
+        image_label_head_mlp_hidden_layers: int = 1,
+        image_label_head_mlp_hidden_channels: int = 256,
+        image_label_head_dropout: float = 0.1,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
         self.num_classes = num_classes
         self.bbox_parametrization = bbox_parametrization
         self.bbox_center_offset_limit = bbox_center_offset_limit
+        self.image_label_task_specs = dict(image_label_tasks or {})
+        self.image_label_head_feature_maps = tuple(
+            image_label_head_feature_maps or ["o10", "o16", "o19", "o22"]
+        )
 
         depth_multiplier, width_multiplier, max_channels = HardcodedModel.MODEL_SCALES[scale]
 
@@ -89,6 +183,7 @@ class HardcodedModel(nn.Module):
         self.prototype_layer_mode = prototype_layer
         self.separate_objectness_head = separate_objectness_head
         self.include_stride4_output = include_stride4_output
+        self.enable_image_label_head = enable_image_label_head and bool(self.image_label_task_specs)
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
@@ -226,6 +321,26 @@ class HardcodedModel(nn.Module):
         self.l22 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
+        if enable_image_label_head and not self.image_label_task_specs:
+            msg = "Global image-label head was enabled but no image label tasks were provided"
+            raise ValueError(msg)
+
+        if self.enable_image_label_head:
+            self.image_label_head = GlobalImageLabelHead(
+                feature_channels={
+                    "o10": output_channels[10],
+                    "o16": output_channels[16],
+                    "o19": output_channels[19],
+                    "o22": output_channels[22],
+                },
+                task_specs=self.image_label_task_specs,
+                selected_feature_maps=list(self.image_label_head_feature_maps),
+                projection_channels=image_label_head_projection_channels,
+                mlp_hidden_layers=image_label_head_mlp_hidden_layers,
+                mlp_hidden_channels=image_label_head_mlp_hidden_channels,
+                dropout=image_label_head_dropout,
+            )
+
         detect_chs: list[int] = (
             [c_p2, c_p3, c_p4, c_p5] if self.include_stride4_output else [c_p3, c_p4, c_p5]
         )
@@ -362,6 +477,10 @@ class HardcodedModel(nn.Module):
                     ],
                     2,
                 )
+        if self.enable_image_label_head:
+            output.image_label_outputs = self.image_label_head(
+                {"o10": o10, "o16": o16, "o19": o19, "o22": o22}
+            )
         return output
 
     def load(self, state_dict: dict) -> None:
@@ -374,7 +493,9 @@ def build_model_from_config(
     *,
     num_classes: int | None = None,
     state_dict: dict | None = None,
+    image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
 ) -> HardcodedModel:
+    resolved_image_label_tasks = _resolve_image_label_tasks(train_config, image_label_tasks)
     model = HardcodedModel(
         input_channels=train_config.input_channels,
         num_classes=num_classes or train_config.num_classes,
@@ -387,6 +508,13 @@ def build_model_from_config(
         prototype_layer=train_config.prototype_layer,
         separate_objectness_head=train_config.separate_objectness_head,
         include_stride4_output=train_config.include_stride4_output,
+        image_label_tasks=resolved_image_label_tasks,
+        enable_image_label_head=train_config.enable_image_label_head,
+        image_label_head_feature_maps=train_config.image_label_head_feature_maps,
+        image_label_head_projection_channels=train_config.image_label_head_projection_channels,
+        image_label_head_mlp_hidden_layers=train_config.image_label_head_mlp_hidden_layers,
+        image_label_head_mlp_hidden_channels=train_config.image_label_head_mlp_hidden_channels,
+        image_label_head_dropout=train_config.image_label_head_dropout,
     )
     if state_dict is not None:
         model.load(state_dict)
