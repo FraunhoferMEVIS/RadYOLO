@@ -1,6 +1,7 @@
 # Data and Output Settings
 data: "D:/datasets/AMOS22/radyolo_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
+split_file_name: "data_splits.json" # (str) split file name inside the dataset folder
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
 experiment_name: "default" # (str, optional) experiment name, results saved to 'output_folder_base/experiment_name' directory
 

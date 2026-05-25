@@ -10,6 +10,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_SPLIT_FILE_NAME = "data_splits.json"
+
+
+def get_split_file_path(dataset_path: Path, split_file_name: str = DEFAULT_SPLIT_FILE_NAME) -> Path:
+    return dataset_path / split_file_name
 
 
 def _find_case_names(images_dir: Path) -> list[str]:
@@ -147,11 +152,12 @@ def k_fold_data_splits(
     seed: int = 42,
     k: int = 5,
     *,
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
     create_test_group: bool = True,
     group_by_prefix: bool = False,
     prefix_sep: str = "_",
 ) -> Path:
-    """Create k-fold data splits from DATASET_PATH/images and write data_splits.json.
+    """Create k-fold data splits from DATASET_PATH/images and write a split file.
 
     The output is a JSON list with k items. Each item is a dict with keys
     'train', 'val', 'test', each containing a list of case names (without extensions).
@@ -207,7 +213,7 @@ def k_fold_data_splits(
                     }
                 )
 
-        out_path = dataset_path / "data_splits.json"
+        out_path = get_split_file_path(dataset_path, split_file_name)
         with out_path.open("w", encoding="utf-8") as f:
             json.dump(folds, f, indent=2)
 
@@ -224,17 +230,18 @@ def k_fold_data_splits(
         return out_path
 
 
-def train_val_test_data_split(
+def train_val_test_data_split(  # noqa: PLR0913
     dataset_path: Path,
     seed: int = 42,
     *,
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
     train_percentage: float = 70.0,
     val_percentage: float = 15.0,
     test_percentage: float = 15.0,
     group_by_prefix: bool = False,
     prefix_sep: str = "_",
 ) -> Path:
-    """Create a single train/val/test split from DATASET_PATH/images and write data_splits.json."""
+    """Create a single train/val/test split from DATASET_PATH/images and write a split file."""
     try:
         images_dir = dataset_path / "images"
         cases = _find_case_names(images_dir)
@@ -274,7 +281,7 @@ def train_val_test_data_split(
             }
         ]
 
-        out_path = dataset_path / "data_splits.json"
+        out_path = get_split_file_path(dataset_path, split_file_name)
         with out_path.open("w", encoding="utf-8") as f:
             json.dump(folds, f, indent=2)
 

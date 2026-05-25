@@ -16,6 +16,7 @@ import torch
 from tqdm.auto import tqdm
 
 from radyolo.config.spatial import PatchSize, VoxelSize
+from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME, get_split_file_path
 from radyolo.data.preprocessing import (
     ImageArrayDType,
     preprocess_image,
@@ -458,6 +459,7 @@ def preprocess_dataset(  # noqa: PLR0913
     target_voxel_size: VoxelSize | None = None,
     normalization: NormalizationSpec | None = None,
     image_dtype: ImageArrayDType = "float32",
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
 ) -> Path:
     """Convert NIfTI images to array stores in a mirrored dataset folder structure.
 
@@ -505,7 +507,10 @@ def preprocess_dataset(  # noqa: PLR0913
     shutil.copytree(labels_dir, output_path / "labels", dirs_exist_ok=True)
 
     _copy_file_if_exists(dataset_path / "dataset.yaml", output_path / "dataset.yaml")
-    _copy_file_if_exists(dataset_path / "data_splits.json", output_path / "data_splits.json")
+    _copy_file_if_exists(
+        get_split_file_path(dataset_path, split_file_name),
+        get_split_file_path(output_path, split_file_name),
+    )
 
     max_workers = os.cpu_count() or 1
     if workers > 0:

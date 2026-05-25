@@ -68,6 +68,7 @@ class DefaultConfig(BaseModel):
     # Data and output settings
     data: Path  # path to data folder containing dataset.yaml
     fold: int  # fold from data splits file to use for training
+    split_file_name: str = "data_splits.json"  # split file name inside the dataset folder
     output_folder_base: str = ""  # base folder for experiment outputs
     experiment_name: int | str  # experiment name, results saved to 'output_folder_base/experiment_name'
 

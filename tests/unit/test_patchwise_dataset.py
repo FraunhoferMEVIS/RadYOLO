@@ -499,6 +499,25 @@ def test_patchwise_validation_sampling_is_deterministic_per_index(
             assert torch.equal(first["masks"], second["masks"])
 
 
+def test_patchwise_dataset_reads_custom_split_file_name(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    dataset_root = tmp_path / "custom_split_name_dataset"
+    shutil.copytree(synthetic_dataset, dataset_root)
+    custom_split_file = dataset_root / "custom_splits.json"
+    (dataset_root / "data_splits.json").replace(custom_split_file)
+
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        split_file_name="custom_splits.json",
+    )
+
+    assert dataset.cases == ["case1", "case2", "case3"]
+
+
 def test_crop_boxes_to_patch_drops_boxes_below_minimum_containment() -> None:
     classes = torch.tensor([[0.0], [1.0]], dtype=torch.float32)
     bboxes = torch.tensor(

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import shutil
 
 from click.testing import CliRunner
 
 from radyolo import main
 
 
-def test_create_k_fold_split_cli(synthetic_dataset) -> None:
-    splits_file = synthetic_dataset / "data_splits.json"
+def test_create_k_fold_split_cli(synthetic_dataset, tmp_path) -> None:
+    dataset_path = tmp_path / "dataset_kfold_default"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    splits_file = dataset_path / "data_splits.json"
     if splits_file.exists():
         splits_file.unlink()
 
@@ -17,7 +20,7 @@ def test_create_k_fold_split_cli(synthetic_dataset) -> None:
         main,
         [
             "create-k-fold-split",
-            str(synthetic_dataset),
+            str(dataset_path),
             "--k",
             "5",
             "--seed",
@@ -29,8 +32,10 @@ def test_create_k_fold_split_cli(synthetic_dataset) -> None:
     assert splits_file.exists(), "data_splits.json not created"
 
 
-def test_create_k_fold_split_cli_without_test_group_allows_k2(synthetic_dataset) -> None:
-    splits_file = synthetic_dataset / "data_splits.json"
+def test_create_k_fold_split_cli_supports_custom_split_file_name(synthetic_dataset, tmp_path) -> None:
+    dataset_path = tmp_path / "dataset_kfold_custom"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    splits_file = dataset_path / "custom_splits.json"
     if splits_file.exists():
         splits_file.unlink()
 
@@ -39,7 +44,33 @@ def test_create_k_fold_split_cli_without_test_group_allows_k2(synthetic_dataset)
         main,
         [
             "create-k-fold-split",
-            str(synthetic_dataset),
+            str(dataset_path),
+            "--k",
+            "5",
+            "--seed",
+            "0",
+            "--split-file-name",
+            "custom_splits.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert splits_file.exists(), "custom split file not created"
+
+
+def test_create_k_fold_split_cli_without_test_group_allows_k2(synthetic_dataset, tmp_path) -> None:
+    dataset_path = tmp_path / "dataset_kfold_no_test"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    splits_file = dataset_path / "data_splits.json"
+    if splits_file.exists():
+        splits_file.unlink()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "create-k-fold-split",
+            str(dataset_path),
             "--k",
             "2",
             "--no-create-test-group",
@@ -63,8 +94,10 @@ def test_create_k_fold_split_cli_without_test_group_allows_k2(synthetic_dataset)
     ]
 
 
-def test_create_train_val_test_split_cli(synthetic_dataset) -> None:
-    splits_file = synthetic_dataset / "data_splits.json"
+def test_create_train_val_test_split_cli(synthetic_dataset, tmp_path) -> None:
+    dataset_path = tmp_path / "dataset_single_split"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    splits_file = dataset_path / "data_splits.json"
     if splits_file.exists():
         splits_file.unlink()
 
@@ -73,7 +106,7 @@ def test_create_train_val_test_split_cli(synthetic_dataset) -> None:
         main,
         [
             "create-train-val-test-split",
-            str(synthetic_dataset),
+            str(dataset_path),
             "--train-percentage",
             "60",
             "--val-percentage",
@@ -95,8 +128,10 @@ def test_create_train_val_test_split_cli(synthetic_dataset) -> None:
     assert len(splits[0]["test"]) == 1
 
 
-def test_create_train_val_test_split_cli_allows_empty_groups(synthetic_dataset) -> None:
-    splits_file = synthetic_dataset / "data_splits.json"
+def test_create_train_val_test_split_cli_allows_empty_groups(synthetic_dataset, tmp_path) -> None:
+    dataset_path = tmp_path / "dataset_single_empty"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    splits_file = dataset_path / "data_splits.json"
     if splits_file.exists():
         splits_file.unlink()
 
@@ -105,7 +140,7 @@ def test_create_train_val_test_split_cli_allows_empty_groups(synthetic_dataset) 
         main,
         [
             "create-train-val-test-split",
-            str(synthetic_dataset),
+            str(dataset_path),
             "--train-percentage",
             "100",
             "--val-percentage",
@@ -125,3 +160,36 @@ def test_create_train_val_test_split_cli_allows_empty_groups(synthetic_dataset) 
     assert len(splits[0]["train"]) == 5
     assert splits[0]["val"] == []
     assert splits[0]["test"] == []
+
+
+def test_create_train_val_test_split_cli_supports_custom_split_file_name(
+    synthetic_dataset,
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "dataset_single_custom"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    splits_file = dataset_path / "single_split.json"
+    if splits_file.exists():
+        splits_file.unlink()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "create-train-val-test-split",
+            str(dataset_path),
+            "--train-percentage",
+            "60",
+            "--val-percentage",
+            "20",
+            "--test-percentage",
+            "20",
+            "--seed",
+            "0",
+            "--split-file-name",
+            "single_split.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert splits_file.exists(), "custom split file not created"

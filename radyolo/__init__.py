@@ -226,6 +226,7 @@ def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
             load_masks=train_config.segmentation_output,
             foreground_oversampling=foreground_oversampling,
             min_box_crop_fraction=train_config.min_box_crop_fraction,
+            split_file_name=train_config.split_file_name,
         )
 
         dataloader = build_dataloader(
@@ -366,6 +367,13 @@ def plot_results(result_path: Path) -> int:
     show_default=True,
     help="Separator used to extract the prefix (text before first occurrence).",
 )
+@click.option(
+    "--split-file-name",
+    default="data_splits.json",
+    show_default=True,
+    type=str,
+    help="Name of the split file to write inside the dataset folder.",
+)
 def create_data_splits(
     dataset_path: Path,
     seed: int,
@@ -373,13 +381,15 @@ def create_data_splits(
     create_test_group: bool,
     group_by_prefix: bool,
     prefix_sep: str,
+    split_file_name: str,
 ) -> int:
-    """Create k-fold data splits from DATASET_PATH/images and write data_splits.json."""
+    """Create k-fold data splits from DATASET_PATH/images and write a split file."""
     try:
         out_path = k_fold_data_splits(
             dataset_path=dataset_path,
             seed=seed,
             k=k,
+            split_file_name=split_file_name,
             create_test_group=create_test_group,
             group_by_prefix=group_by_prefix,
             prefix_sep=prefix_sep,
@@ -441,7 +451,14 @@ def create_data_splits(
     show_default=True,
     help="Separator used to extract the prefix (text before first occurrence).",
 )
-def create_train_val_test_split(
+@click.option(
+    "--split-file-name",
+    default="data_splits.json",
+    show_default=True,
+    type=str,
+    help="Name of the split file to write inside the dataset folder.",
+)
+def create_train_val_test_split(  # noqa: PLR0913
     dataset_path: Path,
     seed: int,
     train_percentage: float,
@@ -449,12 +466,14 @@ def create_train_val_test_split(
     test_percentage: float,
     group_by_prefix: bool,
     prefix_sep: str,
+    split_file_name: str,
 ) -> int:
-    """Create one train/val/test split from DATASET_PATH/images and write data_splits.json."""
+    """Create one train/val/test split from DATASET_PATH/images and write a split file."""
     try:
         out_path = train_val_test_data_split(
             dataset_path=dataset_path,
             seed=seed,
+            split_file_name=split_file_name,
             train_percentage=train_percentage,
             val_percentage=val_percentage,
             test_percentage=test_percentage,
@@ -659,7 +678,14 @@ def propose_model_config(
     show_default=True,
     help="Output dtype for saved preprocessed images.",
 )
-def preprocess_data(
+@click.option(
+    "--split-file-name",
+    default="data_splits.json",
+    show_default=True,
+    type=str,
+    help="Name of the split file to copy from the input dataset to the output dataset.",
+)
+def preprocess_data(  # noqa: PLR0913
     dataset_path: Path,
     output_path: Path,
     workers: int,
@@ -668,6 +694,7 @@ def preprocess_data(
     voxel_size: tuple[float, float, float] | None,
     normalization: dict | list[dict],
     image_dtype: str,
+    split_file_name: str,
 ) -> int:
     """Preprocess a NIfTI dataset and store images as .b2nd outputs in OUTPUT_PATH."""
     try:
@@ -685,6 +712,7 @@ def preprocess_data(
             target_voxel_size=target_voxel_size,
             normalization=normalization,
             image_dtype=image_dtype.lower(),
+            split_file_name=split_file_name,
         )
         LOGGER.info("Preprocessed dataset written to %s", out_path)
     except Exception as e:

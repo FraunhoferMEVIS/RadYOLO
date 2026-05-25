@@ -25,6 +25,7 @@ from radyolo.data.augmentations import (
     random_zoom,
     tensor_cutout,
 )
+from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME, get_split_file_path
 from radyolo.data.preprocessing import preprocess_image, resample_mask
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
@@ -551,8 +552,9 @@ def _load_split_cases(
     src_path: Path,
     fold: int,
     group: Literal["train", "val", "test"],
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
 ) -> list[str]:
-    splits_file = src_path / "data_splits.json"
+    splits_file = get_split_file_path(src_path, split_file_name)
     with splits_file.open("r") as file:
         splits = json.load(file)
     if fold >= len(splits):
@@ -742,8 +744,9 @@ def _load_case_index(
     src_path: Path,
     fold: int,
     group: Literal["train", "val", "test"],
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
 ) -> tuple[list[str], Literal["nifti", "blosc2"]]:
-    cases = _load_split_cases(src_path, fold, group)
+    cases = _load_split_cases(src_path, fold, group, split_file_name)
     return cases, _detect_image_format(src_path, cases)
 
 
@@ -1078,6 +1081,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         load_masks: bool = True,
         foreground_oversampling: float = 0.0,
         min_box_crop_fraction: float = 0.5,
+        split_file_name: str | None = None,
         config: DefaultConfig | None = None,
     ) -> None:
         super().__init__()
@@ -1094,7 +1098,16 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
         self.min_box_crop_fraction = min_box_crop_fraction
-        self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
+        self.split_file_name = (
+            split_file_name
+            or (config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME)
+        )
+        self.cases, self.image_format = _load_case_index(
+            self.src_path,
+            fold,
+            group,
+            self.split_file_name,
+        )
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_oversample_count = _compute_foreground_oversample_count(
@@ -1236,6 +1249,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         load_masks: bool = True,
         foreground_oversampling: float = 0.33,
         min_box_crop_fraction: float = 0.5,
+        split_file_name: str | None = None,
         config: DefaultConfig | None = None,
         deterministic_sampling: bool | None = None,
         sampling_seed: int | None = None,
@@ -1254,6 +1268,10 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
         self.min_box_crop_fraction = min_box_crop_fraction
+        self.split_file_name = (
+            split_file_name
+            or (config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME)
+        )
         self.extraction_patch_size = (
             _get_patchwise_training_extraction_size(self.patch_size)
             if self.augment
@@ -1269,7 +1287,12 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             if sampling_seed is None and config is not None
             else int(sampling_seed or 0)
         )
-        self.cases, self.image_format = _load_case_index(self.src_path, fold, group)
+        self.cases, self.image_format = _load_case_index(
+            self.src_path,
+            fold,
+            group,
+            self.split_file_name,
+        )
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_oversample_count = _compute_foreground_oversample_count(

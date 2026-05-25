@@ -3,6 +3,7 @@ from __future__ import annotations
 import blosc2
 import nibabel as nib
 import numpy as np
+import shutil
 from click.testing import CliRunner
 
 from radyolo import main
@@ -107,6 +108,31 @@ def test_preprocess_data_cli_uses_full_image_chunk_for_fixed_extent_blosc2(
     loaded_mask = np.asarray(blosc_mask_array[:])
     assert loaded.shape == (20, 18, 16)
     assert loaded_mask.shape == (20, 18, 16)
+
+
+def test_preprocess_data_cli_copies_custom_split_file_name(synthetic_dataset, tmp_path) -> None:
+    dataset_path = tmp_path / "dataset_with_custom_split"
+    shutil.copytree(synthetic_dataset, dataset_path)
+    custom_split_file = dataset_path / "folds_alt.json"
+    (dataset_path / "data_splits.json").replace(custom_split_file)
+
+    output_dataset = tmp_path / "preprocessed_dataset_custom_split"
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "preprocess-data",
+            str(dataset_path),
+            str(output_dataset),
+            "--workers",
+            "0",
+            "--split-file-name",
+            "folds_alt.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (output_dataset / "folds_alt.json").exists(), "custom split file not copied"
 
 
 def test_preprocess_data_cli_uses_smart_blosc2_chunks_for_voxel_size(tmp_path) -> None:
