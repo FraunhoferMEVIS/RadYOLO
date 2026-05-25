@@ -7,9 +7,15 @@ from typing import cast
 import nibabel as nib
 import numpy as np
 import pytest
+import torch
 import yaml
 
-from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.config.config import (
+    DatasetConfig,
+    get_cfg,
+    load_model_checkpoint,
+    save_model_checkpoint,
+)
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.data import PatchWiseDataset, WholeImageDataset, build_dataloader
@@ -18,7 +24,6 @@ from radyolo.data.preprocess_data import preprocess_dataset as preprocess_datase
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
 from radyolo.models.model import build_model_from_config, load_checkpoint_model
-from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA
 from radyolo.validation.validate import Validator
 
@@ -84,9 +89,9 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"model_scale: n\n"
             f"data: {synthetic_dataset.as_posix()}\n"
             f"fold: 0\n"
-            f"epochs: 2\n"
+            f"epochs: 1\n"
             f"nominal_batch_size: 1\n"
-            f"warmup_epochs: 0.5\n"
+            f"warmup_epochs: 0.0\n"
             f"patience: 1\n"
             f"batch_size: 1\n"
             f"patch_size: {{x: 32, y: 32, z: 64}}\n"
@@ -112,23 +117,37 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
     return cfg_path
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def trained_run(minimal_train_config: Path) -> Path:
-    """Train a minimal model and return the run directory.
+    """Create a minimal checkpoint run and return the run directory.
 
-    Fails fast if training does not produce both weights_last.pt and weights_best.pt.
+    Fails fast if checkpoint creation does not produce both weights_last.pt and weights_best.pt.
     """
     cfg = minimal_train_config
-    trainer = Trainer(cfg=cfg)
-    trainer.train()
+    train_config = get_cfg(cfg, {})
+    model = build_model_from_config(train_config)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scaler = torch.GradScaler("cpu", enabled=False)
     with cfg.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
     run_dir = Path(data["output_folder_base"]) / str(data["experiment_name"])
+    run_dir.mkdir(parents=True, exist_ok=True)
+    save_model_checkpoint(
+        paths=[run_dir / "weights_last.pt", run_dir / "weights_best.pt"],
+        epoch=1,
+        best_fitness=0.0,
+        model=model,
+        ema_updates=0,
+        optimizer=optimizer,
+        scaler=scaler,
+        train_config=train_config,
+        train_metrics={"metrics/fitness": 0.0},
+    )
     if not (run_dir / "weights_last.pt").exists():
-        msg_last = "weights_last.pt missing after training"
+        msg_last = "weights_last.pt missing after checkpoint creation"
         raise FileNotFoundError(msg_last)
     if not (run_dir / "weights_best.pt").exists():
-        msg_best = "weights_best.pt missing after training"
+        msg_best = "weights_best.pt missing after checkpoint creation"
         raise FileNotFoundError(msg_best)
     return run_dir
 

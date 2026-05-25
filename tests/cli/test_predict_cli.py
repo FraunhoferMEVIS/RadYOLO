@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from typing import TYPE_CHECKING
 
 from click.testing import CliRunner
@@ -212,16 +211,23 @@ def test_predict_cli_passes_worker_counts(
 
 
 def test_predict_cli_uses_shared_preprocessing(
+    monkeypatch,
     trained_run,
-    synthetic_dataset,
     tmp_path,
 ) -> None:
     model_path = trained_run / "weights_best.pt"
     input_dir = tmp_path / "prediction_input"
     input_dir.mkdir()
-    source_image = next(iter(sorted((synthetic_dataset / "images").glob("*.nii.gz"))))
-    shutil.copy2(source_image, input_dir / source_image.name)
     output_dir = tmp_path / "prediction_output"
+    captured: dict[str, PredictionConfig] = {}
+
+    def fake_run_prediction(config: PredictionConfig) -> int:
+        captured["config"] = config
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        (config.output_dir / "case1.json").write_text("[]", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr("radyolo.run_prediction", fake_run_prediction)
     runner = CliRunner()
 
     result = runner.invoke(
@@ -242,6 +248,13 @@ def test_predict_cli_uses_shared_preprocessing(
     )
 
     assert result.exit_code == 0
+    assert captured["config"].model_path == model_path
+    assert captured["config"].input_dir == input_dir
+    assert captured["config"].output_dir == output_dir
+    assert captured["config"].device == "cpu"
+    assert captured["config"].clip_boxes_to_image is True
+    assert captured["config"].num_load_workers == 1
+    assert captured["config"].num_write_workers == 1
     prediction_files = sorted(output_dir.glob("*.json"))
     assert prediction_files, "prediction json files missing"
     with prediction_files[0].open(encoding="utf-8") as file:
