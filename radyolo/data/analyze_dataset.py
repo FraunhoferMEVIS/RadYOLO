@@ -99,7 +99,7 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
 def _infer_image_label_task_type(values: list[int | float]) -> str:
     if values and all(float(value).is_integer() for value in values):
         return "multiclass"
-    return "regression"
+    return "continuous"
 
 
 def _summarize_image_labels(
@@ -108,14 +108,25 @@ def _summarize_image_labels(
     task_specs: dict[str, ImageLabelTaskSpec],
 ) -> dict[str, dict[str, object]]:
     values_by_task: dict[str, list[int | float]] = {}
+    events_by_task: dict[str, list[bool]] = {}
     missing_counts_by_task: dict[str, int] = {}
     for case_id in case_ids:
         image_labels = load_case_image_labels(dataset_path, case_id, task_specs or None)
-        for task_name, value in image_labels.items():
+        task_names = task_specs.keys() if task_specs else image_labels.keys()
+        for task_name in task_names:
+            value = image_labels.get(task_name)
             if value is None:
                 missing_counts_by_task[task_name] = missing_counts_by_task.get(task_name, 0) + 1
                 continue
             values_by_task.setdefault(task_name, []).append(value)
+            task_spec = task_specs.get(task_name)
+            if task_spec is not None and task_spec.type == "survival" and task_spec.masking:
+                event_value = image_labels.get(task_spec.masking)
+                if event_value is None:
+                    missing_counts_by_task[task_name] = missing_counts_by_task.get(task_name, 0) + 1
+                    values_by_task[task_name].pop()
+                    continue
+                events_by_task.setdefault(task_name, []).append(bool(event_value))
 
     summaries: dict[str, dict[str, object]] = {}
     total_cases = len(case_ids)
@@ -154,6 +165,12 @@ def _summarize_image_labels(
                         "std": float(numeric_values.std()),
                     }
                 )
+            if task_type == "survival":
+                event_values = events_by_task.get(task_name, [])
+                summary["n_events"] = sum(event_values)
+                summary["n_censored"] = len(event_values) - sum(event_values)
+                if task_spec is not None and task_spec.masking is not None:
+                    summary["masking"] = task_spec.masking
             if task_spec is not None and task_spec.unit is not None:
                 summary["unit"] = task_spec.unit
         summaries[task_name] = summary

@@ -177,9 +177,8 @@ class BboxLoss(nn.Module):
         return loss_iou, loss_dfl
 
 
-class ImageLabelLoss:
+class ImageLabelClassificationLoss:
     MULTICLASS_LOSS_NAME = "img_cce"
-    REGRESSION_LOSS_NAME = "img_l1"
 
     def __init__(
         self,
@@ -187,27 +186,19 @@ class ImageLabelLoss:
         image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
         image_label_multiclass_cce_gain: float = 1.0,
         image_label_multiclass_cce_class_weights: dict[str, list[float]] | None = None,
-        image_label_regression_l1_gain: float = 1.0,
     ) -> None:
         self.device = device
         self.image_label_tasks = dict(image_label_tasks or {})
-        self.regression_l1 = nn.L1Loss(reduction="mean")
         self.image_label_multiclass_cce_gain = image_label_multiclass_cce_gain
         self.image_label_multiclass_cce_class_weights = self._build_multiclass_class_weights(
             image_label_multiclass_cce_class_weights or {}
         )
-        self.image_label_regression_l1_gain = image_label_regression_l1_gain
         self.has_multiclass_tasks = any(
             task_spec.type == "multiclass" for task_spec in self.image_label_tasks.values()
-        )
-        self.has_regression_tasks = any(
-            task_spec.type == "regression" for task_spec in self.image_label_tasks.values()
         )
         self.loss_names: list[str] = []
         if self.has_multiclass_tasks and self.image_label_multiclass_cce_gain > 0.0:
             self.loss_names.append(self.MULTICLASS_LOSS_NAME)
-        if self.has_regression_tasks and self.image_label_regression_l1_gain > 0.0:
-            self.loss_names.append(self.REGRESSION_LOSS_NAME)
         self.num_loss_terms = len(self.loss_names)
         self.loss_indices = {name: idx for idx, name in enumerate(self.loss_names)}
         self.enabled = bool(self.loss_names)
@@ -259,8 +250,9 @@ class ImageLabelLoss:
             return torch.zeros((), device=self.device), loss_items
 
         multiclass_task_losses: list[torch.Tensor] = []
-        regression_task_losses: list[torch.Tensor] = []
         for task_name, task_spec in self.image_label_tasks.items():
+            if task_spec.type != "multiclass":
+                continue
             predictions = image_label_outputs.get(task_name)
             if predictions is None:
                 msg = f"Missing image-label output for task '{task_name}'"
@@ -292,21 +284,8 @@ class ImageLabelLoss:
                         reduction="mean",
                     )
                 )
-                continue
 
-            if self.image_label_regression_l1_gain <= 0.0:
-                continue
-            regression_targets = torch.tensor(
-                target_values,
-                device=self.device,
-                dtype=task_predictions.dtype,
-            ).view(-1, 1)
-            regression_task_losses.append(
-                self.image_label_regression_l1_gain
-                * self.regression_l1(task_predictions, regression_targets)
-            )
-
-        total_task_count = len(multiclass_task_losses) + len(regression_task_losses)
+        total_task_count = len(multiclass_task_losses)
         if total_task_count == 0:
             return torch.zeros((), device=self.device), loss_items
 
@@ -315,10 +294,206 @@ class ImageLabelLoss:
             loss_items[self.loss_indices[self.MULTICLASS_LOSS_NAME]] = multiclass_loss * (
                 len(multiclass_task_losses) / total_task_count
             )
-        if regression_task_losses:
-            regression_loss = torch.stack(regression_task_losses).mean()
-            loss_items[self.loss_indices[self.REGRESSION_LOSS_NAME]] = regression_loss * (
-                len(regression_task_losses) / total_task_count
+
+        return loss_items.sum(), loss_items.detach()
+
+
+class ImageLabelSurvivalLoss:
+    SURVIVAL_THRESHOLD_LOSS_NAME = "img_cst"
+    SURVIVAL_COX_LOSS_NAME = "img_cox"
+
+    def __init__(
+        self,
+        device: torch.device,
+        image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
+        image_label_survival_mtlr_gain: float = 1.0,
+        image_label_survival_cox_gain: float = 1.0,
+    ) -> None:
+        self.device = device
+        self.image_label_tasks = dict(image_label_tasks or {})
+        self.image_label_survival_mtlr_gain = image_label_survival_mtlr_gain
+        self.image_label_survival_cox_gain = image_label_survival_cox_gain
+        self.has_survival_tasks = any(
+            task_spec.type == "survival" for task_spec in self.image_label_tasks.values()
+        )
+        self.loss_names: list[str] = []
+        if self.has_survival_tasks and self.image_label_survival_mtlr_gain > 0.0:
+            self.loss_names.append(self.SURVIVAL_THRESHOLD_LOSS_NAME)
+        if self.has_survival_tasks and self.image_label_survival_cox_gain > 0.0:
+            self.loss_names.append(self.SURVIVAL_COX_LOSS_NAME)
+        self.num_loss_terms = len(self.loss_names)
+        self.loss_indices = {name: idx for idx, name in enumerate(self.loss_names)}
+        self.enabled = bool(self.loss_names)
+
+    def _get_survival_thresholds(
+        self,
+        task_name: str,
+        task_spec: ImageLabelTaskSpec,
+        task_predictions: torch.Tensor,
+    ) -> torch.Tensor:
+        threshold_values = task_spec.survival_bin_thresholds
+        if not threshold_values:
+            msg = f"Survival task '{task_name}' is missing resolved bin thresholds"
+            raise RuntimeError(msg)
+        if len(threshold_values) != int(task_predictions.shape[1]):
+            msg = (
+                f"Survival task '{task_name}' has {len(threshold_values)} thresholds but model "
+                f"emitted {int(task_predictions.shape[1])} logits"
+            )
+            raise RuntimeError(msg)
+        return torch.tensor(
+            threshold_values,
+            device=self.device,
+            dtype=task_predictions.dtype,
+        ).view(1, -1)
+
+    def _compute_survival_threshold_loss(
+        self,
+        task_predictions: torch.Tensor,
+        survival_times: torch.Tensor,
+        event_indicators: torch.Tensor,
+        thresholds: torch.Tensor,
+    ) -> torch.Tensor:
+        """Computes a censored survival threshold loss."""
+        observed_survival = survival_times.view(-1, 1) >= thresholds
+        supervision_mask = torch.where(
+            event_indicators.view(-1, 1),
+            torch.ones_like(observed_survival),
+            observed_survival,
+        )
+        targets = observed_survival.to(dtype=task_predictions.dtype)
+        loss_matrix = F.binary_cross_entropy_with_logits(
+            task_predictions,
+            targets,
+            reduction="none",
+        )
+        supervised_counts = supervision_mask.sum(dim=1).clamp(min=1)
+        return ((loss_matrix * supervision_mask).sum(dim=1) / supervised_counts).mean()
+
+    @staticmethod
+    def _survival_bin_widths(thresholds: torch.Tensor) -> torch.Tensor:
+        flat_thresholds = thresholds.flatten()
+        if flat_thresholds.numel() == 1:
+            return torch.ones_like(flat_thresholds)
+        trailing_width = flat_thresholds[-1] - flat_thresholds[-2]
+        if trailing_width <= 0:
+            trailing_width = flat_thresholds.new_tensor(1.0)
+        return torch.diff(flat_thresholds, append=flat_thresholds[-1:] + trailing_width)
+
+    def _compute_survival_risk(
+        self,
+        task_predictions: torch.Tensor,
+        thresholds: torch.Tensor,
+    ) -> torch.Tensor:
+        survival_probabilities = task_predictions.sigmoid()
+        return -(survival_probabilities * self._survival_bin_widths(thresholds)).sum(dim=1)
+
+    @staticmethod
+    def _compute_cox_partial_likelihood_loss(
+        risk_scores: torch.Tensor,
+        survival_times: torch.Tensor,
+        event_indicators: torch.Tensor,
+    ) -> torch.Tensor | None:
+        if not torch.any(event_indicators):
+            return None
+        sorted_indices = torch.argsort(survival_times, descending=True)
+        sorted_risk_scores = risk_scores[sorted_indices]
+        sorted_events = event_indicators[sorted_indices]
+        partial_log_likelihood = sorted_risk_scores[sorted_events] - torch.logcumsumexp(
+            sorted_risk_scores,
+            dim=0,
+        )[sorted_events]
+        if partial_log_likelihood.numel() == 0:
+            return None
+        return -partial_log_likelihood.mean()
+
+    def __call__(
+        self,
+        model_output: ModelOutput,
+        batch: Batch,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        loss_items = torch.zeros(self.num_loss_terms, device=self.device)
+        image_label_outputs = model_output.image_label_outputs
+        if image_label_outputs is None:
+            return torch.zeros((), device=self.device), loss_items
+
+        survival_threshold_task_losses: list[torch.Tensor] = []
+        survival_cox_task_losses: list[torch.Tensor] = []
+        for task_name, task_spec in self.image_label_tasks.items():
+            if task_spec.type != "survival":
+                continue
+            predictions = image_label_outputs.get(task_name)
+            if predictions is None:
+                msg = f"Missing image-label output for task '{task_name}'"
+                raise RuntimeError(msg)
+
+            survival_mask_name = task_spec.masking
+            if not survival_mask_name:
+                msg = f"Survival task '{task_name}' is missing a masking field"
+                raise RuntimeError(msg)
+
+            target_times: list[float] = []
+            event_indicators: list[bool] = []
+            labeled_batch_indices: list[int] = []
+            for batch_index, image_labels in enumerate(batch["image_labels"]):
+                target_value = image_labels.get(task_name)
+                event_value = image_labels.get(survival_mask_name)
+                if target_value is None or event_value is None:
+                    continue
+                labeled_batch_indices.append(batch_index)
+                target_times.append(float(target_value))
+                event_indicators.append(bool(event_value))
+
+            if not labeled_batch_indices:
+                continue
+
+            task_predictions = predictions[labeled_batch_indices]
+            thresholds = self._get_survival_thresholds(task_name, task_spec, task_predictions)
+            survival_times = torch.tensor(
+                target_times,
+                device=self.device,
+                dtype=task_predictions.dtype,
+            )
+            event_tensor = torch.tensor(
+                event_indicators,
+                device=self.device,
+                dtype=torch.bool,
+            )
+
+            if self.image_label_survival_mtlr_gain > 0.0:
+                survival_threshold_task_losses.append(
+                    self.image_label_survival_mtlr_gain
+                    * self._compute_survival_threshold_loss(
+                        task_predictions,
+                        survival_times,
+                        event_tensor,
+                        thresholds,
+                    )
+                )
+
+            if self.image_label_survival_cox_gain > 0.0:
+                cox_loss = self._compute_cox_partial_likelihood_loss(
+                    self._compute_survival_risk(task_predictions, thresholds),
+                    survival_times,
+                    event_tensor,
+                )
+                if cox_loss is not None:
+                    survival_cox_task_losses.append(self.image_label_survival_cox_gain * cox_loss)
+
+        total_task_count = len(survival_threshold_task_losses) + len(survival_cox_task_losses)
+        if total_task_count == 0:
+            return torch.zeros((), device=self.device), loss_items
+
+        if survival_threshold_task_losses:
+            survival_threshold_loss = torch.stack(survival_threshold_task_losses).mean()
+            loss_items[self.loss_indices[self.SURVIVAL_THRESHOLD_LOSS_NAME]] = (
+                survival_threshold_loss
+                * (len(survival_threshold_task_losses) / total_task_count)
+            )
+        if survival_cox_task_losses:
+            survival_cox_loss = torch.stack(survival_cox_task_losses).mean()
+            loss_items[self.loss_indices[self.SURVIVAL_COX_LOSS_NAME]] = survival_cox_loss * (
+                len(survival_cox_task_losses) / total_task_count
             )
 
         return loss_items.sum(), loss_items.detach()
@@ -669,11 +844,13 @@ class ComposedTrainingLoss:
     def __init__(
         self,
         detection_loss: DetectionSegmentationLoss,
-        image_label_loss: ImageLabelLoss,
+        *auxiliary_losses: ImageLabelClassificationLoss | ImageLabelSurvivalLoss,
     ) -> None:
         self.detection_loss = detection_loss
-        self.image_label_loss = image_label_loss
-        self.loss_names = [*self.detection_loss.loss_names, *self.image_label_loss.loss_names]
+        self.auxiliary_losses = auxiliary_losses
+        self.loss_names = [*self.detection_loss.loss_names]
+        for auxiliary_loss in self.auxiliary_losses:
+            self.loss_names.extend(auxiliary_loss.loss_names)
         self.num_loss_terms = len(self.loss_names)
 
     def reset_epoch_warning_stats(self) -> None:
@@ -693,10 +870,15 @@ class ComposedTrainingLoss:
             batch,
             current_epoch=current_epoch,
         )
-        image_label_total_loss, image_label_loss_items = self.image_label_loss(model_output, batch)
         batch_size = int(batch["img"].shape[0])
-        total_loss = detection_total_loss + image_label_total_loss * batch_size
-        loss_items = torch.cat((detection_loss_items, image_label_loss_items))
+        auxiliary_total_loss = torch.zeros((), device=detection_total_loss.device)
+        auxiliary_loss_items = [detection_loss_items]
+        for auxiliary_loss in self.auxiliary_losses:
+            current_total_loss, current_loss_items = auxiliary_loss(model_output, batch)
+            auxiliary_total_loss = auxiliary_total_loss + current_total_loss
+            auxiliary_loss_items.append(current_loss_items)
+        total_loss = detection_total_loss + auxiliary_total_loss * batch_size
+        loss_items = torch.cat(auxiliary_loss_items)
         return total_loss, loss_items
 
 
@@ -732,15 +914,25 @@ def build_detection_loss_from_config(
         objectness_loss=train_config.objectness_loss,
         bbox_parametrization=train_config.bbox_parametrization,
     )
-    image_label_loss = ImageLabelLoss(
+    image_label_classification_loss = ImageLabelClassificationLoss(
         device=device,
         image_label_tasks=unwrapped_model.image_label_task_specs,
         image_label_multiclass_cce_gain=train_config.image_label_multiclass_cce_gain,
         image_label_multiclass_cce_class_weights=(
             train_config.image_label_multiclass_cce_class_weights
         ),
-        image_label_regression_l1_gain=train_config.image_label_regression_l1_gain,
     )
-    if not image_label_loss.enabled:
+    image_label_survival_loss = ImageLabelSurvivalLoss(
+        device=device,
+        image_label_tasks=unwrapped_model.image_label_task_specs,
+        image_label_survival_mtlr_gain=train_config.image_label_survival_mtlr_gain,
+        image_label_survival_cox_gain=train_config.image_label_survival_cox_gain,
+    )
+    auxiliary_losses = tuple(
+        loss
+        for loss in (image_label_classification_loss, image_label_survival_loss)
+        if loss.enabled
+    )
+    if not auxiliary_losses:
         return detection_loss
-    return ComposedTrainingLoss(detection_loss, image_label_loss)
+    return ComposedTrainingLoss(detection_loss, *auxiliary_losses)

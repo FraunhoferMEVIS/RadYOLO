@@ -14,7 +14,11 @@ from radyolo.config.config import (
     PrototypeLayer,
     load_model_checkpoint,
 )
-from radyolo.data.image_labels import ImageLabelTaskSpec, load_image_label_task_specs
+from radyolo.data.image_labels import (
+    ImageLabelTaskSpec,
+    load_image_label_task_specs,
+    resolve_survival_task_specs,
+)
 from radyolo.models.layers import (
     C2PSA,
     SPPF,
@@ -57,8 +61,6 @@ class GlobalImageLabelHead(nn.Module):
         mlp_hidden_layers: int,
         mlp_hidden_channels: int,
         dropout: float,
-        regression_init_mean: dict[str, float] | None = None,
-        regression_init_std: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
         if not task_specs:
@@ -93,69 +95,21 @@ class GlobalImageLabelHead(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool3d(1)
         self.max_pool = nn.AdaptiveMaxPool3d(1)
         self.task_heads = nn.ModuleDict()
-        regression_init_mean = dict(regression_init_mean or {})
-        regression_init_std = dict(regression_init_std or {})
-        self._validate_regression_init_config(task_specs, regression_init_mean, regression_init_std)
         for task_name, task_spec in task_specs.items():
             if task_spec.type == "multiclass":
                 if task_spec.classes is None:
                     msg = f"Multiclass task '{task_name}' requires declared class names"
                     raise ValueError(msg)
                 output_width = len(task_spec.classes)
-            else:
-                output_width = 1
-            task_head = nn.Linear(mlp_input_width, output_width)
-            if task_spec.type == "regression":
-                self._initialize_regression_head(
-                    task_name,
-                    task_head,
-                    regression_init_mean,
-                    regression_init_std,
-                )
-            self.task_heads[task_name] = task_head
-
-    @staticmethod
-    def _validate_regression_init_config(
-        task_specs: dict[str, ImageLabelTaskSpec],
-        regression_init_mean: dict[str, float],
-        regression_init_std: dict[str, float],
-    ) -> None:
-        for config_name, values in (
-            ("image_label_regression_init_mean", regression_init_mean),
-            ("image_label_regression_init_std", regression_init_std),
-        ):
-            for task_name in values:
-                task_spec = task_specs.get(task_name)
-                if task_spec is None:
-                    msg = f"{config_name} configured unknown image-label task '{task_name}'"
+            elif task_spec.type == "survival":
+                if not task_spec.survival_bin_thresholds:
+                    msg = f"Survival task '{task_name}' requires resolved bin thresholds"
                     raise ValueError(msg)
-                if task_spec.type != "regression":
-                    msg = (
-                        f"{config_name} can only be set for regression tasks, but "
-                        f"'{task_name}' is '{task_spec.type}'"
-                    )
-                    raise ValueError(msg)
-
-    @staticmethod
-    def _initialize_regression_head(
-        task_name: str,
-        task_head: nn.Linear,
-        regression_init_mean: dict[str, float],
-        regression_init_std: dict[str, float],
-    ) -> None:
-        init_std = regression_init_std.get(task_name)
-        if init_std is not None:
-            if init_std == 0.0:
-                nn.init.zeros_(task_head.weight)
+                output_width = len(task_spec.survival_bin_thresholds)
             else:
-                nn.init.normal_(
-                    task_head.weight,
-                    mean=0.0,
-                    std=init_std / (task_head.in_features**0.5),
-                )
-        init_mean = regression_init_mean.get(task_name)
-        if init_mean is not None:
-            nn.init.constant_(task_head.bias, init_mean)
+                msg = f"Unsupported image-label task type '{task_spec.type}' for '{task_name}'"
+                raise ValueError(msg)
+            self.task_heads[task_name] = nn.Linear(mlp_input_width, output_width)
 
     def forward(self, feature_maps: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         pooled_features: list[torch.Tensor] = []
@@ -178,6 +132,11 @@ def _resolve_image_label_tasks(
         return dict(image_label_tasks)
 
     task_specs = load_image_label_task_specs(Path(train_config.data))
+    task_specs = resolve_survival_task_specs(
+        Path(train_config.data),
+        task_specs,
+        num_bins=train_config.image_label_survival_num_bins,
+    )
     if train_config.enable_image_label_head and not task_specs:
         msg = (
             "enable_image_label_head=True requires dataset.yaml to declare image_label_tasks"
@@ -215,8 +174,6 @@ class HardcodedModel(nn.Module):
         image_label_head_mlp_hidden_layers: int = 1,
         image_label_head_mlp_hidden_channels: int = 256,
         image_label_head_dropout: float = 0.1,
-        image_label_regression_init_mean: dict[str, float] | None = None,
-        image_label_regression_init_std: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -397,8 +354,6 @@ class HardcodedModel(nn.Module):
                 mlp_hidden_layers=image_label_head_mlp_hidden_layers,
                 mlp_hidden_channels=image_label_head_mlp_hidden_channels,
                 dropout=image_label_head_dropout,
-                regression_init_mean=image_label_regression_init_mean,
-                regression_init_std=image_label_regression_init_std,
             )
 
         detect_chs: list[int] = (
@@ -575,8 +530,6 @@ def build_model_from_config(
         image_label_head_mlp_hidden_layers=train_config.image_label_head_mlp_hidden_layers,
         image_label_head_mlp_hidden_channels=train_config.image_label_head_mlp_hidden_channels,
         image_label_head_dropout=train_config.image_label_head_dropout,
-        image_label_regression_init_mean=train_config.image_label_regression_init_mean,
-        image_label_regression_init_std=train_config.image_label_regression_init_std,
     )
     if state_dict is not None:
         model.load(state_dict)

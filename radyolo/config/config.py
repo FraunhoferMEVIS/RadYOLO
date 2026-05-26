@@ -116,9 +116,9 @@ class DefaultConfig(BaseModel):
     image_label_multiclass_cce_class_weights: dict[str, list[float]] = Field(
         default_factory=dict
     )
-    image_label_regression_init_mean: dict[str, float] = Field(default_factory=dict)
-    image_label_regression_init_std: dict[str, float] = Field(default_factory=dict)
-    image_label_regression_l1_gain: float = Field(0.1, ge=0.0)
+    image_label_survival_num_bins: int = Field(32, ge=1)
+    image_label_survival_mtlr_gain: float = Field(1.0, ge=0.0)
+    image_label_survival_cox_gain: float = Field(1.0, ge=0.0)
 
     # Hyperparameters
     epochs: int = 1000  # number of epochs to train for
@@ -397,6 +397,12 @@ class DefaultConfig(BaseModel):
         if self.enable_image_label_head and not self.image_label_head_feature_maps:
             msg = "image_label_head_feature_maps must contain at least one feature map when enabled"
             raise ValueError(msg)
+        if not np.isfinite(self.image_label_survival_mtlr_gain):
+            msg = "image_label_survival_mtlr_gain must be finite"
+            raise ValueError(msg)
+        if not np.isfinite(self.image_label_survival_cox_gain):
+            msg = "image_label_survival_cox_gain must be finite"
+            raise ValueError(msg)
         for task_name, class_weights in self.image_label_multiclass_cce_class_weights.items():
             if not task_name:
                 msg = "image_label_multiclass_cce_class_weights keys must be non-empty"
@@ -423,32 +429,6 @@ class DefaultConfig(BaseModel):
                 msg = (
                     "image_label_multiclass_cce_class_weights entries must contain at least "
                     f"one positive weight, but '{task_name}' contains {class_weights}"
-                )
-                raise ValueError(msg)
-        for task_name, init_mean in self.image_label_regression_init_mean.items():
-            if not task_name:
-                msg = "image_label_regression_init_mean keys must be non-empty"
-                raise ValueError(msg)
-            if not np.isfinite(init_mean):
-                msg = (
-                    "image_label_regression_init_mean entries must be finite, but "
-                    f"'{task_name}' contains {init_mean}"
-                )
-                raise ValueError(msg)
-        for task_name, init_std in self.image_label_regression_init_std.items():
-            if not task_name:
-                msg = "image_label_regression_init_std keys must be non-empty"
-                raise ValueError(msg)
-            if not np.isfinite(init_std):
-                msg = (
-                    "image_label_regression_init_std entries must be finite, but "
-                    f"'{task_name}' contains {init_std}"
-                )
-                raise ValueError(msg)
-            if init_std < 0.0:
-                msg = (
-                    "image_label_regression_init_std entries must be non-negative, but "
-                    f"'{task_name}' contains {init_std}"
                 )
                 raise ValueError(msg)
         self.image_label_head_feature_maps = list(dict.fromkeys(self.image_label_head_feature_maps))

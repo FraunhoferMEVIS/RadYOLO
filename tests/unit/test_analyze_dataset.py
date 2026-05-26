@@ -203,11 +203,11 @@ def test_analyze_dataset_summarizes_global_image_labels(tmp_path: Path) -> None:
         (labels_dir / f"{case_id}.txt").write_text("", encoding="utf-8")
 
     (labels_image_dir / "case1.json").write_text(
-        json.dumps({"tumor_stage": 1, "survival_days": 100.0}),
+        json.dumps({"tumor_stage": 1, "survival_days": 100.0, "relapse": True}),
         encoding="utf-8",
     )
     (labels_image_dir / "case2.json").write_text(
-        json.dumps({"tumor_stage": 2, "survival_days": 200.0}),
+        json.dumps({"tumor_stage": 2, "survival_days": 200.0, "relapse": False}),
         encoding="utf-8",
     )
 
@@ -219,7 +219,8 @@ def test_analyze_dataset_summarizes_global_image_labels(tmp_path: Path) -> None:
         "    type: multiclass\n"
         "    classes: {0: stage_i, 1: stage_ii, 2: stage_iii}\n"
         "  survival_days:\n"
-        "    type: regression\n"
+        "    type: survival\n"
+        "    masking: relapse\n"
         "    unit: days\n",
         encoding="utf-8",
     )
@@ -229,7 +230,7 @@ def test_analyze_dataset_summarizes_global_image_labels(tmp_path: Path) -> None:
 
     assert fingerprint["image_label_tasks"] == {
         "survival_days": {
-            "type": "regression",
+            "type": "survival",
             "n_labeled": 2,
             "n_missing": 1,
             "min": 100.0,
@@ -239,6 +240,9 @@ def test_analyze_dataset_summarizes_global_image_labels(tmp_path: Path) -> None:
             "max": 200.0,
             "mean": 150.0,
             "std": 50.0,
+            "n_events": 1,
+            "n_censored": 1,
+            "masking": "relapse",
             "unit": "days",
         },
         "tumor_stage": {
@@ -267,11 +271,11 @@ def test_analyze_dataset_treats_null_image_labels_as_missing(tmp_path: Path) -> 
         (labels_dir / f"{case_id}.txt").write_text("", encoding="utf-8")
 
     (labels_image_dir / "case1.json").write_text(
-        json.dumps({"tumor_stage": 1, "survival_days": 100.0}),
+        json.dumps({"tumor_stage": 1, "survival_days": 100.0, "relapse": True}),
         encoding="utf-8",
     )
     (labels_image_dir / "case2.json").write_text(
-        json.dumps({"tumor_stage": None, "survival_days": None}),
+        json.dumps({"tumor_stage": None, "survival_days": None, "relapse": None}),
         encoding="utf-8",
     )
 
@@ -283,7 +287,8 @@ def test_analyze_dataset_treats_null_image_labels_as_missing(tmp_path: Path) -> 
         "    type: multiclass\n"
         "    classes: {0: stage_i, 1: stage_ii}\n"
         "  survival_days:\n"
-        "    type: regression\n"
+        "    type: survival\n"
+        "    masking: relapse\n"
         "    unit: days\n",
         encoding="utf-8",
     )
@@ -293,7 +298,7 @@ def test_analyze_dataset_treats_null_image_labels_as_missing(tmp_path: Path) -> 
 
     assert fingerprint["image_label_tasks"] == {
         "survival_days": {
-            "type": "regression",
+            "type": "survival",
             "n_labeled": 1,
             "n_missing": 2,
             "min": 100.0,
@@ -303,6 +308,9 @@ def test_analyze_dataset_treats_null_image_labels_as_missing(tmp_path: Path) -> 
             "max": 100.0,
             "mean": 100.0,
             "std": 0.0,
+            "n_events": 1,
+            "n_censored": 0,
+            "masking": "relapse",
             "unit": "days",
         },
         "tumor_stage": {

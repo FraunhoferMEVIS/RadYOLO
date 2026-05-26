@@ -62,7 +62,7 @@ def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
     shutil.copytree(synthetic_dataset, dataset_path)
     (dataset_path / "labels_image").mkdir()
     (dataset_path / "labels_image" / "case1.json").write_text(
-        json.dumps({"tumor_stage": 2, "survival_days": 418.5}),
+        json.dumps({"tumor_stage": 2, "survival_days": 418.5, "relapse": False}),
         encoding="utf-8",
     )
     (dataset_path / "dataset.yaml").write_text(
@@ -73,7 +73,8 @@ def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
         "    type: multiclass\n"
         "    classes: {0: stage_i, 1: stage_ii, 2: stage_iii}\n"
         "  survival_days:\n"
-        "    type: regression\n",
+        "    type: survival\n"
+        "    masking: relapse\n",
         encoding="utf-8",
     )
 
@@ -91,9 +92,13 @@ def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
 
     sample = dataset.load_image_label_and_mask(0)
 
-    assert sample["image_labels"] == {"tumor_stage": 2, "survival_days": 418.5}
+    assert sample["image_labels"] == {
+        "tumor_stage": 2,
+        "survival_days": 418.5,
+        "relapse": False,
+    }
     assert dataset.collate_fn([sample])["image_labels"] == (
-        {"tumor_stage": 2, "survival_days": 418.5},
+        {"tumor_stage": 2, "survival_days": 418.5, "relapse": False},
     )
     assert (preprocessed_dataset / "labels_image" / "case1.json").exists()
 
@@ -106,7 +111,7 @@ def test_dataset_loads_null_global_image_labels_as_none(
     shutil.copytree(synthetic_dataset, dataset_path)
     (dataset_path / "labels_image").mkdir()
     (dataset_path / "labels_image" / "case1.json").write_text(
-        json.dumps({"tumor_stage": None, "survival_days": None}),
+        json.dumps({"tumor_stage": None, "survival_days": None, "relapse": None}),
         encoding="utf-8",
     )
     (dataset_path / "dataset.yaml").write_text(
@@ -117,7 +122,8 @@ def test_dataset_loads_null_global_image_labels_as_none(
         "    type: multiclass\n"
         "    classes: {0: stage_i, 1: stage_ii, 2: stage_iii}\n"
         "  survival_days:\n"
-        "    type: regression\n",
+        "    type: survival\n"
+        "    masking: relapse\n",
         encoding="utf-8",
     )
 
@@ -129,4 +135,8 @@ def test_dataset_loads_null_global_image_labels_as_none(
 
     sample = dataset.load_image_label_and_mask(0)
 
-    assert sample["image_labels"] == {"tumor_stage": None, "survival_days": None}
+    assert sample["image_labels"] == {
+        "tumor_stage": None,
+        "survival_days": None,
+        "relapse": None,
+    }
