@@ -164,6 +164,8 @@ def _build_estimation_config(  # noqa: PLR0913
     segmentation_output: bool,
     include_stride4_output: bool,
     prototype_masks: int,
+    data_path: Path | None = None,
+    enable_image_label_head: bool | None = None,
     reference_config: dict[str, Any] | DefaultConfig | None = None,
 ) -> DefaultConfig:
     if isinstance(reference_config, DefaultConfig):
@@ -178,7 +180,11 @@ def _build_estimation_config(  # noqa: PLR0913
             "input_channels": input_channels,
             "num_classes": num_classes,
             "model_scale": scale,
-            "data": config_data.get("data", "."),
+            "data": (
+                Path(data_path).as_posix()
+                if data_path is not None
+                else config_data.get("data", ".")
+            ),
             "fold": int(config_data.get("fold", 0)),
             "batch_size": batch_size,
             "patch_size": {"x": 64, "y": 64, "z": 64},
@@ -186,6 +192,11 @@ def _build_estimation_config(  # noqa: PLR0913
             "segmentation_output": segmentation_output,
             "include_stride4_output": include_stride4_output,
             "prototype_masks": prototype_masks,
+            "enable_image_label_head": (
+                bool(enable_image_label_head)
+                if enable_image_label_head is not None
+                else bool(config_data.get("enable_image_label_head", False))
+            ),
             "experiment_name": config_data.get("experiment_name", "memory_estimate"),
         }
     )
@@ -504,6 +515,8 @@ def estimate_patch_memory(  # noqa: PLR0913
     include_stride4_output: bool,
     prototype_masks: int,
     estimated_boxes_per_image: int = 1,
+    data_path: Path | None = None,
+    enable_image_label_head: bool | None = None,
     reference_config: dict[str, Any] | DefaultConfig | None = None,
 ) -> PatchMemoryBreakdown:
     estimator = ModelMemoryEstimator(
@@ -515,6 +528,8 @@ def estimate_patch_memory(  # noqa: PLR0913
             segmentation_output=segmentation_output,
             include_stride4_output=include_stride4_output,
             prototype_masks=prototype_masks,
+            data_path=data_path,
+            enable_image_label_head=enable_image_label_head,
             reference_config=reference_config,
         ),
         estimated_boxes_per_image=estimated_boxes_per_image,
@@ -533,6 +548,8 @@ def estimate_patch_memory_gb(  # noqa: PLR0913
     include_stride4_output: bool,
     prototype_masks: int,
     estimated_boxes_per_image: int = 1,
+    data_path: Path | None = None,
+    enable_image_label_head: bool | None = None,
     reference_config: dict[str, Any] | DefaultConfig | None = None,
 ) -> float:
     memory_breakdown = estimate_patch_memory(
@@ -545,6 +562,8 @@ def estimate_patch_memory_gb(  # noqa: PLR0913
         include_stride4_output=include_stride4_output,
         prototype_masks=prototype_masks,
         estimated_boxes_per_image=estimated_boxes_per_image,
+        data_path=data_path,
+        enable_image_label_head=enable_image_label_head,
         reference_config=reference_config,
     )
     return memory_breakdown.total_gb
@@ -713,6 +732,8 @@ def propose_patch_size(  # noqa: PLR0913, PLR0912, PLR0915
     include_stride4_output: bool,
     prototype_masks: int,
     estimated_boxes_per_image: int = 1,
+    data_path: Path | None = None,
+    enable_image_label_head: bool | None = None,
     reference_config: dict[str, Any] | DefaultConfig | None = None,
 ) -> tuple[PatchSize, float]:
     median_resampled = fingerprint.get("median_resampled_imagesize")
@@ -733,6 +754,8 @@ def propose_patch_size(  # noqa: PLR0913, PLR0912, PLR0915
             segmentation_output=segmentation_output,
             include_stride4_output=include_stride4_output,
             prototype_masks=prototype_masks,
+            data_path=data_path,
+            enable_image_label_head=enable_image_label_head,
             reference_config=reference_config,
         ),
         estimated_boxes_per_image=estimated_boxes_per_image,
@@ -877,6 +900,9 @@ def propose_model_config(
     runtime_normalization = build_runtime_normalization_config(
         normalization_tags, fingerprint
     )
+    enable_image_label_head = bool(dataset_yaml.get("image_label_tasks")) and bool(
+        reference_config.get("enable_image_label_head", False)
+    )
 
     masks_dir = dataset_path / "masks"
     has_masks = bool(
@@ -899,6 +925,8 @@ def propose_model_config(
         ),
         prototype_masks=int(reference_config.get("prototype_masks", 8)),
         estimated_boxes_per_image=estimated_boxes_per_image,
+        data_path=dataset_path,
+        enable_image_label_head=enable_image_label_head,
         reference_config=reference_config,
     )
     if estimated_memory > gpu_ram_limit_gb and batch_size > 1:
@@ -922,6 +950,8 @@ def propose_model_config(
             ),
             prototype_masks=int(reference_config.get("prototype_masks", 8)),
             estimated_boxes_per_image=estimated_boxes_per_image,
+            data_path=dataset_path,
+            enable_image_label_head=enable_image_label_head,
             reference_config=reference_config,
         )
 
@@ -939,6 +969,7 @@ def propose_model_config(
             },
             "normalization": runtime_normalization,
             "segmentation_output": has_masks,
+            "enable_image_label_head": enable_image_label_head,
             "experiment_name": (
                 f"{dataset_path.name}_{model_scale}_{patch_size.x}"
                 f"x{patch_size.y}x{patch_size.z}"
