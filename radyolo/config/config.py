@@ -311,13 +311,14 @@ class DefaultConfig(BaseModel):
 
         if "rotation_angle" in migrated:
             rotation_angle = migrated["rotation_angle"]
-            if isinstance(rotation_angle, bool) or not isinstance(rotation_angle, (int, float)):
-                msg = "rotation_angle must be a numeric scalar when provided"
-                raise TypeError(msg)
-            angle_magnitude = float(rotation_angle)
-            angle_range = (-abs(angle_magnitude), abs(angle_magnitude))
-            for axis_key in ("rotation_angle_x", "rotation_angle_y", "rotation_angle_z"):
-                migrated.setdefault(axis_key, angle_range)
+            if rotation_angle is not None:
+                if isinstance(rotation_angle, bool) or not isinstance(rotation_angle, (int, float)):
+                    msg = "rotation_angle must be a numeric scalar when provided"
+                    raise TypeError(msg)
+                angle_magnitude = float(rotation_angle)
+                angle_range = (-abs(angle_magnitude), abs(angle_magnitude))
+                for axis_key in ("rotation_angle_x", "rotation_angle_y", "rotation_angle_z"):
+                    migrated.setdefault(axis_key, angle_range)
 
         return migrated
 

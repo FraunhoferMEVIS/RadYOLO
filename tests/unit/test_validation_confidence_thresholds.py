@@ -81,3 +81,17 @@ def test_rotation_angle_scalar_does_not_override_explicit_axis_ranges(tmp_path: 
     assert cfg.rotation_angle_x == (-15.0, 15.0)
     assert cfg.rotation_angle_y == (-10.0, 10.0)
     assert cfg.rotation_angle_z == (-15.0, 15.0)
+
+
+def test_rotation_angle_none_keeps_default_axis_ranges(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path),
+            "rotation_angle": None,
+        }
+    )
+
+    assert cfg.rotation_angle is None
+    assert cfg.rotation_angle_x == (-15.0, 15.0)
+    assert cfg.rotation_angle_y == (-15.0, 15.0)
+    assert cfg.rotation_angle_z == (-15.0, 15.0)
