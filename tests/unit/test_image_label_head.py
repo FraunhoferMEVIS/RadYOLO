@@ -136,10 +136,7 @@ def test_detection_loss_includes_image_label_loss_term(tmp_path: Path) -> None:
 
     assert torch.isfinite(total_loss)
     assert torch.isfinite(loss_items).all()
-    assert loss_fn.loss_names[-2:] == [
-        "image_label_multiclass_cce_loss",
-        "image_label_regression_l1_loss",
-    ]
+    assert loss_fn.loss_names[-2:] == ["img_cce", "img_l1"]
     assert loss_items.shape == (7,)
     assert float(loss_items[-2]) > 0.0
     assert float(loss_items[-1]) > 0.0
@@ -160,8 +157,8 @@ def test_detection_loss_skips_zero_gain_image_label_losses(tmp_path: Path) -> No
     model = build_model_from_config(config)
     loss_fn = build_detection_loss_from_config(config, model, torch.device("cpu"))
 
-    assert "image_label_multiclass_cce_loss" not in loss_fn.loss_names
-    assert "image_label_regression_l1_loss" not in loss_fn.loss_names
+    assert "img_cce" not in loss_fn.loss_names
+    assert "img_l1" not in loss_fn.loss_names
 
 
 def test_image_label_multiclass_loss_supports_class_weights() -> None:
@@ -199,7 +196,7 @@ def test_image_label_multiclass_loss_supports_class_weights() -> None:
         reduction="mean",
     )
 
-    assert loss_fn.loss_names == ["image_label_multiclass_cce_loss"]
+    assert loss_fn.loss_names == ["img_cce"]
     assert torch.isclose(total_loss, expected)
     assert torch.isclose(loss_items[0], expected)
 

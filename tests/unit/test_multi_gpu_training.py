@@ -24,8 +24,9 @@ from radyolo.utils.util import ModelEMA, select_device, wrap_model_for_training
 
 
 class RecordingLoss:
-    def __init__(self, loss_fn) -> None:
+    def __init__(self, loss_fn, *, num_loss_terms: int = 5) -> None:
         self.loss_fn = loss_fn
+        self.num_loss_terms = num_loss_terms
 
     def __call__(self, predictions, batch, current_epoch):
         return self.loss_fn(predictions, batch, current_epoch)
