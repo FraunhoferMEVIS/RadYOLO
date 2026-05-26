@@ -115,9 +115,7 @@ mirroring_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
 # Rotation augmentation
 prob_rotation: 0.2
-rotation_angle_x: [-15.0, 15.0]
-rotation_angle_y: [-15.0, 15.0]
-rotation_angle_z: [-15.0, 15.0]
+rotation_angle: 15
 rotation_keep_box_volume: true
 rotation_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 

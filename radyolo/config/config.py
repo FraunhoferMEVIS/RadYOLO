@@ -235,6 +235,7 @@ class DefaultConfig(BaseModel):
 
     # Rotation augmentation
     prob_rotation: float = Field(0.2, ge=0, le=1.0)
+    rotation_angle: float | None = None
     rotation_angle_x: tuple[float, float] = (-15.0, 15.0)
     rotation_angle_y: tuple[float, float] = (-15.0, 15.0)
     rotation_angle_z: tuple[float, float] = (-15.0, 15.0)
@@ -286,25 +287,38 @@ class DefaultConfig(BaseModel):
         if not isinstance(data, dict):
             return data
         if "prototype_layer" in data:
-            return data
+            migrated = dict(data)
+        else:
+            legacy_modes = [
+                ("full_resolution_prototypes", "full_resolution"),
+                ("half_resolution_prototypes", "half_resolution"),
+                ("higher_resolution_prototypes", "higher_resolution"),
+            ]
+            enabled_modes = [mode for key, mode in legacy_modes if data.get(key) is True]
+            if len(enabled_modes) > 1:
+                msg = (
+                    "prototype selection fields are mutually exclusive; got multiple legacy "
+                    f"values enabled: {enabled_modes}"
+                )
+                raise ValueError(msg)
 
-        legacy_modes = [
-            ("full_resolution_prototypes", "full_resolution"),
-            ("half_resolution_prototypes", "half_resolution"),
-            ("higher_resolution_prototypes", "higher_resolution"),
-        ]
-        enabled_modes = [mode for key, mode in legacy_modes if data.get(key) is True]
-        if len(enabled_modes) > 1:
-            msg = (
-                "prototype selection fields are mutually exclusive; got multiple legacy "
-                f"values enabled: {enabled_modes}"
+            migrated = dict(data)
+            migrated["prototype_layer"] = (
+                enabled_modes[0] if enabled_modes else "higher_resolution"
             )
-            raise ValueError(msg)
+            for key, _ in legacy_modes:
+                migrated.pop(key, None)
 
-        migrated = dict(data)
-        migrated["prototype_layer"] = enabled_modes[0] if enabled_modes else "higher_resolution"
-        for key, _ in legacy_modes:
-            migrated.pop(key, None)
+        if "rotation_angle" in migrated:
+            rotation_angle = migrated["rotation_angle"]
+            if isinstance(rotation_angle, bool) or not isinstance(rotation_angle, (int, float)):
+                msg = "rotation_angle must be a numeric scalar when provided"
+                raise TypeError(msg)
+            angle_magnitude = float(rotation_angle)
+            angle_range = (-abs(angle_magnitude), abs(angle_magnitude))
+            for axis_key in ("rotation_angle_x", "rotation_angle_y", "rotation_angle_z"):
+                migrated.setdefault(axis_key, angle_range)
+
         return migrated
 
     @model_validator(mode="after")

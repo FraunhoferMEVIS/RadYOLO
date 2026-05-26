@@ -54,3 +54,30 @@ def test_nms_threshold_candidates_must_be_in_unit_interval(tmp_path: Path) -> No
                 "nms_iou_threshold_candidates": [0.1, 1.2],
             }
         )
+
+
+def test_rotation_angle_scalar_expands_to_all_axes(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path),
+            "rotation_angle": 15,
+        }
+    )
+
+    assert cfg.rotation_angle_x == (-15.0, 15.0)
+    assert cfg.rotation_angle_y == (-15.0, 15.0)
+    assert cfg.rotation_angle_z == (-15.0, 15.0)
+
+
+def test_rotation_angle_scalar_does_not_override_explicit_axis_ranges(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path),
+            "rotation_angle": 15,
+            "rotation_angle_y": (-10.0, 10.0),
+        }
+    )
+
+    assert cfg.rotation_angle_x == (-15.0, 15.0)
+    assert cfg.rotation_angle_y == (-10.0, 10.0)
+    assert cfg.rotation_angle_z == (-15.0, 15.0)
