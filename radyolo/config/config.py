@@ -200,11 +200,14 @@ class DefaultConfig(BaseModel):
     nms_iou_threshold_candidates: list[float] = Field(
         default_factory=lambda: [0.02, 0.04, 0.06, 0.1, 0.15, 0.2]
     )  # NMS IoU thresholds evaluated after training for best/last checkpoints
-    fitness_metric_weights: tuple[float, float, float] = (
+    fitness_metric_weights: tuple[float, ...] = (
         0.4,
         0.4,
         0.2,
-    )  # weights for [mAP10-95, mAP10-95Agn, dice] when computing validation fitness
+        0.0,
+        0.0,
+        0.0,
+    )  # weights for [mAP10-95, mAP10-95Agn, dice, image_label_balanced_accuracy, image_label_multiclass_roc_auc, image_label_c_index] when computing validation fitness
 
     # Plot settings
     plots: bool = True  # save plots and images during train/val
@@ -385,8 +388,8 @@ class DefaultConfig(BaseModel):
             self.tal_topk_final = self.tal_topk
         if self.tal_topk_final_epoch is None:
             self.tal_topk_final_epoch = self.epochs
-        if len(self.fitness_metric_weights) != 3:
-            msg = "fitness_metric_weights must contain exactly three entries"
+        if len(self.fitness_metric_weights) not in {3, 6}:
+            msg = "fitness_metric_weights must contain exactly three legacy entries or six extended entries"
             raise ValueError(msg)
         if any(weight < 0 for weight in self.fitness_metric_weights):
             msg = "fitness_metric_weights entries must be non-negative"

@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 import torch
 
+from radyolo.data.image_labels import ImageLabelTaskSpec
+from radyolo.validation.validate import Validator
 from radyolo.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
@@ -120,6 +122,168 @@ def test_detmetrics_plot_summary_handles_unprocessed_metrics(tmp_path: Path) -> 
     output_path = tmp_path / "validation_summary.png"
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_validator_reports_image_label_metrics(tmp_path: Path) -> None:
+    config = type(
+        "Config",
+        (),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+            "verbose": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.image_label_task_specs = {
+        "stage": ImageLabelTaskSpec(
+            type="multiclass",
+            classes={0: "I", 1: "II", 2: "III"},
+        ),
+        "rfs": ImageLabelTaskSpec(
+            type="survival",
+            masking="relapse",
+            survival_bin_thresholds=(0.0, 1.0, 2.0),
+        ),
+    }
+    validator.init_metrics()
+    validator.image_label_multiclass_targets["stage"] = [np.array([0, 1, 2], dtype=np.int64)]
+    validator.image_label_multiclass_logits["stage"] = [
+        np.array(
+            [
+                [10.0, 0.0, 0.0],
+                [0.0, 10.0, 0.0],
+                [0.0, 0.0, 10.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+    validator.image_label_survival_times["rfs"] = [np.array([1.0, 2.0, 3.0], dtype=np.float64)]
+    validator.image_label_survival_events["rfs"] = [
+        np.array([True, True, False], dtype=np.bool_)
+    ]
+    validator.image_label_survival_logits["rfs"] = [
+        np.array(
+            [
+                [-6.0, -6.0, -6.0],
+                [0.0, 0.0, 0.0],
+                [6.0, 6.0, 6.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+
+    results = validator._get_image_label_stats()
+
+    assert results["metrics/image_label_stage_balanced_accuracy"] == pytest.approx(1.0)
+    assert results["metrics/image_label_stage_multiclass_roc_auc"] == pytest.approx(1.0)
+    assert results["metrics/image_label_rfs_c_index"] == pytest.approx(1.0)
+    assert results["metrics/image_label_balanced_accuracy"] == pytest.approx(1.0)
+    assert results["metrics/image_label_multiclass_roc_auc"] == pytest.approx(1.0)
+    assert results["metrics/image_label_c_index"] == pytest.approx(1.0)
+
+
+def test_validator_replaces_undefined_multiclass_roc_auc_with_random_baseline(
+    tmp_path: Path,
+) -> None:
+    config = type(
+        "Config",
+        (),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+            "verbose": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.image_label_task_specs = {
+        "stage": ImageLabelTaskSpec(
+            type="multiclass",
+            classes={0: "I", 1: "II", 2: "III"},
+        )
+    }
+    validator.init_metrics()
+    validator.image_label_multiclass_targets["stage"] = [np.array([0, 1, 0, 1], dtype=np.int64)]
+    validator.image_label_multiclass_logits["stage"] = [
+        np.array(
+            [
+                [8.0, 0.0, -8.0],
+                [0.0, 8.0, -8.0],
+                [7.0, 0.0, -8.0],
+                [0.0, 7.0, -8.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+
+    results = validator._get_image_label_stats()
+
+    assert results["metrics/image_label_stage_multiclass_roc_auc"] == pytest.approx(0.5)
+    assert np.isfinite(results["metrics/image_label_multiclass_roc_auc"])
+
+
+def test_validator_print_results_includes_image_label_metrics_in_main_summary(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = type(
+        "Config",
+        (),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+            "verbose": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.image_label_task_specs = {
+        "stage": ImageLabelTaskSpec(
+            type="multiclass",
+            classes={0: "I", 1: "II", 2: "III"},
+        ),
+        "rfs": ImageLabelTaskSpec(
+            type="survival",
+            masking="relapse",
+            survival_bin_thresholds=(0.0, 1.0, 2.0),
+        ),
+    }
+    validator.init_metrics()
+    validator.seen = 133
+    validator.nt_per_class = np.array([387], dtype=np.int64)
+    validator.nt_per_image = np.array([133], dtype=np.int64)
+    validator.image_label_multiclass_targets["stage"] = [np.array([0, 1, 2], dtype=np.int64)]
+    validator.image_label_multiclass_logits["stage"] = [
+        np.array(
+            [
+                [10.0, 0.0, 0.0],
+                [0.0, 10.0, 0.0],
+                [0.0, 0.0, 10.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+    validator.image_label_survival_times["rfs"] = [np.array([1.0, 2.0, 3.0], dtype=np.float64)]
+    validator.image_label_survival_events["rfs"] = [
+        np.array([True, True, False], dtype=np.bool_)
+    ]
+    validator.image_label_survival_logits["rfs"] = [
+        np.array(
+            [
+                [-6.0, -6.0, -6.0],
+                [0.0, 0.0, 0.0],
+                [6.0, 6.0, 6.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+
+    caplog.set_level("INFO")
+    validator.print_results()
+
+    assert "BalAcc" in caplog.text
+    assert "mcAUC" in caplog.text
+    assert "C-Index" in caplog.text
+    assert "Image labels " not in caplog.text
 
 
 def test_metric_update_accepts_named_arguments() -> None:

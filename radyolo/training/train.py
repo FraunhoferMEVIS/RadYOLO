@@ -375,11 +375,26 @@ class Trainer:
         map_1095 = float(metrics.get("metrics/mAP10-95", 0.0))
         map_1095_agn = float(metrics.get("metrics/mAP10-95Agn", 0.0))
         dice = float(metrics.get("metrics/dice", 0.0))
+        image_label_balanced_accuracy = float(
+            metrics.get("metrics/image_label_balanced_accuracy", 0.0)
+        )
+        image_label_multiclass_roc_auc = float(
+            metrics.get("metrics/image_label_multiclass_roc_auc", 0.0)
+        )
+        image_label_c_index = float(metrics.get("metrics/image_label_c_index", 0.0))
         weights = self.config.fitness_metric_weights
+        if len(weights) == 3:
+            weights = (*weights, 0.0, 0.0, 0.0)
         total_weight = sum(weights)
-        return (
-            weights[0] * map_1095 + weights[1] * map_1095_agn + weights[2] * dice
-        ) / total_weight
+        weighted_metrics = (
+            weights[0] * map_1095,
+            weights[1] * map_1095_agn,
+            weights[2] * dice,
+            weights[3] * image_label_balanced_accuracy,
+            weights[4] * image_label_multiclass_roc_auc,
+            weights[5] * image_label_c_index,
+        )
+        return sum(weighted_metrics) / total_weight
 
     def check_resume(self) -> None:
         resume = self.config.resume
@@ -1124,9 +1139,9 @@ class Trainer:
             else (("%s," * n % ("epoch", "time", *keys)).rstrip(",") + "\n")
         )
         t = time.time() - train_time_start
-        with self.csv_path.open("a") as f:
+        with self.csv_path.open("a", encoding="utf-8") as file:
             line = ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",")
-            f.write(header + line + "\n")
+            file.write(header + line + "\n")
 
     def build_optimizer(
         self,

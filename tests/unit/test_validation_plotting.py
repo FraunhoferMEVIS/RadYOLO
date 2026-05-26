@@ -100,3 +100,35 @@ def test_plot_results_warns_when_results_png_is_busy(
 
     assert not busy_target.exists()
     assert "Could not save plot" in caplog.text
+
+
+def test_plot_results_saves_image_label_curves_separately(tmp_path: Path) -> None:
+    results_csv = tmp_path / "results.csv"
+    columns = [
+        "epoch",
+        "train/box_loss",
+        "val/box_loss",
+        "metrics/mAP10-95",
+        "metrics/dice",
+        "train/img_cce",
+        "train/img_cst",
+        "train/img_cox",
+        "val/img_cce",
+        "val/img_cst",
+        "val/img_cox",
+        "metrics/image_label_balanced_accuracy",
+        "metrics/image_label_multiclass_roc_auc",
+        "metrics/image_label_c_index",
+    ]
+    pd.DataFrame(
+        [
+            [0, 1.0, 1.1, 0.2, 0.3, 0.8, 0.7, 0.6, 0.75, 0.65, 0.55, 0.4, 0.5, 0.6],
+            [1, 0.9, 1.0, 0.25, 0.35, 0.7, 0.6, 0.5, 0.65, 0.55, 0.45, 0.45, 0.55, 0.65],
+        ],
+        columns=columns,
+    ).to_csv(results_csv, index=False)
+
+    plotting.plot_results(results_csv)
+
+    assert (tmp_path / "loss_curves.png").exists()
+    assert (tmp_path / "loss_curves_image_labels.png").exists()

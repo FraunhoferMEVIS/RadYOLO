@@ -3,17 +3,21 @@ from __future__ import annotations
 import json
 import logging
 import re
+import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
 import torch
 import torch.nn.functional as F  # noqa: N812
+from sklearn.metrics import balanced_accuracy_score, roc_auc_score
+from sksurv.metrics import concordance_index_censored
 from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DetectionPostprocessConfig
 from radyolo.utils import ops
 from radyolo.utils.ops import box_iou
+from radyolo.utils.util import unwrap_model
 from radyolo.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
@@ -27,10 +31,12 @@ if TYPE_CHECKING:
 
     from radyolo.config.config import DatasetConfig, DefaultConfig
     from radyolo.data.data import Batch
+    from radyolo.data.image_labels import ImageLabelTaskSpec
     from radyolo.models.layers import ModelOutput
     from radyolo.models.model import HardcodedModel
     from radyolo.training.loss import TrainingLoss
     from radyolo.training.train import Trainer
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -85,6 +91,12 @@ class Validator:
         self.plot_batches: list[
             tuple[torch.Tensor | None, torch.Tensor, torch.Tensor]
         ] = []
+        self.image_label_task_specs: dict[str, ImageLabelTaskSpec] = {}
+        self.image_label_multiclass_logits: dict[str, list[npt.NDArray[np.float64]]] = {}
+        self.image_label_multiclass_targets: dict[str, list[npt.NDArray[np.int64]]] = {}
+        self.image_label_survival_logits: dict[str, list[npt.NDArray[np.float64]]] = {}
+        self.image_label_survival_times: dict[str, list[npt.NDArray[np.float64]]] = {}
+        self.image_label_survival_events: dict[str, list[npt.NDArray[np.bool_]]] = {}
 
     def _get_dice_average(self) -> float:
         if self.dice_count <= 0:
@@ -117,6 +129,10 @@ class Validator:
                 raise RuntimeError(msg)
         else:
             self.device = model.device
+        unwrapped_model = unwrap_model(model)
+        self.image_label_task_specs = dict(
+            getattr(unwrapped_model, "image_label_task_specs", {})
+        )
         model.eval()
 
         bar = tqdm(
@@ -136,6 +152,8 @@ class Validator:
                         batch,
                         current_epoch=trainer.epoch + 1,
                     )[1]
+
+            self.update_image_label_metrics(batch, model_output.image_label_outputs)
 
             # Postprocess and metrics
             preds = self.postprocess(model_output)
@@ -190,18 +208,30 @@ class Validator:
         self.dice_sum = 0.0
         self.dice_count = 0
         self.plot_batches = []
+        multiclass_tasks = {
+            task_name
+            for task_name, task_spec in self.image_label_task_specs.items()
+            if task_spec.type == "multiclass"
+        }
+        survival_tasks = {
+            task_name
+            for task_name, task_spec in self.image_label_task_specs.items()
+            if task_spec.type == "survival"
+        }
+        self.image_label_multiclass_logits = {task_name: [] for task_name in multiclass_tasks}
+        self.image_label_multiclass_targets = {task_name: [] for task_name in multiclass_tasks}
+        self.image_label_survival_logits = {task_name: [] for task_name in survival_tasks}
+        self.image_label_survival_times = {task_name: [] for task_name in survival_tasks}
+        self.image_label_survival_events = {task_name: [] for task_name in survival_tasks}
 
     def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
-        return ("%22s" + "%11s" * 7) % (
+        summary_metric_labels = self._summary_metric_labels()
+        return ("%22s" + "%11s" * (2 + len(summary_metric_labels))) % (
             "Class",
             "Images",
             "Instances",
-            "Prec",
-            "Rec",
-            "mAP10",
-            "mAP10-95",
-            "Dice",
+            *summary_metric_labels,
         )
 
     def preprocess(self, batch: Batch) -> Batch:
@@ -592,20 +622,247 @@ class Validator:
         return {
             **self.metrics.results_dict,
             "metrics/dice": dice_avg,
+            **self._get_image_label_stats(),
         }
+
+    def update_image_label_metrics(
+        self,
+        batch: Batch,
+        image_label_outputs: dict[str, torch.Tensor] | None,
+    ) -> None:
+        if image_label_outputs is None or not self.image_label_task_specs:
+            return
+
+        for task_name, task_spec in self.image_label_task_specs.items():
+            task_predictions = image_label_outputs.get(task_name)
+            if task_predictions is None:
+                continue
+
+            if task_spec.type == "multiclass":
+                task_targets: list[int] = []
+                task_logits: list[npt.NDArray[np.float64]] = []
+                for batch_index, image_labels in enumerate(batch["image_labels"]):
+                    target_value = image_labels.get(task_name)
+                    if target_value is None:
+                        continue
+                    task_targets.append(int(target_value))
+                    task_logits.append(task_predictions[batch_index].detach().float().cpu().numpy())
+                if task_targets:
+                    self.image_label_multiclass_targets[task_name].append(
+                        np.asarray(task_targets, dtype=np.int64)
+                    )
+                    self.image_label_multiclass_logits[task_name].append(
+                        np.stack(task_logits).astype(np.float64, copy=False)
+                    )
+                continue
+
+            if task_spec.type == "survival":
+                event_field = task_spec.masking
+                if not event_field:
+                    continue
+                task_times: list[float] = []
+                task_events: list[bool] = []
+                task_logits = []
+                for batch_index, image_labels in enumerate(batch["image_labels"]):
+                    target_value = image_labels.get(task_name)
+                    event_value = image_labels.get(event_field)
+                    if target_value is None or event_value is None:
+                        continue
+                    task_times.append(float(target_value))
+                    task_events.append(bool(event_value))
+                    task_logits.append(task_predictions[batch_index].detach().float().cpu().numpy())
+                if task_times:
+                    self.image_label_survival_times[task_name].append(
+                        np.asarray(task_times, dtype=np.float64)
+                    )
+                    self.image_label_survival_events[task_name].append(
+                        np.asarray(task_events, dtype=np.bool_)
+                    )
+                    self.image_label_survival_logits[task_name].append(
+                        np.stack(task_logits).astype(np.float64, copy=False)
+                    )
+
+    @staticmethod
+    def _softmax(logits: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        shifted_logits = logits - np.max(logits, axis=1, keepdims=True)
+        exponentials = np.exp(shifted_logits)
+        return exponentials / exponentials.sum(axis=1, keepdims=True)
+
+    @staticmethod
+    def _survival_bin_widths(thresholds: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        if thresholds.size == 1:
+            return np.ones_like(thresholds)
+        trailing_width = thresholds[-1] - thresholds[-2]
+        if trailing_width <= 0:
+            trailing_width = 1.0
+        return np.diff(thresholds, append=thresholds[-1] + trailing_width)
+
+    def _compute_multiclass_roc_auc(
+        self,
+        task_spec: ImageLabelTaskSpec,
+        targets: npt.NDArray[np.int64],
+        probabilities: npt.NDArray[np.float64],
+    ) -> float:
+        try:
+            if probabilities.shape[1] <= 1 or np.unique(targets).size <= 1:
+                return 0.5
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                if probabilities.shape[1] == 2:
+                    roc_auc = float(roc_auc_score(targets, probabilities[:, 1]))
+                else:
+                    labels = list(range(probabilities.shape[1]))
+                    if task_spec.classes is not None:
+                        labels = sorted(task_spec.classes)
+                    roc_auc = float(
+                        roc_auc_score(
+                            targets,
+                            probabilities,
+                            labels=labels,
+                            multi_class="ovr",
+                            average="macro",
+                        )
+                    )
+            if not np.isfinite(roc_auc):
+                return 0.5
+        except ValueError:
+            return 0.5
+        else:
+            return roc_auc
+
+    def _compute_survival_c_index(
+        self,
+        task_spec: ImageLabelTaskSpec,
+        logits: npt.NDArray[np.float64],
+        survival_times: npt.NDArray[np.float64],
+        event_indicators: npt.NDArray[np.bool_],
+    ) -> float:
+        thresholds = task_spec.survival_bin_thresholds
+        if thresholds is None:
+            return 0.0
+        threshold_array = np.asarray(thresholds, dtype=np.float64)
+        if threshold_array.size != logits.shape[1]:
+            return 0.0
+        survival_probabilities = 1.0 / (1.0 + np.exp(-logits))
+        risk_scores = -(survival_probabilities * self._survival_bin_widths(threshold_array)).sum(
+            axis=1
+        )
+        try:
+            return float(
+                concordance_index_censored(
+                    event_indicators,
+                    survival_times,
+                    risk_scores,
+                )[0]
+            )
+        except ValueError:
+            return 0.0
+
+    def _get_image_label_stats(self) -> dict[str, float]:
+        metrics: dict[str, float] = {}
+        balanced_accuracies: list[float] = []
+        roc_aucs: list[float] = []
+        c_indices: list[float] = []
+
+        for task_name, task_spec in self.image_label_task_specs.items():
+            if task_spec.type == "multiclass":
+                logits_batches = self.image_label_multiclass_logits.get(task_name, [])
+                target_batches = self.image_label_multiclass_targets.get(task_name, [])
+                balanced_accuracy = 0.0
+                multiclass_roc_auc = 0.0
+                if logits_batches and target_batches:
+                    logits = np.concatenate(logits_batches, axis=0)
+                    targets = np.concatenate(target_batches, axis=0)
+                    probabilities = self._softmax(logits)
+                    predictions = probabilities.argmax(axis=1)
+                    balanced_accuracy = float(balanced_accuracy_score(targets, predictions))
+                    multiclass_roc_auc = self._compute_multiclass_roc_auc(
+                        task_spec,
+                        targets,
+                        probabilities,
+                    )
+                metrics[f"metrics/image_label_{task_name}_balanced_accuracy"] = balanced_accuracy
+                metrics[f"metrics/image_label_{task_name}_multiclass_roc_auc"] = multiclass_roc_auc
+                balanced_accuracies.append(balanced_accuracy)
+                roc_aucs.append(multiclass_roc_auc)
+                continue
+
+            if task_spec.type == "survival":
+                logits_batches = self.image_label_survival_logits.get(task_name, [])
+                time_batches = self.image_label_survival_times.get(task_name, [])
+                event_batches = self.image_label_survival_events.get(task_name, [])
+                c_index = 0.0
+                if logits_batches and time_batches and event_batches:
+                    logits = np.concatenate(logits_batches, axis=0)
+                    survival_times = np.concatenate(time_batches, axis=0)
+                    event_indicators = np.concatenate(event_batches, axis=0)
+                    c_index = self._compute_survival_c_index(
+                        task_spec,
+                        logits,
+                        survival_times,
+                        event_indicators,
+                    )
+                metrics[f"metrics/image_label_{task_name}_c_index"] = c_index
+                c_indices.append(c_index)
+
+        if balanced_accuracies:
+            metrics["metrics/image_label_balanced_accuracy"] = float(np.mean(balanced_accuracies))
+        if roc_aucs:
+            metrics["metrics/image_label_multiclass_roc_auc"] = float(np.mean(roc_aucs))
+        if c_indices:
+            metrics["metrics/image_label_c_index"] = float(np.mean(c_indices))
+        return metrics
+
+    def _summary_metric_labels(self) -> list[str]:
+        labels = ["Prec", "Rec", "mAP10", "mAP10-95", "Dice"]
+        has_multiclass_tasks = any(
+            task_spec.type == "multiclass" for task_spec in self.image_label_task_specs.values()
+        )
+        has_survival_tasks = any(
+            task_spec.type == "survival" for task_spec in self.image_label_task_specs.values()
+        )
+        if has_multiclass_tasks:
+            labels.extend(["BalAcc", "mcAUC"])
+        if has_survival_tasks:
+            labels.append("C-Index")
+        return labels
+
+    def _summary_metric_values(
+        self,
+        image_label_stats: dict[str, float],
+        dice_avg: float,
+    ) -> list[float]:
+        values = [*self.metrics.summary_mean_results(), dice_avg]
+        has_multiclass_tasks = any(
+            task_spec.type == "multiclass" for task_spec in self.image_label_task_specs.values()
+        )
+        has_survival_tasks = any(
+            task_spec.type == "survival" for task_spec in self.image_label_task_specs.values()
+        )
+        if has_multiclass_tasks:
+            values.extend(
+                [
+                    float(image_label_stats.get("metrics/image_label_balanced_accuracy", 0.0)),
+                    float(image_label_stats.get("metrics/image_label_multiclass_roc_auc", 0.0)),
+                ]
+            )
+        if has_survival_tasks:
+            values.append(float(image_label_stats.get("metrics/image_label_c_index", 0.0)))
+        return values
 
     def print_results(self) -> None:
         """Prints training/validation set metrics per class."""
         LOGGER.info(self.get_desc())
         dice_avg = self._get_dice_average()
-        pf = "%22s" + "%11i" * 2 + "%11.3g" * (len(self.metrics.summary_keys) + 1)
+        image_label_stats = self._get_image_label_stats()
+        summary_metric_values = self._summary_metric_values(image_label_stats, dice_avg)
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(summary_metric_values)
         LOGGER.info(
             pf,
             "all",
             self.seen,
             self.nt_per_class.sum(),
-            *self.metrics.summary_mean_results(),
-            dice_avg,
+            *summary_metric_values,
         )
         if self.nt_per_class.sum() == 0:
             LOGGER.warning(
@@ -615,13 +872,23 @@ class Validator:
         # Print results per class
         if self.config.verbose and not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
+                class_metric_values = [*self.metrics.class_result(i), float("nan")]
+                if any(
+                    task_spec.type == "multiclass"
+                    for task_spec in self.image_label_task_specs.values()
+                ):
+                    class_metric_values.extend([float("nan"), float("nan")])
+                if any(
+                    task_spec.type == "survival"
+                    for task_spec in self.image_label_task_specs.values()
+                ):
+                    class_metric_values.append(float("nan"))
                 LOGGER.info(
                     pf,
                     self.names[c],
                     self.nt_per_image[c],
                     self.nt_per_class[c],
-                    *self.metrics.class_result(i),
-                    float("nan"),
+                    *class_metric_values,
                 )
 
         if self.config.plots:

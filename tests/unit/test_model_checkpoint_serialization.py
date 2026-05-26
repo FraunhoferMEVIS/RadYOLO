@@ -311,6 +311,26 @@ def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) 
     assert fitness == pytest.approx(0.45)
 
 
+def test_validation_fitness_uses_image_label_metric_weights(minimal_train_config: Path) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.config = trainer.config.model_copy(
+        update={"fitness_metric_weights": (0.4, 0.1, 0.1, 0.1, 0.2, 0.1)}
+    )
+
+    fitness = trainer._compute_validation_fitness(
+        {
+            "metrics/mAP10-95": 0.5,
+            "metrics/mAP10-95Agn": 0.2,
+            "metrics/dice": 0.4,
+            "metrics/image_label_balanced_accuracy": 0.8,
+            "metrics/image_label_multiclass_roc_auc": 0.7,
+            "metrics/image_label_c_index": 0.6,
+        }
+    )
+
+    assert fitness == pytest.approx(0.54)
+
+
 def test_default_config_defaults_tal_topk_schedule_to_static_value(minimal_train_config: Path) -> None:
     config = get_cfg(minimal_train_config, {})
 

@@ -44,6 +44,18 @@ RESULTS_PLOT_COLUMNS = (
     "metrics/dice",
 )
 
+IMAGE_LABEL_RESULTS_PLOT_COLUMNS = (
+    "train/img_cce",
+    "train/img_cst",
+    "train/img_cox",
+    "val/img_cce",
+    "val/img_cst",
+    "val/img_cox",
+    "metrics/image_label_balanced_accuracy",
+    "metrics/image_label_multiclass_roc_auc",
+    "metrics/image_label_c_index",
+)
+
 
 class Colors:
     """Ultralytics color palette.
@@ -750,41 +762,77 @@ def plot_results(
             Defaults to ''.
     """
     save_dir = Path(file).parent if file else Path(directory)
-    fig, ax = plt.subplots(3, 5, figsize=(16, 7), tight_layout=True, sharex="col")
-
-    ax = ax.ravel()
     files = list(save_dir.glob("results*.csv"))
     assert files, f"No results.csv files found in {save_dir.resolve()}, nothing to plot."
+    _plot_results_grid(
+        files=files,
+        columns=RESULTS_PLOT_COLUMNS,
+        save_path=save_dir / "loss_curves.png",
+        shape=(3, 5),
+        figsize=(16, 7),
+    )
+    _plot_results_grid(
+        files=files,
+        columns=IMAGE_LABEL_RESULTS_PLOT_COLUMNS,
+        save_path=save_dir / "loss_curves_image_labels.png",
+        shape=(3, 3),
+        figsize=(12, 7),
+    )
+
+
+def _plot_results_grid(
+    *,
+    files: list[Path],
+    columns: tuple[str, ...],
+    save_path: Path,
+    shape: tuple[int, int],
+    figsize: tuple[float, float],
+) -> None:
+    fig, ax = plt.subplots(*shape, figsize=figsize, tight_layout=True, sharex="col")
+    axes = np.atleast_1d(ax).ravel()
+    has_any_series = False
+    visible_columns = [False] * len(columns)
+
     for f in files:
         data = pd.read_csv(f).rename(columns=lambda name: name.strip())
         epochs = data.to_numpy()[:, 0]
-        for plot_index, column_name in enumerate(RESULTS_PLOT_COLUMNS):
+        for plot_index, column_name in enumerate(columns):
             try:
                 if column_name not in data.columns:
-                    ax[plot_index].set_visible(False)
                     continue
+                visible_columns[plot_index] = True
+                has_any_series = True
                 y = data[column_name].to_numpy(dtype=float)
-                ax[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
-                ax[plot_index].set_ylabel(column_name)
-                ax[plot_index].grid(True, axis="both", alpha=0.2, linewidth=0.6)
+                axes[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
+                axes[plot_index].set_ylabel(column_name)
+                axes[plot_index].grid(True, axis="both", alpha=0.2, linewidth=0.6)
                 if "metrics" in column_name:
-                    ax[plot_index].set_xlabel("Epochs")
-                    ax[plot_index].set_ylim(0, 1)
+                    axes[plot_index].set_xlabel("Epochs")
+                    axes[plot_index].set_ylim(0, 1)
                 if "loss" in column_name:
                     clean = y[np.isfinite(y)]
                     if clean.size > 0:
                         y_min = np.min(clean) * 0.95
                         y_max = np.percentile(clean, 95) * 1.1
                         if y_min < y_max:
-                            ax[plot_index].set_ylim(y_min, y_max)
+                            axes[plot_index].set_ylim(y_min, y_max)
             except Exception as e:
                 LOGGER.warning("WARNING: Plotting error for %s (%s): %s", f, column_name, e)
-        ax[0].legend()
-    fname = save_dir / "loss_curves.png"
+
+    for plot_index, axis in enumerate(axes):
+        axis.set_visible(plot_index < len(columns) and visible_columns[plot_index])
+
+    if not has_any_series:
+        plt.close(fig)
+        return
+
+    legend_axis = next((axis for axis in axes if axis.get_visible()), None)
+    if legend_axis is not None:
+        legend_axis.legend()
     try:
-        fig.savefig(fname, dpi=200)
+        fig.savefig(save_path, dpi=200)
     except OSError as e:
-        LOGGER.warning("Could not save plot %s: %s", fname, e)
+        LOGGER.warning("Could not save plot %s: %s", save_path, e)
     plt.close(fig)
 
 

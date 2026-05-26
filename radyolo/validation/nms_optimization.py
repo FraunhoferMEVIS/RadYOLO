@@ -18,16 +18,26 @@ LOGGER = logging.getLogger(__name__)
 
 def compute_validation_fitness(
     metrics: dict[str, float],
-    fitness_metric_weights: tuple[float, float, float],
+    fitness_metric_weights: tuple[float, ...],
 ) -> float:
     map_1095 = float(metrics.get("metrics/mAP10-95", 0.0))
     map_1095_agn = float(metrics.get("metrics/mAP10-95Agn", 0.0))
     dice = float(metrics.get("metrics/dice", 0.0))
+    image_label_balanced_accuracy = float(metrics.get("metrics/image_label_balanced_accuracy", 0.0))
+    image_label_multiclass_roc_auc = float(
+        metrics.get("metrics/image_label_multiclass_roc_auc", 0.0)
+    )
+    image_label_c_index = float(metrics.get("metrics/image_label_c_index", 0.0))
+    if len(fitness_metric_weights) == 3:
+        fitness_metric_weights = (*fitness_metric_weights, 0.0, 0.0, 0.0)
     total_weight = sum(fitness_metric_weights)
     return (
         fitness_metric_weights[0] * map_1095
         + fitness_metric_weights[1] * map_1095_agn
         + fitness_metric_weights[2] * dice
+        + fitness_metric_weights[3] * image_label_balanced_accuracy
+        + fitness_metric_weights[4] * image_label_multiclass_roc_auc
+        + fitness_metric_weights[5] * image_label_c_index
     ) / total_weight
 
 
