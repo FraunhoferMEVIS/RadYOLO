@@ -610,11 +610,10 @@ class Trainer:
 
             if self.is_main_process:
                 LOGGER.info(
-                    "%11s" * (3 + len(self.loss_names)),
+                    "%13s" * (2 + len(self.loss_names)),
                     "Epoch",
                     "GPU_mem",
                     *self.loss_names,
-                    "Size",
                 )
                 pbar = tqdm(
                     enumerate(train_loader),
@@ -737,7 +736,7 @@ class Trainer:
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
                     if self.is_main_process:
                         pbar.set_description(
-                            ("%11s" * 2 + "%11.4g" * (loss_length))
+                            ("%13s%13s" + "%13.3g" * loss_length)
                             % (
                                 f"{self.epoch + 1}/{self.epochs}",
                                 f"{self.epoch_peak_memory_gb:.3g}G",
@@ -752,18 +751,16 @@ class Trainer:
 
             if self.is_main_process and tloss is not None:
                 LOGGER.info(
-                    "%15s" * 1 + "%11s" * (2 + len(self.loss_names)),  # noqa: G003
+                    "%13s%13s" + "%13s" * len(self.loss_names),  # noqa: G003
                     "Completed Epoch",
                     "GPU_mem",
                     *self.loss_names,
-                    "Loss",
                 )
                 LOGGER.info(
-                    "%15s%11s" + "%11.4g" * (loss_length + 1),  # noqa: G003
+                    "%13s%13s" + "%13.3g" * loss_length,  # noqa: G003
                     f"{self.epoch + 1}/{self.epochs}",
                     f"{self.epoch_peak_memory_gb:.3g}G",
                     *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
-                    loss.detach(),
                 )
 
             final_epoch = self.epoch + 1 >= self.epochs
