@@ -216,6 +216,7 @@ class Trainer:
         # Stateful validation fitness: exponentially weighted metric aggregate across epochs.
         self.ewa_fitness = None
         self.ewa_alpha = 0.6
+        self.epoch_peak_memory_gb = 0.0
 
     def _log_epoch_warning_summary(self) -> None:
         if self.loss is None:
@@ -604,6 +605,7 @@ class Trainer:
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(self.epoch)
             timing_values = self._create_epoch_timing_values()
+            self._reset_epoch_peak_memory()
             self.loss.reset_epoch_warning_stats()
 
             if self.is_main_process:
@@ -729,6 +731,7 @@ class Trainer:
                     timing_values["timing/gpu_steps_total_s"] += gpu_steps_end - all_gpu_steps_start
                     previous_gpu_steps_end = gpu_steps_end
                     has_previous_batch_in_epoch = True
+                    self._update_epoch_peak_memory()
 
                     # Log
                     loss_length = tloss.shape[0] if len(tloss.shape) else 1
@@ -737,7 +740,7 @@ class Trainer:
                             ("%11s" * 2 + "%11.4g" * (loss_length))
                             % (
                                 f"{self.epoch + 1}/{self.epochs}",
-                                f"{self._get_memory():.3g}G",
+                                f"{self.epoch_peak_memory_gb:.3g}G",
                                 *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),
                             )
                         )
@@ -758,7 +761,7 @@ class Trainer:
                 LOGGER.info(
                     "%15s%11s" + "%11.4g" * (loss_length + 1),  # noqa: G003
                     f"{self.epoch + 1}/{self.epochs}",
-                    f"{self._get_memory():.3g}G",
+                    f"{self.epoch_peak_memory_gb:.3g}G",
                     *(tloss if loss_length > 1 else torch.unsqueeze(tloss, 0)),  # losses
                     loss.detach(),
                 )
@@ -933,6 +936,12 @@ class Trainer:
         else:
             memory = torch.cuda.memory_reserved()
         return memory / 1e9
+
+    def _reset_epoch_peak_memory(self) -> None:
+        self.epoch_peak_memory_gb = self._get_memory()
+
+    def _update_epoch_peak_memory(self) -> None:
+        self.epoch_peak_memory_gb = max(self.epoch_peak_memory_gb, self._get_memory())
 
     def _clear_memory(self) -> None:
         """Clear accelerator memory on used platform."""

@@ -344,6 +344,36 @@ def test_trainer_broadcast_stop_uses_cuda_tensor_for_nccl(
     assert captured["src"] == 0
 
 
+def test_trainer_tracks_peak_epoch_memory_from_sampled_readings(
+    minimal_train_config,
+    monkeypatch,
+) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+
+    memory_readings = iter((0.25, 0.5, 0.75, 0.6))
+    monkeypatch.setattr(trainer, "_get_memory", lambda: next(memory_readings))
+
+    trainer._reset_epoch_peak_memory()
+    trainer._update_epoch_peak_memory()
+    trainer._update_epoch_peak_memory()
+    trainer._update_epoch_peak_memory()
+
+    assert trainer.epoch_peak_memory_gb == pytest.approx(0.75)
+
+
+def test_trainer_reset_epoch_peak_memory_uses_current_memory_reading(
+    minimal_train_config,
+    monkeypatch,
+) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.epoch_peak_memory_gb = 1.25
+    monkeypatch.setattr(trainer, "_get_memory", lambda: 0.4)
+
+    trainer._reset_epoch_peak_memory()
+
+    assert trainer.epoch_peak_memory_gb == pytest.approx(0.4)
+
+
 def test_model_ema_updates_from_wrapped_model() -> None:
     model = torch.nn.Linear(2, 2, bias=False)
     ema = ModelEMA(model, decay=0.5, tau=1.0)
