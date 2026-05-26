@@ -57,7 +57,7 @@ SUPPORTED_DISTRIBUTIONS = {
     "grid_search",
 }
 
-DEFAULT_TRAINING_COMMAND = ["uv", "run", "-m", "radyolo", "-v", "train"]
+DEFAULT_TRAINING_COMMAND = ["uv", "run", "-m", "radyolo", "train"]
 
 
 def _is_numeric_search_value(value: object) -> bool:
