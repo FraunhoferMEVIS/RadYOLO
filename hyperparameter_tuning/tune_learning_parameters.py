@@ -35,6 +35,10 @@ def _get_cfg_loader() -> Any:
     return importlib.import_module("radyolo.config.config").get_cfg
 
 
+def _get_default_config_model() -> Any:
+    return importlib.import_module("radyolo.config.config").DefaultConfig
+
+
 _ensure_project_root_on_sys_path()
 
 LOGGER = logging.getLogger(__name__)
@@ -161,6 +165,17 @@ def _deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]
         else:
             merged[key] = copy.deepcopy(value)
     return merged
+
+
+def _get_effective_template_config(template_config: dict[str, Any]) -> dict[str, Any]:
+    default_config_model = _get_default_config_model()
+    validation_payload = copy.deepcopy(template_config)
+    validation_payload["num_classes"] = max(1, int(validation_payload.get("num_classes", 1)))
+    effective_template_config = default_config_model.model_validate(
+        validation_payload
+    ).model_dump(mode="python")
+    effective_template_config.pop("num_classes", None)
+    return effective_template_config
 
 
 def _build_distribution(spec: Any) -> tuple[Any, str | None]:
@@ -1018,8 +1033,7 @@ def _load_tune_settings(
 
     template_config_path = Path(str(template_path)).expanduser().resolve()
     template_config = _read_yaml(template_config_path)
-    get_cfg = _get_cfg_loader()
-    effective_template_config = get_cfg(template_config_path, {}).model_dump(mode="python")
+    effective_template_config = _get_effective_template_config(template_config)
 
     search_space_cfg = tune_cfg.get("search_space")
     if not isinstance(search_space_cfg, dict) or not search_space_cfg:

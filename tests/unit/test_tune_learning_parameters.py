@@ -11,6 +11,7 @@ from hyperparameter_tuning.tune_learning_parameters import (
     _build_initial_evaluation_point,
     _compute_run_config_signature,
     _ensure_project_root_on_sys_path,
+    _load_tune_settings,
     _get_cached_completed_dataset_metrics,
     _restore_completed_dataset_metrics,
     _should_resume_dataset_run,
@@ -93,6 +94,64 @@ def test_build_initial_evaluation_point_skips_one_minus_loguniform_defaults() ->
     )
 
     assert initial_point == {"prototype_masks": 8}
+
+
+def test_load_tune_settings_validates_template_without_dataset_yaml(
+    tmp_path: Path,
+    synthetic_dataset: Path,
+) -> None:
+    template_config_path = tmp_path / "template.yaml"
+    template_config_path.write_text(
+        (
+            "input_channels: 1\n"
+            "model_scale: n\n"
+            "data: D:/datasets/cluster_only/template_dataset\n"
+            "fold: 0\n"
+            "epochs: 1\n"
+            "nominal_batch_size: 1\n"
+            "warmup_epochs: 0.0\n"
+            "patience: 1\n"
+            "batch_size: 1\n"
+            "patch_size: {x: 32, y: 32, z: 64}\n"
+            "normalization: {type: 'none'}\n"
+            "device: cpu\n"
+            "output_folder_base: runs\n"
+            "experiment_name: template\n"
+            "exist_ok: true\n"
+            "optimizer: Adam\n"
+            "verbose: false\n"
+            "seed: 0\n"
+            "deterministic: true\n"
+            "resume: false\n"
+            "amp: false\n"
+            "use_cudnn_benchmark: false\n"
+            "val: true\n"
+            "plots: false\n"
+            "augment: false\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tune_config_path = tmp_path / "tune.yaml"
+    tune_config_path.write_text(
+        (
+            f"template_config: {template_config_path.as_posix()}\n"
+            "search_space:\n"
+            "  workers:\n"
+            "    type: choice\n"
+            "    values: [0, 6]\n"
+            "datasets:\n"
+            f"  - data: {synthetic_dataset.as_posix()}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    _, _, _, _, tune_settings, initial_evaluation_point = _load_tune_settings(
+        tune_config_path
+    )
+
+    assert tune_settings["datasets"][0]["data"] == synthetic_dataset.as_posix()
+    assert initial_evaluation_point == {"workers": 6}
 
 
 def test_alphabetical_restore_trial_sort_key_orders_trial_ids_alphabetically() -> None:
