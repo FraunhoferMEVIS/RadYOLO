@@ -9,7 +9,7 @@ experiment_name: "default" # (str, optional) experiment name, results saved to '
 device: ""                # (str) device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
 amp: True                 # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
 use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
-workers: 4                # (int) number of worker threads for data loading
+workers: 4                # (int) total number of worker threads for data loading. Is divided by world size in multi-GPU trainings
 save: True                # (bool) save train checkpoints
 save_period: -1           # (int) Save checkpoint every x epochs (disabled if < 1)
 exist_ok: True            # (bool) whether to overwrite existing experiment
