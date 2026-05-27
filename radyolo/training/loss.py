@@ -778,12 +778,13 @@ class DetectionSegmentationLoss:  # noqa: N801
                 stride_tensor,
             )
 
-            # Mask loss
-            if self.enable_mask_loss:
-                mask_loss_count = 0
-                mask_coefficients = model_output.mask_coefficients
-                mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
-                prototype_masks = model_output.prototype_masks
+        if self.enable_mask_loss:
+            mask_coefficients = model_output.mask_coefficients
+            prototype_masks = model_output.prototype_masks
+            mask_coefficients = mask_coefficients.permute(0, 2, 1).contiguous()
+            mask_loss_count = 0
+
+            if fg_mask.sum():
                 for batch_index, masks in enumerate(batch["masks"]):
                     target_gt_idx_batch = target_gt_idx[batch_index]
                     fg_mask_batch = fg_mask[batch_index]
@@ -826,10 +827,20 @@ class DetectionSegmentationLoss:  # noqa: N801
                                 continue
                             loss[self.loss_indices["mask_loss"]] += mask_dice_loss + mask_bce_loss
                             mask_loss_count += 1
-                if mask_loss_count > 0:
-                    loss[self.loss_indices["mask_loss"]] = (
-                        loss[self.loss_indices["mask_loss"]] / mask_loss_count
-                    )
+
+            if mask_loss_count > 0:
+                loss[self.loss_indices["mask_loss"]] = (
+                    loss[self.loss_indices["mask_loss"]] / mask_loss_count
+                )
+            else:
+                fallback_mask_logits = torch.einsum(
+                    "n,nhwd->hwd",
+                    mask_coefficients[0, 0],
+                    prototype_masks[0],
+                )
+                loss[self.loss_indices["mask_loss"]] += torch.nan_to_num(
+                    fallback_mask_logits
+                ).sum() * 0.0
 
         loss[self.loss_indices["box_loss"]] *= self.box_gain
         loss[self.loss_indices["cls_obj_loss"]] *= self.classification_gain

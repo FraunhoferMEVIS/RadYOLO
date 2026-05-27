@@ -12,6 +12,7 @@ import yaml
 from torch.utils.data import SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
+from radyolo.models.layers import ModelOutput
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import (
     RADYOLO_LOGGER_NAME,
@@ -236,6 +237,62 @@ def test_trainer_uses_distributed_sampler_for_training_loader(
     assert train_loader.batch_size == 1
     assert train_loader.num_workers == 2
     assert isinstance(val_loader.sampler, SequentialSampler)
+
+
+def test_distributed_any_uses_collective_max(
+    minimal_train_config,
+    monkeypatch,
+) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.distributed = True
+    trainer.rank = 1
+    trainer.world_size = 2
+    trainer.device = torch.device("cpu")
+
+    def _all_reduce(tensor: torch.Tensor, op=None) -> None:
+        del op
+        tensor.fill_(1)
+
+    monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: True)
+    monkeypatch.setattr("radyolo.training.train.dist.get_backend", lambda *_args, **_kwargs: "gloo")
+    monkeypatch.setattr("radyolo.training.train.dist.all_reduce", _all_reduce)
+
+    assert trainer._distributed_any(False) is True
+
+
+def test_distributed_zero_loss_surrogate_keeps_model_output_graph_connected(
+    minimal_train_config,
+) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.distributed = True
+    trainer.device = torch.device("cpu")
+
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+            self.mask_weight = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32))
+            self.label_weight = torch.nn.Parameter(torch.tensor(3.0, dtype=torch.float32))
+
+        def forward(self) -> ModelOutput:
+            raw_prediction = self.weight.unsqueeze(0)
+            mask_coefficients = self.mask_weight.view(1, 1, 1)
+            prototype_masks = self.mask_weight.view(1, 1, 1, 1, 1)
+            return ModelOutput(
+                raw_predictions=[raw_prediction],
+                mask_coefficients=mask_coefficients,
+                prototype_masks=prototype_masks,
+                image_label_outputs={"label": self.label_weight.view(1, 1)},
+            )
+
+    model = FakeModel()
+    zero_loss = trainer._build_distributed_safe_zero_loss(model.forward())
+    zero_loss.backward()
+
+    assert torch.equal(model.weight.grad, torch.zeros_like(model.weight))
+    assert torch.equal(model.mask_weight.grad, torch.zeros_like(model.mask_weight))
+    assert torch.equal(model.label_weight.grad, torch.zeros_like(model.label_weight))
 
 
 def test_trainer_rejects_non_divisible_distributed_batch_size(
@@ -463,7 +520,7 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
     monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
-    monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
+    monkeypatch.setattr(trainer, "_broadcast_stop", lambda _stop: True)
     monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
     monkeypatch.setattr(trainer, "_get_memory", lambda: 0.0)
     monkeypatch.setattr(trainer, "save_metrics", lambda metrics, train_time_start: None)
@@ -737,6 +794,143 @@ def test_trainer_skips_non_finite_input_batch(
     assert ema.epoch_advances == 1
     assert "input image tensor became non-finite" in caplog.text
     assert "bad-case" in caplog.text
+
+
+def test_distributed_non_finite_loss_uses_zero_backward_surrogate(
+    minimal_train_config,
+    monkeypatch,
+) -> None:
+    trainer = Trainer(cfg=minimal_train_config)
+    trainer.config = trainer.config.model_copy(
+        update={
+            "epochs": 1,
+            "warmup_epochs": 0.0,
+            "val": False,
+            "save": False,
+            "plots": False,
+            "verbose": False,
+        }
+    )
+    trainer.epochs = trainer.config.epochs
+    trainer.distributed = True
+    trainer.rank = 1
+    trainer.world_size = 2
+    trainer.is_main_process = False
+    trainer.device = torch.device("cpu")
+    trainer.loss_names = (
+        "box_loss",
+        "cls_obj_loss",
+        "dfl_loss",
+        "mask_loss",
+        "cls_sep_loss",
+    )
+
+    loss_calls = {"count": 0}
+
+    def _loss(_predictions, _batch, current_epoch):
+        del current_epoch
+        loss_calls["count"] += 1
+        return (
+            torch.tensor(float("nan"), dtype=torch.float32, requires_grad=True),
+            torch.full((5,), float("nan"), dtype=torch.float32),
+        )
+
+    trainer.loss = RecordingLoss(_loss)
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+            self.mask_weight = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32))
+
+        def forward(self, _img: torch.Tensor) -> ModelOutput:
+            raw_prediction = self.weight.unsqueeze(0)
+            mask_coefficients = self.mask_weight.view(1, 1, 1)
+            prototype_masks = self.mask_weight.view(1, 1, 1, 1, 1)
+            return ModelOutput(
+                raw_predictions=[raw_prediction],
+                mask_coefficients=mask_coefficients,
+                prototype_masks=prototype_masks,
+            )
+
+    class RecordingEMA:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.epoch_advances = 0
+
+        def update(self, _model: torch.nn.Module) -> None:
+            self.calls += 1
+
+        def advance_updates(self) -> None:
+            self.epoch_advances += 1
+
+    class DummyTrainLoader:
+        def __init__(self, batches: list[dict[str, torch.Tensor | list[str]]]) -> None:
+            self._batches = batches
+            self.sampler = object()
+
+        def __len__(self) -> int:
+            return len(self._batches)
+
+        def __iter__(self):
+            return iter(self._batches)
+
+    model = FakeModel()
+    ema = RecordingEMA()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    scaler = torch.GradScaler("cpu", enabled=False)
+    train_loader = DummyTrainLoader(
+        [{"img": torch.ones(1, dtype=torch.float32), "case_names": ["bad-case"]}]
+    )
+
+    optimizer_step_calls = {"count": 0}
+    all_reduce_calls = {"count": 0}
+
+    def _optimizer_step(*args, **kwargs):
+        del args, kwargs
+        optimizer_step_calls["count"] += 1
+        return True
+
+    def _all_reduce(tensor: torch.Tensor, op=None) -> None:
+        del op
+        all_reduce_calls["count"] += 1
+        tensor.fill_(1)
+
+    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(trainer, "optimizer_step", _optimizer_step)
+    monkeypatch.setattr(trainer, "_barrier", lambda: None)
+    monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
+    monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
+    monkeypatch.setattr(trainer, "_get_memory", lambda: 0.0)
+    monkeypatch.setattr(trainer, "_log_epoch_warning_summary", lambda: None)
+    monkeypatch.setattr(trainer, "save_metrics", lambda metrics, train_time_start: None)
+    monkeypatch.setattr(trainer, "save_model", lambda **_kwargs: None)
+    monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: True)
+    monkeypatch.setattr("radyolo.training.train.dist.get_backend", lambda *_args, **_kwargs: "gloo")
+    monkeypatch.setattr("radyolo.training.train.dist.all_reduce", _all_reduce)
+
+    trainer._train_loop(
+        model=model,
+        train_loader=train_loader,
+        validator=None,
+        optimizer=optimizer,
+        scheduler=torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _epoch: 1.0),
+        scaler=scaler,
+        lf=lambda _epoch: 1.0,
+        ema=cast(ModelEMA, ema),
+        accumulate=1,
+        stopper=lambda _epoch, _fitness: False,
+        stop=False,
+        best_fitness=None,
+        start_epoch=0,
+    )
+
+    assert loss_calls["count"] == 1
+    assert optimizer_step_calls["count"] == 0
+    assert ema.calls == 0
+    assert ema.epoch_advances == 1
+    assert all_reduce_calls["count"] >= 2
 
 
 def test_model_ema_advance_updates_controls_epoch_counter() -> None:

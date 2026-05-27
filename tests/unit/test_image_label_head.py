@@ -198,6 +198,50 @@ def test_detection_loss_skips_zero_gain_image_label_losses(tmp_path: Path) -> No
     assert "img_cox" not in loss_fn.loss_names
 
 
+def test_detection_loss_keeps_mask_branch_graph_connected_without_masks(
+    minimal_train_config: Path,
+) -> None:
+    config = get_cfg(minimal_train_config, {})
+    model = build_model_from_config(config)
+    loss_fn = build_detection_loss_from_config(config, model, torch.device("cpu"))
+    images = torch.randn((1, 1, 32, 32, 64), dtype=torch.float32)
+    model_output = model(images)
+    batch = {
+        "img": images,
+        "ori_shape": ((32, 32, 64),),
+        "ratio_pad": (None,),
+        "shape": ((32, 32, 64),),
+        "cls": torch.zeros((0,), dtype=torch.float32),
+        "bboxes": torch.zeros((0, 6), dtype=torch.float32),
+        "batch_idx": torch.zeros((0,), dtype=torch.int64),
+        "masks": (None,),
+        "case_names": ("case1",),
+    }
+
+    total_loss, loss_items = loss_fn(model_output, batch, current_epoch=1)
+    total_loss.backward()
+
+    prototype_grads = [
+        parameter.grad
+        for name, parameter in model.named_parameters()
+        if "prototype_layer" in name and parameter.requires_grad
+    ]
+    coefficient_grads = [
+        parameter.grad
+        for name, parameter in model.named_parameters()
+        if "mask_coefficient_layer" in name and parameter.requires_grad
+    ]
+
+    assert torch.isfinite(total_loss)
+    assert torch.isfinite(loss_items).all()
+    assert prototype_grads
+    assert coefficient_grads
+    assert all(grad is not None for grad in prototype_grads)
+    assert all(grad is not None for grad in coefficient_grads)
+    assert all(torch.count_nonzero(grad) == 0 for grad in prototype_grads if grad is not None)
+    assert all(torch.count_nonzero(grad) == 0 for grad in coefficient_grads if grad is not None)
+
+
 def test_image_label_multiclass_loss_supports_class_weights() -> None:
     loss_fn = ImageLabelClassificationLoss(
         device=torch.device("cpu"),

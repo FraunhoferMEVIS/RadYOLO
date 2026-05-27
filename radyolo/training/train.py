@@ -59,6 +59,7 @@ if TYPE_CHECKING:
 
     from torch.utils.data import DataLoader
 
+    from radyolo.models.layers import ModelOutput
     from radyolo.training.loss import TrainingLoss
 
 
@@ -362,6 +363,29 @@ class Trainer:
         )
         dist.broadcast(stop_tensor, src=0)
         return bool(stop_tensor.item())
+
+    def _distributed_any(self, value: bool) -> bool:
+        if not self.distributed or not dist.is_initialized():
+            return value
+        value_tensor = torch.tensor(
+            int(value),
+            device=self._get_distributed_collective_device(),
+        )
+        dist.all_reduce(value_tensor, op=dist.ReduceOp.MAX)
+        return bool(value_tensor.item())
+
+    def _build_distributed_safe_zero_loss(self, model_output: ModelOutput) -> torch.Tensor:
+        zero_loss = torch.zeros((), device=self.device)
+        if model_output.raw_predictions is not None:
+            for tensor in model_output.raw_predictions:
+                zero_loss = zero_loss + torch.nan_to_num(tensor).sum() * 0.0
+        for tensor in (model_output.mask_coefficients, model_output.prototype_masks):
+            if tensor is not None:
+                zero_loss = zero_loss + torch.nan_to_num(tensor).sum() * 0.0
+        if model_output.image_label_outputs is not None:
+            for tensor in model_output.image_label_outputs.values():
+                zero_loss = zero_loss + torch.nan_to_num(tensor).sum() * 0.0
+        return zero_loss
 
     def _scale_loss_for_backward(self, loss: torch.Tensor) -> torch.Tensor:
         if not self.distributed:
@@ -691,8 +715,12 @@ class Trainer:
                             batch,
                             run_gpu_augmentations,
                         )
-                        if not torch.isfinite(prepared_batch["img"]).all():
+                        skip_due_to_non_finite_input = not torch.isfinite(
+                            prepared_batch["img"]
+                        ).all()
+                        if skip_due_to_non_finite_input:
                             self._log_non_finite_input_batch(prepared_batch)
+                        if self._distributed_any(skip_due_to_non_finite_input):
                             continue
                         raw_predictions = model(prepared_batch["img"])
                         if isinstance(raw_predictions, torch.Tensor):
@@ -707,13 +735,30 @@ class Trainer:
                             ),
                         )
 
-                        if not torch.isfinite(loss) or not torch.isfinite(self.loss_items).all():
+                        skip_due_to_non_finite_loss = (
+                            not torch.isfinite(loss)
+                            or not torch.isfinite(self.loss_items).all()
+                        )
+                        if skip_due_to_non_finite_loss:
                             self._log_non_finite_training_batch(
                                 batch=prepared_batch,
                                 loss=loss,
                                 loss_items=self.loss_items,
                             )
+                        if self._distributed_any(skip_due_to_non_finite_loss):
                             optimizer.zero_grad()
+                            if self.distributed:
+                                surrogate_loss = self._build_distributed_safe_zero_loss(
+                                    raw_predictions
+                                )
+                                deterministic_restore = (
+                                    torch.are_deterministic_algorithms_enabled()
+                                )
+                                try:
+                                    torch.use_deterministic_algorithms(False)
+                                    scaler.scale(surrogate_loss).backward()
+                                finally:
+                                    torch.use_deterministic_algorithms(deterministic_restore)
                             continue
 
                         tloss = (
