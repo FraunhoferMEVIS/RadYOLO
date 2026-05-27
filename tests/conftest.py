@@ -104,7 +104,6 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"optimizer: Adam\n"
             f"verbose: False\n"
             f"seed: 0\n"
-            f"deterministic: True\n"
             f"resume: False\n"
             f"amp: False\n"
             f"use_cudnn_benchmark: False\n"

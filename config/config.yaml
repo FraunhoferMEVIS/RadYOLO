@@ -16,7 +16,6 @@ exist_ok: True            # (bool) whether to overwrite existing experiment
 resume: True              # (bool) resume training from last checkpoint
 verbose: True             # (bool) whether to print verbose output
 seed: 0                   # (int) random seed for reproducibility
-deterministic: False      # (bool) whether to enable deterministic mode
 
 # Model Parameters
 input_channels: 2 # number of input channels for model

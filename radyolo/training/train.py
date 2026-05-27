@@ -196,7 +196,7 @@ class Trainer:
         if self.distributed:
             self._setup_distributed_process_group()
 
-        init_seeds(self.config.seed, deterministic=self.config.deterministic)
+        init_seeds(self.config.seed)
 
         self.epochs = self.config.epochs or 100
         if self.device.type in {"cpu", "mps"}:
@@ -751,14 +751,7 @@ class Trainer:
                                 surrogate_loss = self._build_distributed_safe_zero_loss(
                                     raw_predictions
                                 )
-                                deterministic_restore = (
-                                    torch.are_deterministic_algorithms_enabled()
-                                )
-                                try:
-                                    torch.use_deterministic_algorithms(False)
-                                    scaler.scale(surrogate_loss).backward()
-                                finally:
-                                    torch.use_deterministic_algorithms(deterministic_restore)
+                                scaler.scale(surrogate_loss).backward()
                             continue
 
                         tloss = (
@@ -767,13 +760,7 @@ class Trainer:
 
                     # Backward
                     loss = self._scale_loss_for_backward(loss)
-
-                    deterministic_restore = torch.are_deterministic_algorithms_enabled()
-                    try:
-                        torch.use_deterministic_algorithms(False)
-                        scaler.scale(loss).backward()
-                    finally:
-                        torch.use_deterministic_algorithms(deterministic_restore)
+                    scaler.scale(loss).backward()
 
                     # Optimize
                     if num_iterations - last_opt_step >= accumulate:

@@ -894,13 +894,17 @@ def test_distributed_non_finite_loss_uses_zero_backward_surrogate(
     def _all_reduce(tensor: torch.Tensor, op=None) -> None:
         del op
         all_reduce_calls["count"] += 1
-        tensor.fill_(1)
+        tensor.fill_(1 if all_reduce_calls["count"] > 1 else 0)
 
     monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
     monkeypatch.setattr(trainer, "optimizer_step", _optimizer_step)
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
-    monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
+    monkeypatch.setattr(
+        trainer,
+        "_broadcast_stop",
+        lambda stop: stop or trainer.epoch + 1 >= trainer.epochs,
+    )
     monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
     monkeypatch.setattr(trainer, "_get_memory", lambda: 0.0)
     monkeypatch.setattr(trainer, "_log_epoch_warning_summary", lambda: None)

@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DEPRECATED_CONFIG_KEYS = {"num_classes", "nms_time_limit"}
+DEPRECATED_CONFIG_KEYS = {"deterministic", "num_classes", "nms_time_limit"}
 PrototypeLayer = Literal["higher_resolution", "full_resolution", "half_resolution"]
 ImageLabelHeadFeature = Literal["o10", "o16", "o19", "o22"]
 
@@ -86,8 +86,6 @@ class DefaultConfig(BaseModel):
     resume: bool | FilePath = True  # resume training from last checkpoint
     verbose: bool = True  # whether to print verbose output
     seed: int = 0  # random seed for reproducibility
-    deterministic: bool = False  # whether to enable deterministic mode
-
     # Model Parameters
     input_channels: int  # number of input channels for model
     num_classes: int = 0  # deprecated in config.yaml; inferred from dataset.yaml names
@@ -582,9 +580,16 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
         yaml_config = yaml.safe_load(f) or {}
     deprecated_config_keys = DEPRECATED_CONFIG_KEYS.intersection(yaml_config)
     if overrides:
+        deprecated_config_keys |= DEPRECATED_CONFIG_KEYS.intersection(overrides)
         yaml_config = {**yaml_config, **overrides}
 
+    yaml_config.pop("deterministic", None)
+
     yaml_config["num_classes"] = _num_classes_from_dataset(yaml_config)
+    if "deterministic" in deprecated_config_keys:
+        LOGGER.warning(
+            "Config field 'deterministic' is deprecated and ignored."
+        )
     if "num_classes" in deprecated_config_keys:
         LOGGER.warning(
             (

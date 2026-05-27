@@ -154,18 +154,12 @@ def get_gpu_info(index: torch.device | int | str) -> str:
     return f"{properties.name}, {properties.total_memory / (1 << 20):.0f}MiB"
 
 
-def init_seeds(seed: int = 0, deterministic: bool = False) -> None:
+def init_seeds(seed: int = 0) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)  # for multi-GPU, exception safe
-    torch.use_deterministic_algorithms(False)
-    if deterministic:
-        torch.use_deterministic_algorithms(True)
-        torch.backends.cudnn.deterministic = True
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        os.environ["PYTHONHASHSEED"] = str(seed)
     torch.backends.cudnn.deterministic = False
 
 
