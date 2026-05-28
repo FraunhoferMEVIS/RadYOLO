@@ -349,7 +349,7 @@ class Trainer:
             backend=backend,
             rank=self.rank,
             world_size=self.world_size,
-            timeout=datetime.timedelta(minutes=10),
+            timeout=datetime.timedelta(minutes=30),
         )
         LOGGER.info("Rank %d finished distributed process group initialization.", self.rank)
 
