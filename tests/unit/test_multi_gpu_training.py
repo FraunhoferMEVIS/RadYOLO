@@ -15,9 +15,13 @@ from torch.utils.data.distributed import DistributedSampler
 from radyolo.models.layers import ModelOutput
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import (
+    LOG_FILE_ENV,
+    LOG_LEVEL_ENV,
     RADYOLO_LOGGER_NAME,
     Trainer,
+    _configure_process_logging,
     _distributed_train_worker,
+    _resolve_process_log_level,
     _select_distributed_backend,
 )
 from radyolo.utils.logging_utils import EpochWarningStats
@@ -116,6 +120,37 @@ def test_distributed_train_worker_logs_start(caplog, monkeypatch) -> None:
                 os.environ[env_var] = previous_value
 
 
+def test_resolve_process_log_level_prefers_env_override(monkeypatch) -> None:
+    monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.DEBUG))
+
+    assert _resolve_process_log_level(verbose=False) == logging.DEBUG
+
+
+def test_configure_process_logging_refreshes_managed_handler_levels(monkeypatch) -> None:
+    logger = logging.getLogger(RADYOLO_LOGGER_NAME)
+    original_handlers = list(logger.handlers)
+    monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.DEBUG))
+
+    try:
+        _configure_process_logging(verbose=False)
+
+        managed_handlers = [
+            handler
+            for handler in logger.handlers
+            if getattr(handler, "_radyolo_managed_handler", False)
+        ]
+        assert managed_handlers
+        assert any(
+            isinstance(handler, logging.StreamHandler) and handler.level == logging.DEBUG
+            for handler in managed_handlers
+        )
+    finally:
+        for handler in logger.handlers:
+            if handler not in original_handlers:
+                handler.close()
+        logger.handlers = original_handlers
+
+
 def test_distributed_rank_zero_writes_non_empty_log_file(
     minimal_train_config,
     monkeypatch,
@@ -137,6 +172,7 @@ def test_distributed_rank_zero_writes_non_empty_log_file(
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "0")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "0")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
+    monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.INFO))
     monkeypatch.setattr(torch.cuda, "set_device", lambda _device: None)
     monkeypatch.setattr("radyolo.training.train.dist.init_process_group", lambda **_kwargs: None)
     monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: False)
@@ -144,14 +180,56 @@ def test_distributed_rank_zero_writes_non_empty_log_file(
     try:
         trainer = Trainer(cfg=config_path)
         log_files = sorted(trainer.save_dir.glob("*.log"))
+        managed_file_handlers = [
+            handler
+            for handler in logger.handlers
+            if getattr(handler, "_radyolo_managed_handler", False)
+            and isinstance(handler, logging.FileHandler)
+        ]
 
         assert len(log_files) == 1
+        assert managed_file_handlers
+        assert all(handler.level == logging.INFO for handler in managed_file_handlers)
+        assert os.environ[LOG_FILE_ENV] == str(log_files[0])
         assert "Experiment folder:" in log_files[0].read_text(encoding="utf-8")
     finally:
         for handler in logger.handlers:
             if handler not in original_handlers:
                 handler.close()
         logger.handlers = original_handlers
+
+
+def test_launch_distributed_training_preserves_configured_log_level(
+    minimal_train_config,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "distributed_launch.yaml"
+    with minimal_train_config.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    config["device"] = "0,1"
+    with config_path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False)
+
+    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.INFO))
+    monkeypatch.setattr("radyolo.training.train._find_free_port", lambda: 12345)
+
+    captured: dict[str, object] = {}
+
+    def fake_spawn(fn, args, nprocs, join):
+        captured["fn"] = fn
+        captured["args"] = args
+        captured["nprocs"] = nprocs
+        captured["join"] = join
+
+    monkeypatch.setattr("radyolo.training.train.mp.spawn", fake_spawn)
+
+    trainer = Trainer(cfg=config_path)
+    trainer._launch_distributed_training()
+
+    assert captured["nprocs"] == 2
+    assert os.environ[LOG_LEVEL_ENV] == str(logging.INFO)
 
 
 def test_distributed_nonzero_rank_writes_rank_specific_log_file(
@@ -185,8 +263,7 @@ def test_distributed_nonzero_rank_writes_rank_specific_log_file(
 
         assert len(log_files) == 1
         assert log_files[0].name.endswith("-rank1.log")
-        log_text = log_files[0].read_text(encoding="utf-8")
-        assert "[rank 1/2] Experiment folder:" in log_text
+        assert os.environ[LOG_FILE_ENV] == str(log_files[0])
     finally:
         for handler in logger.handlers:
             if handler not in original_handlers:

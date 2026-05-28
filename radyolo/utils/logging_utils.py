@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
+
+import torch
 
 
 @dataclass(slots=True)
@@ -100,3 +103,91 @@ def format_epoch_warning_summary(stats: EpochWarningStats) -> str | None:
     )
 
     return "; ".join(warning_parts) + "."
+
+
+def get_debug_batch_size(batch: dict) -> int | None:
+    image = batch.get("img")
+    if isinstance(image, torch.Tensor) and image.ndim > 0:
+        return int(image.shape[0])
+    case_names = batch.get("case_names")
+    if isinstance(case_names, (list, tuple)):
+        return len(case_names)
+    return None
+
+
+def get_debug_case_preview(batch: dict, limit: int = 3) -> str | None:
+    case_names = batch.get("case_names")
+    if not isinstance(case_names, (list, tuple)) or not case_names:
+        return None
+    return ", ".join(str(name) for name in case_names[:limit])
+
+
+def debug_log_training_event(logger: logging.Logger, event: str, **fields: object) -> None:
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    details = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    if details:
+        logger.debug("%s: %s", event, details)
+        return
+    logger.debug("%s", event)
+
+
+def debug_log_batch_received(logger: logging.Logger, epoch: int, batch_index: int, batch: dict) -> None:
+    debug_log_training_event(
+        logger,
+        "Received training batch",
+        epoch=epoch,
+        batch_index=batch_index,
+        batch_size=get_debug_batch_size(batch),
+        cases=get_debug_case_preview(batch),
+    )
+
+
+def debug_log_forward_start(logger: logging.Logger, epoch: int, batch_index: int, batch: dict) -> None:
+    image = batch.get("img")
+    image_shape = tuple(image.shape) if isinstance(image, torch.Tensor) else None
+    debug_log_training_event(
+        logger,
+        "Starting forward pass",
+        epoch=epoch,
+        batch_index=batch_index,
+        image_shape=image_shape,
+    )
+
+
+def debug_log_loss_computed(
+    logger: logging.Logger,
+    epoch: int,
+    batch_index: int,
+    loss: torch.Tensor,
+) -> None:
+    loss_value: float | str
+    if loss.numel() == 1:
+        loss_value = float(loss.detach().float().cpu().item())
+    else:
+        loss_value = f"tensor(shape={tuple(loss.shape)})"
+    debug_log_training_event(
+        logger,
+        "Computed training loss",
+        epoch=epoch,
+        batch_index=batch_index,
+        loss=loss_value,
+    )
+
+
+def debug_log_backward_start(logger: logging.Logger, epoch: int, batch_index: int) -> None:
+    debug_log_training_event(
+        logger,
+        "Starting backward pass",
+        epoch=epoch,
+        batch_index=batch_index,
+    )
+
+
+def debug_log_weight_update_start(logger: logging.Logger, epoch: int, batch_index: int) -> None:
+    debug_log_training_event(
+        logger,
+        "Starting optimizer step",
+        epoch=epoch,
+        batch_index=batch_index,
+    )

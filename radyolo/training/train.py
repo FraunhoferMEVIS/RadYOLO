@@ -41,7 +41,15 @@ from radyolo.models.model import (
     get_model_min_stride,
 )
 from radyolo.training.loss import build_detection_loss_from_config
-from radyolo.utils.logging_utils import EpochWarningStats, format_epoch_warning_summary
+from radyolo.utils.logging_utils import (
+    EpochWarningStats,
+    debug_log_backward_start,
+    debug_log_batch_received,
+    debug_log_forward_start,
+    debug_log_loss_computed,
+    debug_log_weight_update_start,
+    format_epoch_warning_summary,
+)
 from radyolo.utils.torch_utils import EarlyStopping
 from radyolo.utils.util import (
     ModelEMA,
@@ -70,6 +78,8 @@ MANAGED_LOGGING_HANDLER_ATTR = "_radyolo_managed_handler"
 DDP_LOCAL_RANK_ENV = "RADYOLO_DDP_LOCAL_RANK"
 DDP_RANK_ENV = "RADYOLO_DDP_RANK"
 DDP_WORLD_SIZE_ENV = "RADYOLO_DDP_WORLD_SIZE"
+LOG_LEVEL_ENV = "RADYOLO_LOG_LEVEL"
+LOG_FILE_ENV = "RADYOLO_LOG_FILE"
 
 
 def _find_free_port() -> int:
@@ -93,12 +103,12 @@ def _distributed_train_worker(
     master_port: int,
 ) -> None:
     worker_config = get_cfg(config_path, {})
-    _configure_process_logging(worker_config.verbose)
     os.environ[DDP_LOCAL_RANK_ENV] = str(local_rank)
     os.environ[DDP_RANK_ENV] = str(local_rank)
     os.environ[DDP_WORLD_SIZE_ENV] = str(world_size)
     os.environ["MASTER_ADDR"] = master_addr
     os.environ["MASTER_PORT"] = str(master_port)
+    _configure_process_logging(worker_config.verbose)
     LOGGER.info(
         "Started distributed train worker rank=%d/%d with master=%s:%d for config=%s.",
         local_rank,
@@ -122,6 +132,14 @@ def _mark_managed_handler(handler: logging.Handler) -> logging.Handler:
     return handler
 
 
+def _close_managed_handlers(logger: logging.Logger) -> None:
+    for handler in list(logger.handlers):
+        if not getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False):
+            continue
+        logger.removeHandler(handler)
+        handler.close()
+
+
 def _has_managed_handlers(logger: logging.Logger) -> bool:
     return any(getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False) for handler in logger.handlers)
 
@@ -136,8 +154,17 @@ def _get_log_rank_context(rank: int | None = None, world_size: int | None = None
     return f"[rank {rank}/{world_size}] "
 
 
+def _resolve_process_log_level(verbose: bool) -> int:
+    configured_level = os.environ.get(LOG_LEVEL_ENV)
+    if configured_level is None:
+        return logging.INFO if verbose else logging.WARNING
+    if configured_level.isdigit():
+        return int(configured_level)
+    return logging.getLevelNamesMapping().get(configured_level.upper(), logging.INFO)
+
+
 def _configure_process_logging(verbose: bool) -> None:
-    level = logging.INFO if verbose else logging.WARNING
+    level = _resolve_process_log_level(verbose)
     simple_formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(rank_context)s%(message)s",
         datefmt="[%H:%M:%S%z]",
@@ -148,17 +175,19 @@ def _configure_process_logging(verbose: bool) -> None:
     )
 
     radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
-    if not _has_managed_handlers(radyolo_logger):
-        out_handler = _mark_managed_handler(logging.StreamHandler(sys.stdout))
-        out_handler.setLevel(level)
-        out_handler.addFilter(StdoutFilter())
-        out_handler.setFormatter(simple_formatter)
-        radyolo_logger.addHandler(out_handler)
+    if _has_managed_handlers(radyolo_logger):
+        _close_managed_handlers(radyolo_logger)
 
-        err_handler = _mark_managed_handler(logging.StreamHandler(sys.stderr))
-        err_handler.setLevel(logging.WARNING)
-        err_handler.setFormatter(simple_formatter)
-        radyolo_logger.addHandler(err_handler)
+    out_handler = _mark_managed_handler(logging.StreamHandler(sys.stdout))
+    out_handler.setLevel(level)
+    out_handler.addFilter(StdoutFilter())
+    out_handler.setFormatter(simple_formatter)
+    radyolo_logger.addHandler(out_handler)
+
+    err_handler = _mark_managed_handler(logging.StreamHandler(sys.stderr))
+    err_handler.setLevel(logging.WARNING)
+    err_handler.setFormatter(simple_formatter)
+    radyolo_logger.addHandler(err_handler)
 
     radyolo_logger.setLevel(logging.DEBUG)
 
@@ -258,10 +287,22 @@ class Trainer:
     def _configure_file_logging(self) -> None:
         time_now = datetime.datetime.now(tz=datetime.UTC)
         radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
+        log_file_path = self._get_log_file_path(time_now)
+        os.environ[LOG_FILE_ENV] = str(log_file_path)
+        for handler in list(radyolo_logger.handlers):
+            if not (
+                getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False)
+                and isinstance(handler, logging.FileHandler)
+            ):
+                continue
+            radyolo_logger.removeHandler(handler)
+            handler.close()
         file_handler = logging.FileHandler(
-            str(self._get_log_file_path(time_now)),
+            str(log_file_path),
             encoding="utf-8",
         )
+        _mark_managed_handler(file_handler)
+        file_handler.setLevel(_resolve_process_log_level(self.config.verbose))
         file_handler.setFormatter(
             logging.Formatter(
                 fmt=(
@@ -321,6 +362,7 @@ class Trainer:
         self._validate_distributed_setup()
         master_addr = "127.0.0.1"
         master_port = _find_free_port()
+        os.environ.setdefault(LOG_LEVEL_ENV, str(_resolve_process_log_level(self.config.verbose)))
         LOGGER.info(
             "Launching distributed training with %d processes via backend=%s at %s:%d.",
             self.configured_world_size,
@@ -681,6 +723,7 @@ class Trainer:
                 else nullcontext()
             ):
                 for i, batch in pbar:
+                    debug_log_batch_received(LOGGER, self.epoch + 1, i, batch)
                     run_gpu_augmentations = self.config.uses_gpu_augmentations()
                     # Warmup
                     num_iterations = i + num_batches * self.epoch
@@ -723,6 +766,7 @@ class Trainer:
                             batch,
                             run_gpu_augmentations,
                         )
+                        debug_log_forward_start(LOGGER, self.epoch + 1, i, prepared_batch)
                         skip_due_to_non_finite_input = not torch.isfinite(
                             prepared_batch["img"]
                         ).all()
@@ -742,6 +786,7 @@ class Trainer:
                                 current_epoch=self.epoch + 1,
                             ),
                         )
+                        debug_log_loss_computed(LOGGER, self.epoch + 1, i, loss)
 
                         skip_due_to_non_finite_loss = (
                             not torch.isfinite(loss)
@@ -768,10 +813,12 @@ class Trainer:
 
                     # Backward
                     loss = self._scale_loss_for_backward(loss)
+                    debug_log_backward_start(LOGGER, self.epoch + 1, i)
                     scaler.scale(loss).backward()
 
                     # Optimize
                     if num_iterations - last_opt_step >= accumulate:
+                        debug_log_weight_update_start(LOGGER, self.epoch + 1, i)
                         self.optimizer_step(
                             scaler,
                             optimizer,

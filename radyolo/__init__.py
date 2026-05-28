@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from radyolo.models.model import (
     get_model_min_stride,
     load_checkpoint_model,
 )
-from radyolo.training.train import Trainer
+from radyolo.training.train import LOG_LEVEL_ENV, Trainer
 from radyolo.utils.util import ModelEMA
 from radyolo.validation.evaluate_predictions import evaluate_prediction_folder
 from radyolo.validation.plotting import plot_results as plot_results_
@@ -73,6 +74,7 @@ def main(verbose: bool, quiet: bool, debug: bool) -> None:
         level = logging.WARNING
     else:
         level = logging.INFO
+    os.environ[LOG_LEVEL_ENV] = str(level)
 
     simple_formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(message)s",
