@@ -154,6 +154,46 @@ def test_distributed_rank_zero_writes_non_empty_log_file(
         logger.handlers = original_handlers
 
 
+def test_distributed_nonzero_rank_writes_rank_specific_log_file(
+    minimal_train_config,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "distributed_logging_rank1.yaml"
+    with minimal_train_config.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    config["device"] = "0,1"
+    config["output_folder_base"] = str(tmp_path / "runs")
+    config["experiment_name"] = "distributed-log-rank1-test"
+    with config_path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False)
+
+    logger = logging.getLogger(RADYOLO_LOGGER_NAME)
+    original_handlers = list(logger.handlers)
+
+    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
+    monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
+    monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
+    monkeypatch.setattr(torch.cuda, "set_device", lambda _device: None)
+    monkeypatch.setattr("radyolo.training.train.dist.init_process_group", lambda **_kwargs: None)
+    monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: False)
+
+    try:
+        trainer = Trainer(cfg=config_path)
+        log_files = sorted(trainer.save_dir.glob("*.log"))
+
+        assert len(log_files) == 1
+        assert log_files[0].name.endswith("-rank1.log")
+        log_text = log_files[0].read_text(encoding="utf-8")
+        assert "[rank 1/2] Experiment folder:" in log_text
+    finally:
+        for handler in logger.handlers:
+            if handler not in original_handlers:
+                handler.close()
+        logger.handlers = original_handlers
+
+
 def test_trainer_wraps_training_model_for_multiple_gpus_with_ddp(
     minimal_train_config,
     monkeypatch,

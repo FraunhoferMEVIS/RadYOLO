@@ -126,12 +126,25 @@ def _has_managed_handlers(logger: logging.Logger) -> bool:
     return any(getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False) for handler in logger.handlers)
 
 
+def _get_log_rank_context(rank: int | None = None, world_size: int | None = None) -> str:
+    if rank is None:
+        rank = int(os.environ.get(DDP_RANK_ENV, "0"))
+    if world_size is None:
+        world_size = int(os.environ.get(DDP_WORLD_SIZE_ENV, "1"))
+    if world_size <= 1:
+        return ""
+    return f"[rank {rank}/{world_size}] "
+
+
 def _configure_process_logging(verbose: bool) -> None:
     level = logging.INFO if verbose else logging.WARNING
     simple_formatter = logging.Formatter(
-        fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(message)s",
+        fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(rank_context)s%(message)s",
         datefmt="[%H:%M:%S%z]",
-        defaults={"spacer": " " * 11},
+        defaults={
+            "spacer": " " * 11,
+            "rank_context": _get_log_rank_context(),
+        },
     )
 
     radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
@@ -190,7 +203,7 @@ class Trainer:
         if self.config.use_cudnn_benchmark:
             torch.backends.cudnn.benchmark = True
 
-        if not self.should_launch_distributed and self.is_main_process:
+        if not self.should_launch_distributed and (self.is_main_process or self.distributed):
             self._configure_file_logging()
 
         if self.distributed:
@@ -246,16 +259,17 @@ class Trainer:
         time_now = datetime.datetime.now(tz=datetime.UTC)
         radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
         file_handler = logging.FileHandler(
-            str(self.save_dir.joinpath(time_now.strftime("%Y_%m_%d-%H_%M_%S")).with_suffix(".log")),
+            str(self._get_log_file_path(time_now)),
             encoding="utf-8",
         )
         file_handler.setFormatter(
             logging.Formatter(
                 fmt=(
                     "%(asctime)s %(levelname)- 9s %(module)30.30s:"
-                    "%(funcName)-14.14s:%(lineno)- 4d: %(message)s"
+                    "%(funcName)-14.14s:%(lineno)- 4d: %(rank_context)s%(message)s"
                 ),
                 datefmt="[%H:%M:%S%z]",
+                defaults={"rank_context": _get_log_rank_context(self.rank, self.world_size)},
             )
         )
         radyolo_logger.addHandler(file_handler)
@@ -263,6 +277,12 @@ class Trainer:
         LOGGER.info("Experiment folder: %s", self.save_dir.resolve())
         LOGGER.info("Input config path: %s", self.config_path.resolve())
         LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
+
+    def _get_log_file_path(self, time_now: datetime.datetime) -> Path:
+        log_stem = time_now.strftime("%Y_%m_%d-%H_%M_%S")
+        if self.distributed:
+            log_stem = f"{log_stem}-rank{self.rank}"
+        return self.save_dir / f"{log_stem}.log"
 
     def _setup_distributed_process_group(self) -> None:
         if dist.is_initialized():
