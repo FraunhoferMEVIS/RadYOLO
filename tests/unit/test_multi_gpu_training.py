@@ -520,7 +520,7 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
     monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
-    monkeypatch.setattr(trainer, "_broadcast_stop", lambda _stop: True)
+    monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
     monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
     monkeypatch.setattr(trainer, "_get_memory", lambda: 0.0)
     monkeypatch.setattr(trainer, "save_metrics", lambda metrics, train_time_start: None)
