@@ -97,12 +97,13 @@ def unwrap_model(model: nn.Module) -> nn.Module:
 
 
 def select_device(
-    device: str | torch.device = "", _: int = 0, newline: bool = False
+    device: str | torch.device = "",
 ) -> torch.device:
     if isinstance(device, torch.device):
         return device
 
-    s = f"radyolo Python-{PYTHON_VERSION} torch-{torch.__version__}"
+    version_message = f"Version info - Python: {PYTHON_VERSION} torch: {torch.__version__}"
+    LOGGER.info(version_message)
     device = _normalize_device_string(str(device))
 
     cpu = device == "cpu"
@@ -117,7 +118,6 @@ def select_device(
         visible = os.environ.get("CUDA_VISIBLE_DEVICES", None)
         os.environ["CUDA_VISIBLE_DEVICES"] = device
         if not (torch.cuda.is_available() and torch.cuda.device_count() >= len(device.split(","))):
-            LOGGER.info(s)
             msg = (
                 f"Invalid CUDA 'device={device}' requested"
                 f" Use 'device=cpu' or pass valid CUDA device(s) if available,"
@@ -129,22 +129,21 @@ def select_device(
 
     if not cpu and not mps and torch.cuda.is_available():  # prefer GPU if available
         devices = device.split(",") if device else ["0"]
-        gpus = len(devices)  # device count
-        space = " " * (len(s) + 1)
+        device_message = "Device(s): "
         for i, d in enumerate(devices):
-            s += f"{'' if i == 0 else space}CUDA:{d} ({get_gpu_info(i)})\n"  # bytes to MB
+            device_message += f"CUDA:{d} ({get_gpu_info(i)})\n"  # bytes to MB
         arg = "cuda:0"
     elif mps and torch.backends.mps.is_available():
         # Prefer MPS if available
-        s += "MPS\n"
+        device_message += "MPS"
         arg = "mps"
     else:  # revert to CPU
-        s += "CPU\n"
+        device_message += "CPU"
         arg = "cpu"
 
     if arg in {"cpu", "mps"}:
         torch.set_num_threads(NUM_THREADS)
-    LOGGER.info(s if newline else s.rstrip())
+    LOGGER.info(device_message.rstrip())
     return torch.device(arg)
 
 
