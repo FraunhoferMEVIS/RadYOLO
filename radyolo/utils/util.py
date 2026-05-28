@@ -97,7 +97,7 @@ def unwrap_model(model: nn.Module) -> nn.Module:
 
 
 def select_device(
-    device: str | torch.device = "", _: int = 0, newline: bool = False, verbose: bool = True
+    device: str | torch.device = "", _: int = 0, newline: bool = False
 ) -> torch.device:
     if isinstance(device, torch.device):
         return device
@@ -144,8 +144,7 @@ def select_device(
 
     if arg in {"cpu", "mps"}:
         torch.set_num_threads(NUM_THREADS)
-    if verbose:
-        LOGGER.info(s if newline else s.rstrip())
+    LOGGER.info(s if newline else s.rstrip())
     return torch.device(arg)
 
 

@@ -119,7 +119,6 @@ def test_load_tune_settings_validates_template_without_dataset_yaml(
             "experiment_name: template\n"
             "exist_ok: true\n"
             "optimizer: Adam\n"
-            "verbose: false\n"
             "seed: 0\n"
             "resume: false\n"
             "amp: false\n"

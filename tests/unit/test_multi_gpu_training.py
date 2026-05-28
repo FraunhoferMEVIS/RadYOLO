@@ -53,7 +53,7 @@ def test_select_device_accepts_multiple_cuda_devices(monkeypatch) -> None:
     )
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
 
-    device = select_device("0,1", verbose=False)
+    device = select_device("0,1")
 
     assert device == torch.device("cuda:0")
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0,1"
@@ -89,7 +89,6 @@ def test_distributed_train_worker_logs_start(caplog, monkeypatch) -> None:
         def train(self) -> None:
             trainer_calls.append("train")
 
-    monkeypatch.setattr("radyolo.training.train.get_cfg", lambda *_args, **_kwargs: SimpleNamespace(verbose=True))
     monkeypatch.setattr("radyolo.training.train.Trainer", FakeTrainer)
     for env_var in env_vars:
         monkeypatch.delenv(env_var, raising=False)
@@ -123,7 +122,7 @@ def test_distributed_train_worker_logs_start(caplog, monkeypatch) -> None:
 def test_resolve_process_log_level_prefers_env_override(monkeypatch) -> None:
     monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.DEBUG))
 
-    assert _resolve_process_log_level(verbose=False) == logging.DEBUG
+    assert _resolve_process_log_level() == logging.DEBUG
 
 
 def test_configure_process_logging_refreshes_managed_handler_levels(monkeypatch) -> None:
@@ -134,7 +133,7 @@ def test_configure_process_logging_refreshes_managed_handler_levels(monkeypatch)
     monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.DEBUG))
 
     try:
-        _configure_process_logging(verbose=False)
+        _configure_process_logging()
 
         managed_handlers = [
             handler
@@ -589,7 +588,6 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
             "val": False,
             "save": False,
             "plots": False,
-            "verbose": False,
         }
     )
     trainer.epochs = trainer.config.epochs
@@ -692,7 +690,6 @@ def test_trainer_skips_non_finite_loss_batch(minimal_train_config, monkeypatch) 
             "val": False,
             "save": False,
             "plots": False,
-            "verbose": False,
         }
     )
     trainer.epochs = trainer.config.epochs
@@ -813,7 +810,6 @@ def test_trainer_skips_non_finite_input_batch(
             "val": False,
             "save": False,
             "plots": False,
-            "verbose": False,
         }
     )
     trainer.epochs = trainer.config.epochs
@@ -936,7 +932,6 @@ def test_distributed_non_finite_loss_uses_zero_backward_surrogate(
             "val": False,
             "save": False,
             "plots": False,
-            "verbose": False,
         }
     )
     trainer.epochs = trainer.config.epochs

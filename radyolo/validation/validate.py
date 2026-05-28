@@ -870,7 +870,7 @@ class Validator:
             )
 
         # Print results per class
-        if self.config.verbose and not self.training and self.nc > 1 and len(self.stats):
+        if not self.training and self.nc > 1 and len(self.stats):
             for i, c in enumerate(self.metrics.ap_class_index):
                 class_metric_values = [*self.metrics.class_result(i), float("nan")]
                 if any(

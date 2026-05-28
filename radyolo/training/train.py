@@ -103,13 +103,12 @@ def _distributed_train_worker(
     master_addr: str,
     master_port: int,
 ) -> None:
-    worker_config = get_cfg(config_path, {})
     os.environ[DDP_LOCAL_RANK_ENV] = str(local_rank)
     os.environ[DDP_RANK_ENV] = str(local_rank)
     os.environ[DDP_WORLD_SIZE_ENV] = str(world_size)
     os.environ["MASTER_ADDR"] = master_addr
     os.environ["MASTER_PORT"] = str(master_port)
-    _configure_process_logging(worker_config.verbose)
+    _configure_process_logging()
     LOGGER.info(
         "Started distributed train worker rank=%d/%d with master=%s:%d for config=%s.",
         local_rank,
@@ -155,17 +154,17 @@ def _get_log_rank_context(rank: int | None = None, world_size: int | None = None
     return f"[rank {rank}/{world_size}] "
 
 
-def _resolve_process_log_level(verbose: bool) -> int:
+def _resolve_process_log_level() -> int:
     configured_level = os.environ.get(LOG_LEVEL_ENV)
     if configured_level is None:
-        return logging.INFO if verbose else logging.WARNING
+        return logging.INFO
     if configured_level.isdigit():
         return int(configured_level)
     return logging.getLevelNamesMapping().get(configured_level.upper(), logging.INFO)
 
 
-def _configure_process_logging(verbose: bool) -> None:
-    level = _resolve_process_log_level(verbose)
+def _configure_process_logging() -> None:
+    level = _resolve_process_log_level()
     simple_formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(rank_context)s%(message)s",
         datefmt="[%H:%M:%S%z]",
@@ -307,7 +306,7 @@ class Trainer:
             encoding="utf-8",
         )
         _mark_managed_handler(file_handler)
-        file_handler.setLevel(_resolve_process_log_level(self.config.verbose))
+        file_handler.setLevel(_resolve_process_log_level())
         file_handler.setFormatter(
             logging.Formatter(
                 fmt=(
@@ -367,7 +366,7 @@ class Trainer:
         self._validate_distributed_setup()
         master_addr = "127.0.0.1"
         master_port = _find_free_port()
-        os.environ.setdefault(LOG_LEVEL_ENV, str(_resolve_process_log_level(self.config.verbose)))
+        os.environ.setdefault(LOG_LEVEL_ENV, str(_resolve_process_log_level()))
         LOGGER.info(
             "Launching distributed training with %d processes via backend=%s at %s:%d.",
             self.configured_world_size,

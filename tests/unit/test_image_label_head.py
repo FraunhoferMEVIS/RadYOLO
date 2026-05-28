@@ -90,7 +90,6 @@ def _write_train_config(
         "experiment_name": "image_label_head",
         "exist_ok": True,
         "optimizer": "Adam",
-        "verbose": False,
         "seed": 0,
         "deterministic": True,
         "resume": False,

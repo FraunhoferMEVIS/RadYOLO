@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DEPRECATED_CONFIG_KEYS = {"deterministic", "num_classes", "nms_time_limit"}
+DEPRECATED_CONFIG_KEYS = {"deterministic", "num_classes", "nms_time_limit", "verbose"}
 PrototypeLayer = Literal["higher_resolution", "full_resolution", "half_resolution"]
 ImageLabelHeadFeature = Literal["o10", "o16", "o19", "o22"]
 
@@ -84,7 +84,7 @@ class DefaultConfig(BaseModel):
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     exist_ok: bool = True  # whether to overwrite existing experiment
     resume: bool | FilePath = True  # resume training from last checkpoint
-    verbose: bool = True  # whether to print verbose output
+    verbose: bool = True  # deprecated in config.yaml; logging config controls verbosity
     seed: int = 0  # random seed for reproducibility
     # Model Parameters
     input_channels: int  # number of input channels for model
@@ -584,6 +584,7 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
         yaml_config = {**yaml_config, **overrides}
 
     yaml_config.pop("deterministic", None)
+    yaml_config.pop("verbose", None)
 
     yaml_config["num_classes"] = _num_classes_from_dataset(yaml_config)
     if "deterministic" in deprecated_config_keys:
@@ -601,6 +602,12 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
         )
     if "nms_time_limit" in deprecated_config_keys:
         LOGGER.warning("Config field 'nms_time_limit' is deprecated and ignored.")
+    if "verbose" in deprecated_config_keys:
+        message = (
+            "Config field 'verbose' is deprecated and ignored; "
+            "use logging configuration to control verbosity."
+        )
+        LOGGER.warning(message)
 
     return DefaultConfig.model_validate(yaml_config)
 

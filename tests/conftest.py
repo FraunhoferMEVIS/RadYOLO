@@ -102,7 +102,6 @@ def minimal_train_config(synthetic_dataset: Path, tmp_path_factory: pytest.TempP
             f"experiment_name: e2e\n"
             f"exist_ok: True\n"
             f"optimizer: Adam\n"
-            f"verbose: False\n"
             f"seed: 0\n"
             f"resume: False\n"
             f"amp: False\n"
