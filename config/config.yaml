@@ -9,7 +9,7 @@ experiment_name: "default" # (str, optional) experiment name, results saved to '
 device: ""                # (str) device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
 amp: True                 # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
 use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
-workers: 4                # (int) total number of worker threads for data loading. Is divided by world size in multi-GPU trainings
+workers: 4                # (int) number of dataloader workers per GPU/process; total workers in multi-GPU training = workers * number of GPUs
 save: True                # (bool) save train checkpoints
 save_period: -1           # (int) Save checkpoint every x epochs (disabled if < 1)
 exist_ok: True            # (bool) whether to overwrite existing experiment
@@ -53,8 +53,8 @@ normalization: [{type: "zscore"}, {type: "zscore"}]     # Normalization for imag
 apply_preprocessing: False        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
 foreground_oversampling: 0.0      # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 min_box_crop_fraction: 0.5        # (float) minimum fraction of a box volume that must stay inside a sampled patch to keep it
-batch_size: 2                     # (int) number of images per batch
-nominal_batch_size: 14            # (int) nominal batch size (i.e. samples for gradient accumulation)
+batch_size: 2                     # (int) number of images per GPU/process; effective global batch in multi-GPU training = batch_size * number of GPUs
+nominal_batch_size: 14            # (int) nominal effective global batch size used to derive gradient accumulation
 optimizer: SGD                    # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 initial_learning_rate: 0.0143     # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
 final_learning_rate_ratio: 0.0164 # (float) final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)

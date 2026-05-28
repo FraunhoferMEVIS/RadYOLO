@@ -296,18 +296,6 @@ class Trainer:
         if self.device.type != "cuda":
             msg = "DistributedDataParallel requires explicit CUDA devices, e.g. device='0,1'."
             raise ValueError(msg)
-        if self.config.batch_size < self.configured_world_size:
-            msg = (
-                "batch_size must be at least the number of distributed processes; got "
-                f"batch_size={self.config.batch_size} and world_size={self.configured_world_size}."
-            )
-            raise ValueError(msg)
-        if self.config.batch_size % self.configured_world_size != 0:
-            msg = (
-                "batch_size must be divisible by the number of distributed processes; got "
-                f"batch_size={self.config.batch_size} and world_size={self.configured_world_size}."
-            )
-            raise ValueError(msg)
 
     def _launch_distributed_training(self) -> None:
         self._validate_distributed_setup()
@@ -333,14 +321,15 @@ class Trainer:
         )
 
     def _get_per_process_batch_size(self) -> int:
-        if not self.distributed:
-            return self.config.batch_size
-        return self.config.batch_size // self.world_size
+        return self.config.batch_size
 
     def _get_per_process_workers(self) -> int:
-        if not self.distributed or self.config.workers == 0:
-            return self.config.workers
-        return max(self.config.workers // self.world_size, 1)
+        return self.config.workers
+
+    def _get_effective_batch_size(self) -> int:
+        if not self.distributed:
+            return self.config.batch_size
+        return self.config.batch_size * self.world_size
 
     def _barrier(self) -> None:
         if self.distributed and dist.is_initialized():
@@ -388,9 +377,7 @@ class Trainer:
         return zero_loss
 
     def _scale_loss_for_backward(self, loss: torch.Tensor) -> torch.Tensor:
-        if not self.distributed:
-            return loss
-        return loss * self.world_size
+        return loss
 
     def copy_train_config(self) -> None:
         shutil.copy2(self.config_path, self.save_dir / "train_config.yaml")
@@ -535,10 +522,11 @@ class Trainer:
         )
 
         # Optimizer
-        accumulate = max(round(self.config.nominal_batch_size / self.config.batch_size), 1)
+        effective_batch_size = self._get_effective_batch_size()
+        accumulate = max(round(self.config.nominal_batch_size / effective_batch_size), 1)
         weight_decay = (
             self.config.weight_decay
-            * self.config.batch_size
+            * effective_batch_size
             * accumulate
             / self.config.nominal_batch_size
         )
@@ -684,7 +672,7 @@ class Trainer:
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [2, self.config.nominal_batch_size / self.config.batch_size],
+                                    [2, self.config.nominal_batch_size / self._get_effective_batch_size()],
                                 ).round()
                             ),
                         )

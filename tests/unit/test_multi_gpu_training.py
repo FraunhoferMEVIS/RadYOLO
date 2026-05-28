@@ -234,8 +234,9 @@ def test_trainer_uses_distributed_sampler_for_training_loader(
     val_loader = trainer.get_dataloader(trainer.config.data, model, fold=0, mode="val")
 
     assert isinstance(train_loader.sampler, DistributedSampler)
-    assert train_loader.batch_size == 1
-    assert train_loader.num_workers == 2
+    assert train_loader.batch_size == 2
+    assert train_loader.num_workers == 4
+    assert not isinstance(val_loader.sampler, DistributedSampler)
     assert isinstance(val_loader.sampler, SequentialSampler)
 
 
@@ -267,7 +268,6 @@ def test_distributed_zero_loss_surrogate_keeps_model_output_graph_connected(
     trainer.distributed = True
     trainer.device = torch.device("cpu")
 
-
     class FakeModel(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -295,7 +295,7 @@ def test_distributed_zero_loss_surrogate_keeps_model_output_graph_connected(
     assert torch.equal(model.label_weight.grad, torch.zeros_like(model.label_weight))
 
 
-def test_trainer_rejects_non_divisible_distributed_batch_size(
+def test_trainer_accepts_non_divisible_distributed_batch_size_per_gpu(
     minimal_train_config,
     monkeypatch,
     tmp_path,
@@ -312,11 +312,10 @@ def test_trainer_rejects_non_divisible_distributed_batch_size(
 
     trainer = Trainer(cfg=config_path)
 
-    with pytest.raises(ValueError, match="batch_size must be divisible"):
-        trainer._validate_distributed_setup()
+    trainer._validate_distributed_setup()
 
 
-def test_trainer_scales_distributed_loss_to_global_batch_size(
+def test_trainer_uses_per_gpu_batch_size_without_loss_rescaling(
     minimal_train_config,
     monkeypatch,
     tmp_path,
@@ -326,6 +325,7 @@ def test_trainer_scales_distributed_loss_to_global_batch_size(
         config = yaml.safe_load(file)
     config["device"] = "0,1"
     config["batch_size"] = 2
+    config["workers"] = 3
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
@@ -340,8 +340,10 @@ def test_trainer_scales_distributed_loss_to_global_batch_size(
     distributed_trainer = Trainer(cfg=config_path)
     single_process_loss = torch.tensor(3.5)
 
-    assert distributed_trainer._get_per_process_batch_size() == 1
-    assert distributed_trainer._scale_loss_for_backward(single_process_loss) == torch.tensor(7.0)
+    assert distributed_trainer._get_per_process_batch_size() == 2
+    assert distributed_trainer._get_per_process_workers() == 3
+    assert distributed_trainer._get_effective_batch_size() == 4
+    assert distributed_trainer._scale_loss_for_backward(single_process_loss) is single_process_loss
 
     monkeypatch.delenv("RADYOLO_DDP_LOCAL_RANK", raising=False)
     monkeypatch.delenv("RADYOLO_DDP_RANK", raising=False)
@@ -349,6 +351,7 @@ def test_trainer_scales_distributed_loss_to_global_batch_size(
 
     single_gpu_trainer = Trainer(cfg=config_path)
 
+    assert single_gpu_trainer._get_effective_batch_size() == 2
     assert single_gpu_trainer._scale_loss_for_backward(single_process_loss) is single_process_loss
 
 

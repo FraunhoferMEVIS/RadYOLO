@@ -79,7 +79,7 @@ class DefaultConfig(BaseModel):
     # Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and
     # chooses the best one
     use_cudnn_benchmark: bool = True
-    workers: int = 6  # number of worker threads for data loading
+    workers: int = 6  # number of dataloader workers per GPU/process
     save: bool = True  # save train checkpoints
     save_period: int = -1  # Save checkpoint every x epochs (disabled if < 1)
     exist_ok: bool = True  # whether to overwrite existing experiment
@@ -143,8 +143,8 @@ class DefaultConfig(BaseModel):
         ge=0.0,
         le=1.0,
     )  # minimum fraction of a box volume that must remain inside a sampled patch to keep it
-    batch_size: int = 2  # number of images per batch
-    nominal_batch_size: int = 64  # nominal batch size (i.e. samples for gradient accumulation)
+    batch_size: int = 2  # number of images per GPU/process
+    nominal_batch_size: int = 64  # nominal effective global batch size for gradient accumulation
     optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
         "Adam"  # optimizer to use
     )
