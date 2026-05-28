@@ -131,7 +131,7 @@ def select_device(
         devices = device.split(",") if device else ["0"]
         device_message = "Device(s): "
         for i, d in enumerate(devices):
-            device_message += f"CUDA:{d} ({get_gpu_info(i)})\n"  # bytes to MB
+            device_message += f"CUDA:{d} ({get_gpu_info(i)}), "  # bytes to MB
         arg = "cuda:0"
     elif mps and torch.backends.mps.is_available():
         # Prefer MPS if available
@@ -143,7 +143,7 @@ def select_device(
 
     if arg in {"cpu", "mps"}:
         torch.set_num_threads(NUM_THREADS)
-    LOGGER.info(device_message.rstrip())
+    LOGGER.info(device_message)
     return torch.device(arg)
 
 
