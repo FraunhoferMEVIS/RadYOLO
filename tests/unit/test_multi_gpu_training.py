@@ -128,7 +128,9 @@ def test_resolve_process_log_level_prefers_env_override(monkeypatch) -> None:
 
 def test_configure_process_logging_refreshes_managed_handler_levels(monkeypatch) -> None:
     logger = logging.getLogger(RADYOLO_LOGGER_NAME)
+    tqdm_logger = logging.getLogger("tqdm_loggable.tqdm_logging")
     original_handlers = list(logger.handlers)
+    original_tqdm_handlers = list(tqdm_logger.handlers)
     monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.DEBUG))
 
     try:
@@ -144,11 +146,17 @@ def test_configure_process_logging_refreshes_managed_handler_levels(monkeypatch)
             isinstance(handler, logging.StreamHandler) and handler.level == logging.DEBUG
             for handler in managed_handlers
         )
+        assert tqdm_logger.handlers
+        assert all(handler.level == logging.INFO for handler in tqdm_logger.handlers)
     finally:
         for handler in logger.handlers:
             if handler not in original_handlers:
                 handler.close()
         logger.handlers = original_handlers
+        for handler in tqdm_logger.handlers:
+            if handler not in original_tqdm_handlers:
+                handler.close()
+        tqdm_logger.handlers = original_tqdm_handlers
 
 
 def test_distributed_rank_zero_writes_non_empty_log_file(

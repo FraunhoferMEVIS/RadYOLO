@@ -43,6 +43,7 @@ from radyolo.models.model import (
 from radyolo.training.loss import build_detection_loss_from_config
 from radyolo.utils.logging_utils import (
     EpochWarningStats,
+    configure_tqdm_logging,
     debug_log_backward_start,
     debug_log_batch_received,
     debug_log_forward_start,
@@ -190,6 +191,10 @@ def _configure_process_logging(verbose: bool) -> None:
     radyolo_logger.addHandler(err_handler)
 
     radyolo_logger.setLevel(logging.DEBUG)
+    configure_tqdm_logging(
+        level=logging.INFO,
+        stream_handler_factory=lambda: logging.StreamHandler(sys.stdout),
+    )
 
 
 class Trainer:

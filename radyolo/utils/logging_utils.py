@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import datetime
 import logging
 from dataclasses import dataclass, field
 
 import torch
+from tqdm_loggable.tqdm_logging import tqdm_logging
 
 
 @dataclass(slots=True)
@@ -132,7 +134,12 @@ def debug_log_training_event(logger: logging.Logger, event: str, **fields: objec
     logger.debug("%s", event)
 
 
-def debug_log_batch_received(logger: logging.Logger, epoch: int, batch_index: int, batch: dict) -> None:
+def debug_log_batch_received(
+    logger: logging.Logger,
+    epoch: int,
+    batch_index: int,
+    batch: dict,
+) -> None:
     debug_log_training_event(
         logger,
         "Received training batch",
@@ -143,7 +150,12 @@ def debug_log_batch_received(logger: logging.Logger, epoch: int, batch_index: in
     )
 
 
-def debug_log_forward_start(logger: logging.Logger, epoch: int, batch_index: int, batch: dict) -> None:
+def debug_log_forward_start(
+    logger: logging.Logger,
+    epoch: int,
+    batch_index: int,
+    batch: dict,
+) -> None:
     image = batch.get("img")
     image_shape = tuple(image.shape) if isinstance(image, torch.Tensor) else None
     debug_log_training_event(
@@ -191,3 +203,28 @@ def debug_log_weight_update_start(logger: logging.Logger, epoch: int, batch_inde
         epoch=epoch,
         batch_index=batch_index,
     )
+
+
+def configure_tqdm_logging(
+    *,
+    level: int = logging.INFO,
+    log_rate: datetime.timedelta | None = None,
+    stream_handler_factory: callable | None = None,
+) -> logging.Logger:
+    tqdm_logging.set_level(level)
+    tqdm_logging.set_log_rate(log_rate or datetime.timedelta(minutes=1))
+
+    tqdm_logger = logging.getLogger("tqdm_loggable.tqdm_logging")
+    tqdm_logger.handlers.clear()
+    handler_factory = stream_handler_factory or logging.StreamHandler
+    tqdm_handler = handler_factory()
+    tqdm_handler.setLevel(level)
+    tqdm_handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(levelname)-9s %(message)s",
+            datefmt="[%H:%M:%S%z]",
+        )
+    )
+    tqdm_logger.addHandler(tqdm_handler)
+    tqdm_logger.setLevel(level)
+    return tqdm_logger

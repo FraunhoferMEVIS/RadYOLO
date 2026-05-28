@@ -11,7 +11,6 @@ import click
 import tqdm_loggable
 import tqdm_loggable.utils
 import yaml
-from tqdm_loggable.tqdm_logging import tqdm_logging
 
 from radyolo.config.config import DatasetConfig, load_model_checkpoint
 from radyolo.config.propose_model_config import propose_model_config as propose_model_config_fn
@@ -29,6 +28,7 @@ from radyolo.models.model import (
     load_checkpoint_model,
 )
 from radyolo.training.train import LOG_LEVEL_ENV, Trainer
+from radyolo.utils.logging_utils import configure_tqdm_logging
 from radyolo.utils.util import ModelEMA
 from radyolo.validation.evaluate_predictions import evaluate_prediction_folder
 from radyolo.validation.plotting import plot_results as plot_results_
@@ -95,18 +95,11 @@ def main(verbose: bool, quiet: bool, debug: bool) -> None:
 
     LOGGER.setLevel(logging.DEBUG)
 
-    tqdm_logging.set_level(logging.INFO)
-    tqdm_logging.set_log_rate(datetime.timedelta(minutes=1))
-    tqdm_logger = logging.getLogger("tqdm_loggable.tqdm_logging")
-    tqdm_handler = logging.StreamHandler(sys.stdout)
-    tqdm_handler.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s %(levelname)-9s %(message)s",
-            datefmt="[%H:%M:%S%z]",
-        )
+    configure_tqdm_logging(
+        level=logging.INFO,
+        log_rate=datetime.timedelta(minutes=1),
+        stream_handler_factory=lambda: logging.StreamHandler(sys.stdout),
     )
-    tqdm_logger.addHandler(tqdm_handler)
-    tqdm_logger.setLevel(logging.INFO)
 
     if debug:
         LOGGER.debug("Debug logging enabled.")
