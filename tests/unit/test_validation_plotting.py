@@ -172,3 +172,39 @@ def test_plot_results_marks_best_fitness_epoch(tmp_path: Path, monkeypatch: pyte
     legend = fitness_axis.get_legend()
     assert legend is not None
     assert "Best epoch" in [text.get_text() for text in legend.get_texts()]
+
+
+def test_palette_overflow_generates_distinct_followup_variant() -> None:
+    base_color = plotting.palette_rgb(0)
+    overflow_color = plotting.palette_rgb(len(plotting.BASE_PLOT_HEX_COLORS))
+
+    assert base_color == (23, 156, 125)
+    assert overflow_color != base_color
+    assert all(0 <= channel <= 255 for channel in overflow_color)
+
+
+def test_plot_results_uses_shared_palette_for_series(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    results_csv = tmp_path / "results.csv"
+    columns = ["epoch", "train/box_loss", "metrics/fitness"]
+    pd.DataFrame(
+        [
+            [0, 1.0, 0.2],
+            [1, 0.9, 0.4],
+        ],
+        columns=columns,
+    ).to_csv(results_csv, index=False)
+
+    captured_figures: list[Figure] = []
+    original_savefig = Figure.savefig
+
+    def capture_savefig(self: Figure, fname: str | Path, *args: object, **kwargs: object) -> None:
+        captured_figures.append(self)
+        original_savefig(self, fname, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    plotting.plot_results(results_csv)
+
+    loss_curves_figure = captured_figures[0]
+    expected_color = plotting.palette_mpl(0)
+    assert loss_curves_figure.axes[0].lines[0].get_color() == expected_color

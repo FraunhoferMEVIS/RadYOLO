@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import colorsys
 import contextlib
 import logging
 import math
@@ -14,6 +15,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import torch
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageDraw, ImageFont
 
@@ -56,50 +58,103 @@ IMAGE_LABEL_RESULTS_PLOT_COLUMNS = (
     "metrics/image_label_c_index",
 )
 
+BASE_PLOT_HEX_COLORS = (
+    "#005b7f",
+    "#179c7d",
+    "#a6bbc8",
+    "#f58220",
+    "#1c3f52",
+    "#d3c7ae",
+    "#008598",
+    "#39c1cd",
+    "#b2d235",
+    "#fdb913",
+    "#bb0056",
+    "#7c154d",
+)
+
+MAIN_CURVE_COLOR = "#005b7f"
+BACKGROUND_CURVE_COLOR = "#a6bbc8"
+OPERATING_POINT_COLOR = "#f58220"
+BEST_POINT_COLOR = "#179c7d"
+CONFUSION_MATRIX_BASE_COLOR = "#005b7f"
+
+
+def _hex_to_rgb(color_hex: str) -> tuple[int, int, int]:
+    color_hex = color_hex.removeprefix("#")
+    return tuple(int(color_hex[index : index + 2], 16) for index in (0, 2, 4))
+
+
+def _rgb_to_mpl(color_rgb: tuple[int, int, int]) -> tuple[float, float, float]:
+    return tuple(channel / 255.0 for channel in color_rgb)
+
+
+def palette_rgb(index: int) -> tuple[int, int, int]:
+    base_index = index % len(BASE_PLOT_HEX_COLORS)
+    cycle_index = index // len(BASE_PLOT_HEX_COLORS)
+    base_rgb = _hex_to_rgb(BASE_PLOT_HEX_COLORS[base_index])
+    if cycle_index == 0:
+        return base_rgb
+
+    hue, saturation, value = colorsys.rgb_to_hsv(*_rgb_to_mpl(base_rgb))
+    hue_shift_direction = -1.0 if cycle_index % 2 else 1.0
+    hue_shift = (0.055 + 0.015 * ((cycle_index - 1) % 3)) * hue_shift_direction
+    saturation_scale = (0.88, 1.08, 0.78)[(cycle_index - 1) % 3]
+    value_scale = (1.0, 0.92, 1.08)[(cycle_index - 1) % 3]
+    adjusted_rgb = colorsys.hsv_to_rgb(
+        (hue + hue_shift) % 1.0,
+        min(1.0, max(0.35, saturation * saturation_scale)),
+        min(1.0, max(0.3, value * value_scale)),
+    )
+    return tuple(round(channel * 255.0) for channel in adjusted_rgb)
+
+
+def palette_mpl(index: int) -> tuple[float, float, float]:
+    return _rgb_to_mpl(palette_rgb(index))
+
+
+def named_plot_color(name: Literal["mean", "background", "operating", "best"]) -> str:
+    return {
+        "mean": MAIN_CURVE_COLOR,
+        "background": BACKGROUND_CURVE_COLOR,
+        "operating": OPERATING_POINT_COLOR,
+        "best": BEST_POINT_COLOR,
+    }[name]
+
+
+def confusion_matrix_cmap() -> LinearSegmentedColormap:
+    base_hue, _, base_saturation = colorsys.rgb_to_hls(
+        *_rgb_to_mpl(_hex_to_rgb(CONFUSION_MATRIX_BASE_COLOR))
+    )
+    lightness_values = np.linspace(0.97, 0.2, 7)
+    saturation_values = np.linspace(0.18, max(base_saturation, 0.95), 7)
+    color_stops = [
+        colorsys.hls_to_rgb(base_hue, float(lightness), float(saturation))
+        for lightness, saturation in zip(lightness_values, saturation_values, strict=True)
+    ]
+    return LinearSegmentedColormap.from_list(
+        "validation_confusion_matrix",
+        color_stops,
+    )
+
 
 class Colors:
-    """Ultralytics color palette.
+    """Color palette.
 
-    https://docs.ultralytics.com/reference/utils/plotting/#ultralytics.utils.plotting.Colors.
-
-    This class provides methods to work with the Ultralytics color palette, including converting
+    This class provides methods to work with the color palette, including converting
     hex color codes to RGB values.
-
-    Attributes:
-        palette (list of tuple): List of RGB color values.
-        n (int): The number of colors in the palette.
     """
 
     def __init__(self) -> None:
-        """Initialize colors as hex = matplotlib.colors.TABLEAU_COLORS.values()."""
-        hexs = (
-            "042AFF",
-            "0BDBEB",
-            "F3F3F3",
-            "00DFB7",
-            "111F68",
-            "FF6FDD",
-            "FF444F",
-            "CCED00",
-            "00F344",
-            "BD00FF",
-            "00B4FF",
-            "DD00BA",
-            "00FFFF",
-            "26C000",
-            "01FFB3",
-            "7D24FF",
-            "7B0068",
-            "FF1B6C",
-            "FC6D2F",
-            "A2FF0B",
-        )
-        self.palette: list[tuple[int, int, int]] = [self.hex2rgb(f"#{c}") for c in hexs]
+        """Initialize the shared plotting palette used across validation artifacts."""
+        self.palette: list[tuple[int, int, int]] = [
+            _hex_to_rgb(color) for color in BASE_PLOT_HEX_COLORS
+        ]
         self.n: int = len(self.palette)
 
     def __call__(self, i: int | str, bgr: bool = False) -> tuple[int, int, int]:
-        """Converts hex color codes to RGB values."""
-        c: tuple[int, int, int] = self.palette[int(i) % self.n]
+        """Return a palette color, generating distinguishable overflow variants as needed."""
+        c: tuple[int, int, int] = palette_rgb(int(i))
         return (c[2], c[1], c[0]) if bgr else c
 
     @staticmethod
@@ -197,9 +252,10 @@ class Annotator:
         Returns:
             txt_color (tuple): Text color for label
         """
-        if color in self.dark_colors:
+        relative_luminance = (0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]) / 255.0
+        if relative_luminance >= 0.62:
             return 104, 31, 17
-        if color in self.light_colors:
+        if relative_luminance <= 0.3:
             return 255, 255, 255
         return txt_color
 
@@ -796,6 +852,7 @@ def _plot_results_grid(
     best_epoch_legend_added = False
 
     for f in files:
+        file_color = palette_mpl(files.index(f))
         data = pd.read_csv(f).rename(columns=lambda name: name.strip())
         epochs = data.iloc[:, 0].to_numpy(dtype=float)
         for plot_index, column_name in enumerate(columns):
@@ -805,7 +862,13 @@ def _plot_results_grid(
                 visible_columns[plot_index] = True
                 has_any_series = True
                 y = data[column_name].to_numpy(dtype=float)
-                plotted_line = axes[plot_index].plot(epochs, y, label=f.stem, linewidth=2)[0]
+                plotted_line = axes[plot_index].plot(
+                    epochs,
+                    y,
+                    label=f.stem,
+                    linewidth=2,
+                    color=file_color,
+                )[0]
                 axes[plot_index].set_ylabel(column_name)
                 axes[plot_index].grid(True, axis="both", alpha=0.2, linewidth=0.6)
                 if "metrics" in column_name:

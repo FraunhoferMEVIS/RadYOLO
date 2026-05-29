@@ -4,7 +4,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import seaborn as sns
 import torch
+from matplotlib import pyplot as plt
 
 from radyolo.data.image_labels import ImageLabelTaskSpec
 from radyolo.validation.validate import Validator
@@ -16,6 +18,7 @@ from radyolo.validation.metrics import (
     _smoothed_mean_confidence_curve,
     smooth,
 )
+from radyolo.validation.plotting import confusion_matrix_cmap, named_plot_color, palette_mpl
 
 
 def test_detmetrics_reports_class_agnostic_map_for_class_confusion(tmp_path: Path) -> None:
@@ -111,6 +114,32 @@ def test_detmetrics_plot_summary_saves_combined_validation_figure(tmp_path: Path
     output_path = tmp_path / "validation_summary.png"
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_named_plot_colors_match_configured_palette_roles() -> None:
+    assert named_plot_color("mean") == "#005b7f"
+    assert named_plot_color("operating") == "#f58220"
+    assert named_plot_color("best") == "#179c7d"
+    assert palette_mpl(0) == pytest.approx((23 / 255, 156 / 255, 125 / 255))
+
+
+def test_confusion_matrix_render_uses_shared_colormap(monkeypatch: pytest.MonkeyPatch) -> None:
+    confusion_matrix = ConfusionMatrix(nc=1)
+    confusion_matrix.matrix_[0, 0] = 1.0
+    captured: dict[str, object] = {}
+    original_heatmap = sns.heatmap
+
+    def capture_heatmap(*args: object, **kwargs: object):
+        captured.update(kwargs)
+        return original_heatmap(*args, **kwargs)
+
+    monkeypatch.setattr(sns, "heatmap", capture_heatmap)
+
+    figure, axis = plt.subplots()
+    confusion_matrix.render(axis)
+    plt.close(figure)
+
+    assert captured["cmap"].name == confusion_matrix_cmap().name
 
 
 def test_detmetrics_plot_summary_handles_unprocessed_metrics(tmp_path: Path) -> None:

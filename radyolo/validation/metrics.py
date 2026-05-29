@@ -15,6 +15,7 @@ from matplotlib import patheffects
 from matplotlib import pyplot as plt
 
 from radyolo.utils.ops import box_iou
+from radyolo.validation.plotting import confusion_matrix_cmap, named_plot_color, palette_mpl
 
 plt.switch_backend("Agg")
 
@@ -152,7 +153,7 @@ class ConfusionMatrix:
                 ax=ax,
                 annot=display_nc < 30,
                 annot_kws={"size": 8},
-                cmap="Blues",
+                cmap=confusion_matrix_cmap(),
                 fmt=".2f" if normalize else ".0f",
                 square=True,
                 vmin=0.0,
@@ -246,15 +247,15 @@ def _plot_pr_curve_on_axis(
 
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py.T):
-            ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}")
+            ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}", color=palette_mpl(i))
     else:
-        ax.plot(px, py, linewidth=1, color="grey", alpha=0.35)
+        ax.plot(px, py, linewidth=1, color=named_plot_color("background"), alpha=0.35)
 
     ax.plot(
         px,
         py.mean(1),
         linewidth=3,
-        color="blue",
+        color=named_plot_color("mean"),
         label=f"all classes {ap[:, 0].mean():.3f} mAP@0.1",
     )
     ax.set_xlabel("Recall")
@@ -294,16 +295,16 @@ def _plot_mc_curve_on_axis(
         return
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py):
-            ax.plot(px, y, linewidth=1, label=f"{names[i]}")
+            ax.plot(px, y, linewidth=1, label=f"{names[i]}", color=palette_mpl(i))
     else:
-        ax.plot(px, py.T, linewidth=1, color="grey", alpha=0.35)
+        ax.plot(px, py.T, linewidth=1, color=named_plot_color("background"), alpha=0.35)
 
     y = _smoothed_mean_confidence_curve(py, px)
     ax.plot(
         px,
         y,
         linewidth=3,
-        color="blue",
+        color=named_plot_color("mean"),
         label=f"all classes {y.max():.2f} at {px[y.argmax()]:.3f}",
     )
     ax.set_xlabel(xlabel)
@@ -917,7 +918,7 @@ class DetMetrics:
                 self.metrics.froc_avg_fp[positive_froc_mask],
                 self.metrics.froc_sensitivity[positive_froc_mask],
                 linewidth=3,
-                color="blue",
+                color=named_plot_color("mean"),
             )
         ax_froc.set_xlabel("Average False Positives per Image")
         ax_froc.set_ylabel("Sensitivity")
@@ -967,28 +968,28 @@ class DetMetrics:
             x_values=target_pr_recalls,
             y_values=target_pr_precisions,
             labels=target_labels,
-            color="salmon",
+            color=named_plot_color("operating"),
         )
         _annotate_points(
             ax=ax_f1,
             x_values=target_confidences,
             y_values=[float(mean_f1_curve[index]) for index in target_curve_indices],
             labels=target_labels,
-            color="salmon",
+            color=named_plot_color("operating"),
         )
         _annotate_points(
             ax=ax_p,
             x_values=target_confidences,
             y_values=[float(mean_precision_curve[index]) for index in target_curve_indices],
             labels=target_labels,
-            color="salmon",
+            color=named_plot_color("operating"),
         )
         _annotate_points(
             ax=ax_r,
             x_values=target_confidences,
             y_values=[float(mean_recall_curve[index]) for index in target_curve_indices],
             labels=target_labels,
-            color="salmon",
+            color=named_plot_color("operating"),
         )
         _annotate_points(
             ax=ax_froc,
@@ -1000,7 +1001,7 @@ class DetMetrics:
                 float(self.metrics.froc_sensitivity[index]) for index in target_indices.values()
             ],
             labels=target_labels,
-            color="salmon",
+            color=named_plot_color("operating"),
         )
 
         best_confidence = float(self.metrics.best_confidence)
@@ -1020,7 +1021,7 @@ class DetMetrics:
             x_values=[best_pr_recall],
             y_values=[best_pr_precision],
             labels=[best_label],
-            color="tab:green",
+            color=named_plot_color("best"),
             marker="*",
         )
         _annotate_points(
@@ -1028,7 +1029,7 @@ class DetMetrics:
             x_values=[best_confidence],
             y_values=[float(mean_f1_curve[best_curve_index])],
             labels=[best_label],
-            color="tab:green",
+            color=named_plot_color("best"),
             marker="*",
         )
         _annotate_points(
@@ -1036,7 +1037,7 @@ class DetMetrics:
             x_values=[best_confidence],
             y_values=[float(mean_precision_curve[best_curve_index])],
             labels=[best_label],
-            color="tab:green",
+            color=named_plot_color("best"),
             marker="*",
         )
         _annotate_points(
@@ -1044,7 +1045,7 @@ class DetMetrics:
             x_values=[best_confidence],
             y_values=[float(mean_recall_curve[best_curve_index])],
             labels=[best_label],
-            color="tab:green",
+            color=named_plot_color("best"),
             marker="*",
         )
         _annotate_points(
@@ -1052,7 +1053,7 @@ class DetMetrics:
             x_values=[max(float(self.metrics.froc_avg_fp[best_froc_index]), float(froc_ticks[0]))],
             y_values=[float(self.metrics.froc_sensitivity[best_froc_index])],
             labels=[best_label],
-            color="tab:green",
+            color=named_plot_color("best"),
             marker="*",
         )
 
