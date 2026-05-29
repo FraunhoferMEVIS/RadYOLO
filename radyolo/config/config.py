@@ -138,6 +138,11 @@ class DefaultConfig(BaseModel):
         ge=0.0,
         lt=1.0,
     )  # extra train-epoch sample fraction to draw from foreground cases
+    background_undersampling: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+    )  # fraction of background-only train cases to remove from each epoch
     min_box_crop_fraction: float = Field(
         0.5,
         ge=0.0,

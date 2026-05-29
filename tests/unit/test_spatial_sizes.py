@@ -55,6 +55,17 @@ def test_default_config_accepts_foreground_oversampling(tmp_path: Path) -> None:
     assert cfg.foreground_oversampling == 0.25
 
 
+def test_default_config_accepts_background_undersampling(tmp_path: Path) -> None:
+    cfg = DefaultConfig.model_validate(
+        {
+            **_make_minimal_config(tmp_path, {"x": 20, "y": 18, "z": 16}),
+            "background_undersampling": 0.25,
+        }
+    )
+
+    assert cfg.background_undersampling == 0.25
+
+
 def test_default_config_accepts_patchwise_training_mode(tmp_path: Path) -> None:
     cfg = DefaultConfig.model_validate(
         {

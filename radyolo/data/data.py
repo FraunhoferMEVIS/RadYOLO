@@ -5,7 +5,7 @@ import logging
 import math
 import os
 import random
-from collections.abc import Sized
+from collections.abc import Iterator, Sized
 from typing import TYPE_CHECKING, Literal, TypedDict
 
 import blosc2
@@ -688,6 +688,106 @@ def _validate_foreground_oversampling(foreground_oversampling: float) -> None:
         raise ValueError(msg)
 
 
+def _compute_background_keep_count(
+    num_background_cases: int,
+    background_undersampling: float,
+) -> int:
+    if background_undersampling <= 0.0 or num_background_cases == 0:
+        return num_background_cases
+    if background_undersampling >= 1.0:
+        return 0
+    return math.floor(num_background_cases * (1.0 - background_undersampling))
+
+
+class BackgroundUndersamplingSampler(Sampler[int]):
+    def __init__(
+        self,
+        dataset: WholeImageDataset | PatchWiseDataset,
+        background_undersampling: float,
+        *,
+        shuffle: bool = True,
+        seed: int = 0,
+        num_replicas: int = 1,
+        rank: int = 0,
+    ) -> None:
+        if num_replicas < 1:
+            msg = f"num_replicas must be >= 1, got {num_replicas}."
+            raise ValueError(msg)
+        if rank < 0 or rank >= num_replicas:
+            msg = f"rank must be in [0, {num_replicas}), got {rank}."
+            raise ValueError(msg)
+
+        self.dataset = dataset
+        self.background_undersampling = background_undersampling
+        self.shuffle = shuffle
+        self.seed = int(seed)
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def _build_epoch_indices(self) -> list[int]:
+        random_generator = random.Random(self.seed + self.epoch)
+        active_indices = list(self.dataset.foreground_case_indices)
+        background_case_indices = list(self.dataset.background_case_indices)
+        background_keep_count = _compute_background_keep_count(
+            len(background_case_indices),
+            self.background_undersampling,
+        )
+
+        if background_keep_count >= len(background_case_indices):
+            active_indices.extend(background_case_indices)
+        elif background_keep_count > 0:
+            active_indices.extend(
+                random_generator.sample(background_case_indices, background_keep_count)
+            )
+
+        oversample_start_index = len(self.dataset.cases)
+        active_indices.extend(
+            range(
+                oversample_start_index,
+                oversample_start_index + self.dataset.foreground_oversample_count,
+            )
+        )
+
+        if self.shuffle:
+            random_generator.shuffle(active_indices)
+
+        return active_indices
+
+    def __iter__(self) -> Iterator[int]:
+        indices = self._build_epoch_indices()
+        if self.num_replicas == 1:
+            return iter(indices)
+
+        if not indices:
+            return iter(())
+
+        num_samples = math.ceil(len(indices) / self.num_replicas)
+        total_size = num_samples * self.num_replicas
+        if len(indices) < total_size:
+            indices.extend(indices[: total_size - len(indices)])
+        rank_indices = indices[self.rank:total_size:self.num_replicas]
+        return iter(rank_indices)
+
+    def __len__(self) -> int:
+        active_count = (
+            len(self.dataset.foreground_case_indices)
+            + _compute_background_keep_count(
+                len(self.dataset.background_case_indices),
+                self.background_undersampling,
+            )
+            + self.dataset.foreground_oversample_count
+        )
+        if self.num_replicas == 1:
+            return active_count
+        if active_count == 0:
+            return 0
+        return math.ceil(active_count / self.num_replicas)
+
+
 def _sample_patch_center_from_bbox(
     bbox: torch.Tensor,
     image_shape_xyz: tuple[int, int, int],
@@ -1101,6 +1201,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         apply_preprocessing: bool = True,
         load_masks: bool = True,
         foreground_oversampling: float = 0.0,
+        background_undersampling: float = 0.0,
         min_box_crop_fraction: float = 0.5,
         split_file_name: str | None = None,
         config: DefaultConfig | None = None,
@@ -1118,6 +1219,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
+        self.background_undersampling = background_undersampling
         self.min_box_crop_fraction = min_box_crop_fraction
         self.split_file_name = (
             split_file_name
@@ -1132,6 +1234,12 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.image_label_tasks = _load_image_label_tasks(self.src_path)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
+        self.foreground_case_indices = tuple(
+            index for index, case_name in enumerate(self.cases) if case_name in self.foreground_case_bboxes
+        )
+        self.background_case_indices = tuple(
+            index for index, case_name in enumerate(self.cases) if case_name not in self.foreground_case_bboxes
+        )
         self.foreground_oversample_count = _compute_foreground_oversample_count(
             len(self.cases),
             foreground_oversampling if self.foreground_cases else 0.0,
@@ -1275,6 +1383,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         apply_preprocessing: bool = True,
         load_masks: bool = True,
         foreground_oversampling: float = 0.33,
+        background_undersampling: float = 0.0,
         min_box_crop_fraction: float = 0.5,
         split_file_name: str | None = None,
         config: DefaultConfig | None = None,
@@ -1294,6 +1403,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
+        self.background_undersampling = background_undersampling
         self.min_box_crop_fraction = min_box_crop_fraction
         self.split_file_name = (
             split_file_name
@@ -1323,6 +1433,12 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.image_label_tasks = _load_image_label_tasks(self.src_path)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
+        self.foreground_case_indices = tuple(
+            index for index, case_name in enumerate(self.cases) if case_name in self.foreground_case_bboxes
+        )
+        self.background_case_indices = tuple(
+            index for index, case_name in enumerate(self.cases) if case_name not in self.foreground_case_bboxes
+        )
         self.foreground_oversample_count = _compute_foreground_oversample_count(
             len(self.cases),
             foreground_oversampling if self.foreground_cases else 0.0,

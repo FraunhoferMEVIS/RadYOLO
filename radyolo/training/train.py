@@ -30,6 +30,7 @@ from radyolo.config.config import (
     save_model_checkpoint,
 )
 from radyolo.data.data import (
+    BackgroundUndersamplingSampler,
     PatchWiseDataset,
     WholeImageDataset,
     apply_configured_augmentations_to_batch,
@@ -1071,8 +1072,11 @@ class Trainer:
             PatchWiseDataset if self.config.training_mode == "patchwise" else WholeImageDataset
         )
         foreground_oversampling = 0.0
+        background_undersampling = 0.0
         if mode == "train" or self.config.training_mode == "patchwise":
             foreground_oversampling = self.config.foreground_oversampling
+        if mode == "train":
+            background_undersampling = self.config.background_undersampling
 
         dataset = dataset_class(
             src_path=dataset_path,
@@ -1085,12 +1089,29 @@ class Trainer:
             apply_preprocessing=self.config.apply_preprocessing,
             load_masks=self.config.segmentation_output,
             foreground_oversampling=foreground_oversampling,
+            background_undersampling=background_undersampling,
             min_box_crop_fraction=self.config.min_box_crop_fraction,
             config=self.config,
         )
         sampler = None
         shuffle = mode == "train"
-        if self.distributed and mode == "train":
+        if mode == "train" and background_undersampling > 0.0 and dataset.background_case_indices:
+            sampler = BackgroundUndersamplingSampler(
+                dataset,
+                background_undersampling=background_undersampling,
+                shuffle=True,
+                seed=int(self.config.seed),
+                num_replicas=self.world_size if self.distributed else 1,
+                rank=self.rank if self.distributed else 0,
+            )
+            if len(sampler) == 0:
+                msg = (
+                    "background_undersampling removed all training samples for the selected split. "
+                    "Decrease background_undersampling or ensure the split contains foreground cases."
+                )
+                raise ValueError(msg)
+            shuffle = False
+        elif self.distributed and mode == "train":
             sampler = DistributedSampler(
                 dataset,
                 num_replicas=self.world_size,

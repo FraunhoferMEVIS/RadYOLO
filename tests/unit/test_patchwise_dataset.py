@@ -10,7 +10,7 @@ import torch
 
 from radyolo.config.spatial import PatchSize
 from radyolo.data import data as data_module
-from radyolo.data.data import PatchWiseDataset
+from radyolo.data.data import BackgroundUndersamplingSampler, PatchWiseDataset
 from radyolo.data.preprocess_data import preprocess_dataset
 
 
@@ -412,6 +412,44 @@ def test_patchwise_dataset_length_includes_foreground_oversamples(
     assert len(dataset.cases) == 3
     assert dataset.foreground_oversample_count == 2
     assert len(dataset) == 5
+
+
+def test_background_undersampling_sampler_keeps_all_foreground_and_drops_fraction_of_background(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    dataset_root = tmp_path / "background_fraction_dataset"
+    shutil.copytree(synthetic_dataset, dataset_root)
+    (dataset_root / "data_splits.json").write_text(
+        json.dumps([
+            {"train": ["case1", "case2", "case3", "case4", "case5"], "val": [], "test": []}
+        ]),
+        encoding="utf-8",
+    )
+    for case_name in ("case2", "case3", "case4", "case5"):
+        (dataset_root / "labels" / f"{case_name}.txt").write_text("", encoding="utf-8")
+
+    dataset = PatchWiseDataset(
+        src_path=dataset_root,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        foreground_oversampling=0.0,
+        background_undersampling=0.5,
+    )
+    sampler = BackgroundUndersamplingSampler(
+        dataset,
+        background_undersampling=dataset.background_undersampling,
+        shuffle=False,
+        seed=0,
+    )
+
+    sampled_indices = list(iter(sampler))
+
+    assert dataset.foreground_case_indices == (0,)
+    assert dataset.background_case_indices == (1, 2, 3, 4)
+    assert len(sampled_indices) == 3
+    assert sampled_indices[0] == 0
+    assert set(sampled_indices[1:]).issubset({1, 2, 3, 4})
 
 
 def test_patchwise_dataset_oversampled_indices_sample_from_foreground_boxes(
