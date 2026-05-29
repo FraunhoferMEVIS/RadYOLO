@@ -23,6 +23,8 @@ before_script:
 
 test:
   stage: test
+  tags:
+    - mevis-runner
   script:
     - uv sync --locked --group dev
     - uv run --group dev pytest --junitxml=pytest-report.xml --html=pytest-report.html --self-contained-html --cov=radyolo --cov-report=term --cov-report=xml --cov-report=html
