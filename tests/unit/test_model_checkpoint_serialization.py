@@ -118,6 +118,64 @@ def test_resume_preserves_typed_patch_size(
     assert trainer.config.patch_size.get_zyx() == config.patch_size.get_zyx()
 
 
+def test_save_model_copies_best_validation_artifacts(
+    minimal_train_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trainer = Trainer.__new__(Trainer)
+    trainer.config = get_cfg(minimal_train_config, {})
+    trainer.save_period = -1
+    trainer.epoch = 0
+    trainer.save_dir = Path(trainer.config.output_folder_base) / trainer.config.experiment_name
+    trainer.save_dir.mkdir(parents=True, exist_ok=True)
+    trainer.last_model_path = trainer.save_dir / "weights_last.pt"
+    trainer.best_model_path = trainer.save_dir / "weights_best.pt"
+    trainer.ewa_fitness = 0.42
+
+    validation_summary = trainer.save_dir / "validation_summary.png"
+    validation_summary.write_bytes(b"summary")
+    validation_samples = trainer.save_dir / "validation_samples"
+    validation_samples.mkdir(exist_ok=True)
+    (validation_samples / "sample.txt").write_text("best sample", encoding="utf-8")
+
+    saved_paths: list[list[Path]] = []
+
+    def fake_save_model_checkpoint(
+        paths: list[Path],
+        epoch: int,
+        best_fitness: float,
+        model: torch.nn.Module,
+        ema_updates: int,
+        optimizer: torch.optim.Optimizer,
+        scaler: torch.GradScaler,
+        train_config: DefaultConfig,
+        train_metrics: dict[str, float],
+    ) -> None:
+        saved_paths.append(paths)
+
+    monkeypatch.setattr("radyolo.training.train.save_model_checkpoint", fake_save_model_checkpoint)
+
+    model = build_model_from_config(trainer.config)
+    ema = ModelEMA(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scaler = torch.GradScaler("cpu", enabled=False)
+
+    trainer.save_model(
+        best_fitness=0.42,
+        ema=ema,
+        optimizer=optimizer,
+        scaler=scaler,
+        metrics={"metrics/mAP10-95": 0.3},
+        fitness=0.42,
+    )
+
+    assert saved_paths == [[trainer.last_model_path, trainer.best_model_path]]
+    assert (trainer.save_dir / "validation_summary_best.png").read_bytes() == b"summary"
+    assert (trainer.save_dir / "validation_samples_best" / "sample.txt").read_text(
+        encoding="utf-8"
+    ) == "best sample"
+
+
 def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing(
     minimal_train_config: Path,
     tmp_path: Path,

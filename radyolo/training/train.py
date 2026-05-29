@@ -8,7 +8,7 @@ import shutil
 import socket
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast, overload
 
@@ -1137,8 +1137,9 @@ class Trainer:
         metrics: dict[str, float],
         fitness: float,
     ) -> None:
+        is_best = best_fitness == fitness
         save_paths = [self.last_model_path]
-        if best_fitness == fitness:
+        if is_best:
             save_paths.append(self.best_model_path)
         if (self.save_period > 0) and (self.epoch % self.save_period == 0):
             save_paths.append(self.save_dir / f"epoch{self.epoch}.pt")
@@ -1156,6 +1157,22 @@ class Trainer:
                 "metrics/fitness": float(self.ewa_fitness) if self.ewa_fitness is not None else 0.0,
             },
         )
+        if is_best:
+            self._save_best_validation_artifacts()
+
+    def _save_best_validation_artifacts(self) -> None:
+        validation_summary = self.save_dir / "validation_summary.png"
+        if validation_summary.exists():
+            shutil.copy2(validation_summary, self.save_dir / "validation_summary_best.png")
+
+        validation_samples = self.save_dir / "validation_samples"
+        validation_samples_best = self.save_dir / "validation_samples_best"
+        if not validation_samples.exists():
+            return
+
+        with suppress(FileNotFoundError):
+            shutil.rmtree(validation_samples_best)
+        shutil.copytree(validation_samples, validation_samples_best)
 
     def get_validator(
         self,

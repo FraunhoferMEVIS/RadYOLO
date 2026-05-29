@@ -132,3 +132,43 @@ def test_plot_results_saves_image_label_curves_separately(tmp_path: Path) -> Non
 
     assert (tmp_path / "loss_curves.png").exists()
     assert (tmp_path / "loss_curves_image_labels.png").exists()
+
+
+def test_plot_results_marks_best_fitness_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    results_csv = tmp_path / "results.csv"
+    columns = ["epoch", *plotting.RESULTS_PLOT_COLUMNS]
+    pd.DataFrame(
+        [
+            [0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.1, 1.0, 0.9, 0.8, 0.7, 0.2, 0.1, 0.15, 0.12, 0.05],
+            [1, 0.9, 0.8, 0.7, 0.6, 0.5, 1.0, 0.9, 0.8, 0.7, 0.6, 0.6, 0.2, 0.25, 0.22, 0.15],
+            [2, 0.8, 0.7, 0.6, 0.5, 0.4, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.35, 0.32, 0.25],
+        ],
+        columns=columns,
+    ).to_csv(results_csv, index=False)
+
+    captured_figures: list[Figure] = []
+    original_savefig = Figure.savefig
+
+    def capture_savefig(self: Figure, fname: str | Path, *args: object, **kwargs: object) -> None:
+        captured_figures.append(self)
+        original_savefig(self, fname, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    plotting.plot_results(results_csv)
+
+    loss_curves_figure = captured_figures[0]
+    assert loss_curves_figure.axes[0].get_legend() is None
+
+    fitness_axis = loss_curves_figure.axes[10]
+    marker_lines = [
+        line
+        for line in fitness_axis.lines
+        if len(line.get_xdata()) == 2 and line.get_xdata()[0] == line.get_xdata()[1]
+    ]
+
+    assert marker_lines
+    assert marker_lines[0].get_xdata()[0] == pytest.approx(1.0)
+    legend = fitness_axis.get_legend()
+    assert legend is not None
+    assert "Best epoch" in [text.get_text() for text in legend.get_texts()]

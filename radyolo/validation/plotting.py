@@ -792,10 +792,12 @@ def _plot_results_grid(
     axes = np.atleast_1d(ax).ravel()
     has_any_series = False
     visible_columns = [False] * len(columns)
+    fitness_axis: plt.Axes | None = None
+    best_epoch_legend_added = False
 
     for f in files:
         data = pd.read_csv(f).rename(columns=lambda name: name.strip())
-        epochs = data.to_numpy()[:, 0]
+        epochs = data.iloc[:, 0].to_numpy(dtype=float)
         for plot_index, column_name in enumerate(columns):
             try:
                 if column_name not in data.columns:
@@ -803,12 +805,24 @@ def _plot_results_grid(
                 visible_columns[plot_index] = True
                 has_any_series = True
                 y = data[column_name].to_numpy(dtype=float)
-                axes[plot_index].plot(epochs, y, label=f.stem, linewidth=2)
+                plotted_line = axes[plot_index].plot(epochs, y, label=f.stem, linewidth=2)[0]
                 axes[plot_index].set_ylabel(column_name)
                 axes[plot_index].grid(True, axis="both", alpha=0.2, linewidth=0.6)
                 if "metrics" in column_name:
                     axes[plot_index].set_xlabel("Epochs")
                     axes[plot_index].set_ylim(0, 1)
+                if column_name == "metrics/fitness":
+                    fitness_axis = axes[plot_index]
+                    best_epoch = float(epochs[int(np.argmax(y))])
+                    axes[plot_index].axvline(
+                        best_epoch,
+                        color=plotted_line.get_color(),
+                        alpha=0.3,
+                        linewidth=1.0,
+                        linestyle="--",
+                        label="Best epoch" if not best_epoch_legend_added else "_nolegend_",
+                    )
+                    best_epoch_legend_added = True
                 if "loss" in column_name:
                     clean = y[np.isfinite(y)]
                     if clean.size > 0:
@@ -826,9 +840,9 @@ def _plot_results_grid(
         plt.close(fig)
         return
 
-    legend_axis = next((axis for axis in axes if axis.get_visible()), None)
-    if legend_axis is not None:
-        legend_axis.legend()
+    if fitness_axis is not None and fitness_axis.get_visible():
+        handles, labels = fitness_axis.get_legend_handles_labels()
+        fitness_axis.legend(handles, labels, loc="best")
     try:
         fig.savefig(save_path, dpi=200)
     except OSError as e:
