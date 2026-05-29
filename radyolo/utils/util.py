@@ -127,9 +127,9 @@ def select_device(
             )
             raise ValueError(msg)
 
+    device_message = "Device(s): "
     if not cpu and not mps and torch.cuda.is_available():  # prefer GPU if available
         devices = device.split(",") if device else ["0"]
-        device_message = "Device(s): "
         for i, d in enumerate(devices):
             device_message += f"CUDA:{d} ({get_gpu_info(i)}), "  # bytes to MB
         arg = "cuda:0"
