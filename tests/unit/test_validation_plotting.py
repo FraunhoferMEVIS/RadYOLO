@@ -178,7 +178,7 @@ def test_palette_overflow_generates_distinct_followup_variant() -> None:
     base_color = plotting.palette_rgb(0)
     overflow_color = plotting.palette_rgb(len(plotting.BASE_PLOT_HEX_COLORS))
 
-    assert base_color == (23, 156, 125)
+    assert base_color == plotting.Colors.hex2rgb(plotting.MAIN_CURVE_COLOR)
     assert overflow_color != base_color
     assert all(0 <= channel <= 255 for channel in overflow_color)
 

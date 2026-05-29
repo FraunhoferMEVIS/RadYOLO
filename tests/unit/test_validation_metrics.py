@@ -9,7 +9,6 @@ import torch
 from matplotlib import pyplot as plt
 
 from radyolo.data.image_labels import ImageLabelTaskSpec
-from radyolo.validation.validate import Validator
 from radyolo.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
@@ -18,7 +17,14 @@ from radyolo.validation.metrics import (
     _smoothed_mean_confidence_curve,
     smooth,
 )
-from radyolo.validation.plotting import confusion_matrix_cmap, named_plot_color, palette_mpl
+from radyolo.validation.plotting import (
+    MAIN_CURVE_COLOR,
+    Colors,
+    confusion_matrix_cmap,
+    named_plot_color,
+    palette_mpl,
+)
+from radyolo.validation.validate import Validator
 
 
 def test_detmetrics_reports_class_agnostic_map_for_class_confusion(tmp_path: Path) -> None:
@@ -120,7 +126,9 @@ def test_named_plot_colors_match_configured_palette_roles() -> None:
     assert named_plot_color("mean") == "#005b7f"
     assert named_plot_color("operating") == "#f58220"
     assert named_plot_color("best") == "#179c7d"
-    assert palette_mpl(0) == pytest.approx((23 / 255, 156 / 255, 125 / 255))
+    assert palette_mpl(0) == pytest.approx(
+        tuple(channel / 255 for channel in Colors.hex2rgb(MAIN_CURVE_COLOR))
+    )
 
 
 def test_confusion_matrix_render_uses_shared_colormap(monkeypatch: pytest.MonkeyPatch) -> None:
