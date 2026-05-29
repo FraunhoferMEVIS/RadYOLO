@@ -1,13 +1,10 @@
-ARG UV_VERSION="0.8.22"
+FROM registry.intern.mevis.fraunhofer.de/ghcr/astral-sh/uv:0.11.17 AS uv-base
+FROM registry.intern.mevis.fraunhofer.de/dockerhub/python:3.12-slim
 
-FROM registry.fme.lan/ghcr/astral-sh/uv:${UV_VERSION} AS uv-base
-
-FROM registry.fme.lan/dockerhub/python:3.12-slim
-
-LABEL org.opencontainers.image.authors="Laurens Müller-Groh <laurens.mueller-groh@mevis.fraunhofer.de>, Kai Geissler <kai.geissler@mevis.fraunhofer.de"
+LABEL org.opencontainers.image.authors="Kai Geissler <kai.geissler@mevis.fraunhofer.de>, Laurens Müller-Groh"
 
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y openssh-server && \
+    apt-get install --no-install-recommends -y openssh-server rsync && \
     apt-get clean -qq && \
     rm -rf /var/lib/apt/lists/*
 
