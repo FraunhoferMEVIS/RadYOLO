@@ -1740,7 +1740,7 @@ def build_dataloader(
 ) -> DataLoader:
     """Return an DataLoader for training or validation set."""
     batch_size = min(batch_size, len(dataset))
-    number_workers = min(os.cpu_count() or 1, workers)
+    number_workers = max(workers, 0)
     multiprocessing_context = None
     if number_workers > 0 and os.name == "posix":
         multiprocessing_context = "spawn"
