@@ -564,7 +564,7 @@ class DetectionSegmentationLoss:  # noqa: N801
             alpha=tal_alpha,
             beta=tal_beta,
             use_fallback_if_alignment_zero=tal_fallback,
-            anchor_inclusion_distance=-2 if include_stride4_output else -4,
+            anchor_inclusion_distance=-6 if include_stride4_output else -12,
         )
         self.bbox_loss = BboxLoss(
             self.reg_bins,
@@ -703,9 +703,10 @@ class DetectionSegmentationLoss:  # noqa: N801
             )
         )
         if self.separate_objectness_head:
-            assign_scores = pred_objectness_logit.detach().squeeze(-1).sigmoid()  # (B, A)
-            # Expand to (B, A, C) so assigner API stays the same
-            assign_scores = assign_scores.unsqueeze(-1).expand(-1, -1, self.num_classes)
+            assign_scores = (
+                pred_class_logits.detach().softmax(dim=-1)
+                * pred_objectness_logit.detach().sigmoid()
+            )
         else:
             assign_scores = pred_class_logits.detach().sigmoid()
         _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
