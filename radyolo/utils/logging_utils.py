@@ -67,7 +67,7 @@ def format_epoch_warning_summary(stats: EpochWarningStats) -> str | None:
         warning_parts.append(
             "TaskAlignedAssinger fallback for "
             f"{stats.tal.alignment_zero_fallback_objects}/{stats.tal.total_gt_objects} "
-            "reference objects because they had 0 alignment with all predictions"
+            "reference objects because they had zero alignment with all predictions"
         )
     if stats.tal.target_assignment_fallback_objects:
         warning_parts.append(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import torch
+
 from radyolo.training.tal import TaskAlignedAssigner
 from radyolo.utils.logging_utils import (
     EpochWarningStats,
@@ -23,7 +25,7 @@ def test_format_epoch_warning_summary_lists_only_nonzero_warning_categories() ->
     )
 
     assert summary == (
-        "TaskAlignedAssinger fallback for 3/12 reference objects because they had 0 "
+        "TaskAlignedAssinger fallback for 3/12 reference objects because they had zero "
         "alignment with all predictions; "
         "TaskAlignedAssinger fallback for 1/12 reference objects becaue they had no "
         "assigned anchor after assignment conflict resolution; "
@@ -68,3 +70,21 @@ def test_task_aligned_assigner_pop_epoch_warning_stats_resets_counts() -> None:
         alignment_zero_fallback_objects=2,
     )
     assert assigner.pop_epoch_warning_stats() == TaskAlignedEpochWarningStats()
+
+
+def test_select_highest_overlaps_prefers_highest_align_metric_over_iou() -> None:
+    assigner = TaskAlignedAssigner()
+    mask_pos = torch.tensor([[[1.0], [1.0]]], dtype=torch.float32)
+    align_metric = torch.tensor([[[0.2], [0.9]]], dtype=torch.float32)
+    overlaps = torch.tensor([[[0.9], [0.3]]], dtype=torch.float32)
+
+    target_gt_idx, fg_mask, resolved_mask_pos = assigner.select_highest_alignments(
+        mask_pos,
+        align_metric,
+        overlaps,
+        n_max_boxes=2,
+    )
+
+    assert target_gt_idx.tolist() == [[1]]
+    assert fg_mask.tolist() == [[1.0]]
+    assert resolved_mask_pos.tolist() == [[[0.0], [1.0]]]
