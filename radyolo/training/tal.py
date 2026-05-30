@@ -266,7 +266,9 @@ class TaskAlignedAssigner(nn.Module):
             # Compute Euclidean distance in 6D (between corners of GT and anchor boxes)
             distances = torch.norm(gt_boxes_exp - pred_boxes_exp, dim=3)  # (B, M, A)
             max_distance = distances.max()
-            distances = torch.where(anchors_in_gts__mask == 0, max_distance, distances)
+            distances = torch.where(anchors_in_gts__mask == 0, distances * 5, distances)
+            selected_anchor_mask = mask_topk.sum(1, keepdim=True) > 0
+            distances = torch.where(selected_anchor_mask, max_distance * 5, distances)
 
             # Loop over batch and GT boxes where zero_mask is True
             for b in range(batch_size):
