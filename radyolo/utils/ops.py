@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -234,8 +233,6 @@ def nms(
     iou_threshold: float,
     max_detections: int
 ) -> torch.Tensor:
-    boxes = boxes.to(dtype=torch.float16)
-    scores = scores.to(dtype=torch.float16)
     sorted_indices = torch.argsort(-scores)
     keep = []
     while len(sorted_indices) > 0:
@@ -365,7 +362,6 @@ def non_max_suppression(
         boxes = x[:, :6] + c  # boxes (offset by class)
         selected_indices = nms(boxes, scores, iou_thres, max_det)
         selected_indices = selected_indices[:max_det]  # limit detections
-
         output[index] = x[selected_indices]
 
     return output

@@ -117,6 +117,57 @@ def test_non_max_suppression_accepts_model_output(monkeypatch) -> None:
     assert captured["max_detections"] == 300
 
 
+def test_non_max_suppression_keeps_high_class_indices_separate() -> None:
+    model_output = ModelOutput(
+        decoded_boxes=torch.tensor(
+            [
+                [
+                    [5.0, 5.0],
+                    [5.0, 5.0],
+                    [5.0, 5.0],
+                    [2.0, 2.0],
+                    [2.0, 2.0],
+                    [2.0, 2.0],
+                ]
+            ],
+            dtype=torch.float32,
+        ),
+        class_probabilities=torch.tensor(
+            [
+                [
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.95, 0.0],
+                    [0.0, 0.96],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                    [0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        ),
+    )
+
+    result = non_max_suppression(
+        model_output,
+        conf_thres=0.1,
+        iou_thres=0.2,
+        nc=15,
+    )
+
+    assert len(result) == 1
+    assert result[0].shape[0] == 2
+    assert set(result[0][:, 7].tolist()) == {9.0, 10.0}
+
+
 def test_scale_boxes_can_skip_clipping() -> None:
     boxes = torch.tensor([[-2.0, -3.0, -4.0, 12.0, 13.0, 14.0]], dtype=torch.float32)
 
