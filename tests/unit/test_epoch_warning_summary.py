@@ -72,19 +72,17 @@ def test_task_aligned_assigner_pop_epoch_warning_stats_resets_counts() -> None:
     assert assigner.pop_epoch_warning_stats() == TaskAlignedEpochWarningStats()
 
 
-def test_select_highest_overlaps_prefers_highest_align_metric_over_iou() -> None:
+def test_select_highest_overlaps_prefers_highest_iou() -> None:
     assigner = TaskAlignedAssigner()
     mask_pos = torch.tensor([[[1.0], [1.0]]], dtype=torch.float32)
-    align_metric = torch.tensor([[[0.2], [0.9]]], dtype=torch.float32)
     overlaps = torch.tensor([[[0.9], [0.3]]], dtype=torch.float32)
 
-    target_gt_idx, fg_mask, resolved_mask_pos = assigner.select_highest_alignments(
+    target_gt_idx, fg_mask, resolved_mask_pos = assigner.select_highest_overlaps(
         mask_pos,
-        align_metric,
         overlaps,
         n_max_boxes=2,
     )
 
-    assert target_gt_idx.tolist() == [[1]]
+    assert target_gt_idx.tolist() == [[0]]
     assert fg_mask.tolist() == [[1.0]]
-    assert resolved_mask_pos.tolist() == [[[0.0], [1.0]]]
+    assert resolved_mask_pos.tolist() == [[[1.0], [0.0]]]
