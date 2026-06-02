@@ -1,5 +1,5 @@
 # Data and Output Settings
-data: "D:/datasets/HECKTOR_2026/radyolo_hecktor_2026_128_128_128_zscore_float16" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/AMOS22/radyolo_new" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
 split_file_name: "data_splits.json" # (str) split file name inside the dataset folder
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
@@ -9,7 +9,7 @@ experiment_name: "default" # (str, optional) experiment name, results saved to '
 device: ""                # (str) device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda device 0
 amp: True                 # (bool) Automatic Mixed Precision (AMP) training, choices=[True, False], True runs AMP check
 use_cudnn_benchmark: True # (bool) Set torch.backends.cudnn.benchmark = True which tests several convolution algorithms and chooses the best one
-workers: 4                # (int) number of dataloader workers per GPU/process; total workers in multi-GPU training = workers * number of GPUs
+workers: 6                # (int) number of dataloader workers per GPU/process; total workers in multi-GPU training = workers * number of GPUs
 save: True                # (bool) save train checkpoints
 save_period: -1           # (int) Save checkpoint every x epochs (disabled if < 1)
 exist_ok: True            # (bool) whether to overwrite existing experiment
@@ -17,7 +17,7 @@ resume: True              # (bool) resume training from last checkpoint
 seed: 0                   # (int) random seed for reproducibility
 
 # Model Parameters
-input_channels: 2 # number of input channels for model
+input_channels: 1 # number of input channels for model
 model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Optional Segmentation Head
@@ -30,7 +30,7 @@ separate_objectness_head: True # (bool) if True, add a separate objectness outpu
 include_stride4_output: False  # (bool) if True, add a detection head on stride 4 level (otherwise only on stride levels 8, 16, 32)
 
 # Global Image-Label Head
-enable_image_label_head: True                  # (bool) enable the global image-label head for dataset.yaml image_label_tasks
+enable_image_label_head: False                  # (bool) enable the global image-label head for dataset.yaml image_label_tasks
 image_label_head_feature_maps: ["o10", "o16", "o19", "o22"] # (list[literal]) selectable inputs from [o10, o16, o19, o22]
 image_label_head_projection_channels: 128      # (int) shared projection width for each selected feature map via 1x1x1 convolutions
 image_label_head_mlp_hidden_layers: 1          # (int) number of hidden layers in the shared MLP trunk
@@ -46,10 +46,11 @@ image_label_survival_cox_gain: 1.0             # (float) gain for Cox partial li
 epochs: 1000                      # (int) number of epochs to train for
 patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training
 training_mode: "wholeimage"       # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
-patch_size: {x: 128, y: 128, z: 128} # input patch size stored in x, y, z (width, height, depth) order
+patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
 voxel_size: null                  # optional resampling target in x, y, z: {x: 0.8, y: 0.8, z: 1.5} or null, only used for patchwise training
-normalization: [{type: "zscore"}, {type: "zscore"}]     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
-apply_preprocessing: False        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
+normalization: {type: "zscore"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
+apply_preprocessing: True        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
+preprocessing_device: "cpu"      # (literal) choose "cpu" for dataset-worker preprocessing or "gpu" to resample/normalize on the training/validation device
 foreground_oversampling: 0.0      # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 background_undersampling: 0.0     # (float) fraction of background-only train cases to remove from each epoch, range [0, 1]
 min_box_crop_fraction: 0.5        # (float) minimum fraction of a box volume that must stay inside a sampled patch to keep it
@@ -64,7 +65,7 @@ warmup_epochs: 4.4                # (float) warmup epochs
 warmup_momentum: 0.72             # (float) warmup initial momentum
 warmup_bias_lr: 0.0021            # (float) warmup initial bias learning rate
 grad_clip_max_norm: 11.6          # (float) max norm used for gradient clipping
-tal_topk: 6                       # (int) initial top-k anchors to keep per ground truth for task-aligned assignment
+tal_topk: 3                       # (int) initial top-k anchors to keep per ground truth for task-aligned assignment
 tal_topk_final: null              # (int) final top-k anchors reached by the TAL schedule
 tal_topk_final_epoch: 900         # (int) 1-based epoch at which tal_topk_final is reached; values beyond this keep tal_topk_final
 tal_alpha: 1.0                    # (float) class score exponent in task-aligned assignment metric

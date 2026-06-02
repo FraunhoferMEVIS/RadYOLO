@@ -133,6 +133,7 @@ class DefaultConfig(BaseModel):
     # mean, std, clip_min and clip_max in the dict.
     normalization: dict | list[dict] = {"type": "none"}
     apply_preprocessing: bool = True  # keep preprocessing settings in config for inference, and apply them while loading raw training data
+    preprocessing_device: Literal["cpu", "gpu"] = "cpu"  # choose where training/validation preprocessing runs
     foreground_oversampling: float = Field(
         0.0,
         ge=0.0,
@@ -443,6 +444,26 @@ class DefaultConfig(BaseModel):
     def uses_gpu_augmentations(self) -> bool:
         return any(
             placement == "gpu"
+            for placement in (
+                self.intensity_noise_augmentation_device,
+                self.intensity_blur_augmentation_device,
+                self.intensity_mult_brightness_augmentation_device,
+                self.intensity_add_brightness_augmentation_device,
+                self.intensity_contrast_augmentation_device,
+                self.intensity_lowres_augmentation_device,
+                self.intensity_gamma_augmentation_device,
+                self.gin_augmentation_device,
+                self.channel_dropout_augmentation_device,
+                self.zoom_augmentation_device,
+                self.rotation_augmentation_device,
+                self.cutout_augmentation_device,
+                self.mirroring_augmentation_device,
+            )
+        )
+
+    def uses_cpu_augmentations(self) -> bool:
+        return any(
+            placement == "cpu"
             for placement in (
                 self.intensity_noise_augmentation_device,
                 self.intensity_blur_augmentation_device,

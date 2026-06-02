@@ -35,6 +35,7 @@ from radyolo.data.data import (
     WholeImageDataset,
     apply_configured_augmentations_to_batch,
     build_dataloader,
+    preprocess_batch_images,
 )
 from radyolo.models.model import (
     HardcodedModel,
@@ -941,7 +942,14 @@ class Trainer:
         return dict.fromkeys(keys, 0.0)
 
     def _prepare_training_batch(self, batch: dict, run_gpu_augmentations: bool) -> dict:
-        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+        preprocess_batch_images(
+            batch,
+            device=self.device,
+            normalization=self.config.normalization,
+            target_shape=self.config.patch_size,
+            apply_preprocessing=self.config.apply_preprocessing,
+            preprocessing_device=self.config.preprocessing_device,
+        )
         if self.config.segmentation_output:
             batch["masks"] = tuple(
                 masks.to(self.device, non_blocking=True) if masks is not None else None
@@ -1087,6 +1095,7 @@ class Trainer:
             min_stride=get_model_min_stride(model),
             normalization=self.config.normalization,
             apply_preprocessing=self.config.apply_preprocessing,
+            preprocessing_device=self.config.preprocessing_device,
             load_masks=self.config.segmentation_output,
             foreground_oversampling=foreground_oversampling,
             background_undersampling=background_undersampling,

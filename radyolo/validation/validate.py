@@ -15,6 +15,7 @@ from sksurv.metrics import concordance_index_censored
 from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DetectionPostprocessConfig
+from radyolo.data.data import preprocess_batch_images
 from radyolo.utils import ops
 from radyolo.utils.ops import box_iou
 from radyolo.utils.util import unwrap_model
@@ -236,7 +237,14 @@ class Validator:
 
     def preprocess(self, batch: Batch) -> Batch:
         """Preprocesses batch of images for YOLO validation."""
-        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+        preprocess_batch_images(
+            batch,
+            device=self.device,
+            normalization=self.config.normalization,
+            target_shape=self.config.patch_size,
+            apply_preprocessing=self.config.apply_preprocessing,
+            preprocessing_device=self.config.preprocessing_device,
+        )
         batch["masks"] = tuple(
             masks.to(self.device, non_blocking=True) if masks is not None else None
             for masks in batch["masks"]

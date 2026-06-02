@@ -44,6 +44,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 PATCHWISE_TRAIN_EXTRACTION_SCALE = 1.2
 
+ImageBatch = torch.Tensor | tuple[torch.Tensor, ...]
+
 
 def _has_intensity_augmentations_on_device(
     config: DefaultConfig,
@@ -442,7 +444,7 @@ class Sample(TypedDict):
 
 
 class Batch(TypedDict):
-    img: torch.Tensor
+    img: ImageBatch
     ori_shape: tuple[tuple[int, int, int], ...]
     ratio_pad: tuple[
         tuple[tuple[float, float, float], tuple[int, int, int]] | None,
@@ -616,7 +618,7 @@ def _load_nifti_array(image_path: Path) -> np.ndarray:
     nifti_image = nib.loadsave.load(image_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
         raise TypeError
-    return np.asanyarray(nifti_image.dataobj, dtype=np.float32)
+    return np.asanyarray(nifti_image.dataobj)
 
 
 def _array_to_runtime_tensor(array: np.ndarray) -> torch.Tensor:
@@ -640,7 +642,7 @@ def _load_image_array(
         return _load_nifti_array(image_path)
 
     blosc2.set_nthreads(1)
-    return np.asarray(blosc2.open(str(image_path), mode="r")[:]).astype(np.float32, copy=False)
+    return np.asarray(blosc2.open(str(image_path), mode="r")[:])
 
 
 def _load_labels(src_path: Path, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -946,10 +948,76 @@ def _load_labels_and_masks(
     return classes, bboxes, resample_mask(mask_tensor, patch_size)
 
 
+def _to_image_batch(images: list[torch.Tensor]) -> ImageBatch:
+    if not images:
+        msg = "Expected at least one image to collate."
+        raise ValueError(msg)
+    first_shape = tuple(int(dim) for dim in images[0].shape)
+    if all(tuple(int(dim) for dim in image.shape) == first_shape for image in images[1:]):
+        return torch.stack(images)
+    return tuple(images)
+
+
+def preprocess_batch_images(
+    batch: Batch,
+    *,
+    device: torch.device,
+    normalization: NormalizationConfig | list[NormalizationConfig],
+    target_shape: PatchSize,
+    apply_preprocessing: bool,
+    preprocessing_device: Literal["cpu", "gpu"],
+    non_blocking: bool = True,
+) -> Batch:
+    images = batch["img"]
+    if preprocessing_device == "cpu":
+        if isinstance(images, torch.Tensor):
+            batch["img"] = images.to(device, non_blocking=non_blocking)
+        else:
+            batch["img"] = torch.stack(
+                [image.to(device, non_blocking=non_blocking) for image in images]
+            )
+        return batch
+
+    image_list = list(images) if isinstance(images, tuple) else list(images.unbind(0))
+    processed_images: list[torch.Tensor] = []
+    updated_shapes: list[tuple[int, int, int]] = []
+    updated_ratio_pad: list[tuple[tuple[float, float, float], tuple[int, int, int]]] = []
+    for image in image_list:
+        image_gpu = image.to(device, non_blocking=non_blocking)
+        processed_image, original_shape, resized_shape = preprocess_image(
+            image_gpu,
+            normalization,
+            target_shape=target_shape,
+            apply_resampling=apply_preprocessing,
+            apply_normalization=apply_preprocessing,
+            output_dtype=torch.float32,
+        )
+        processed_images.append(processed_image)
+        updated_shapes.append(resized_shape)
+        updated_ratio_pad.append(
+            (
+                tuple(
+                    resized_dim / original_dim
+                    for resized_dim, original_dim in zip(
+                        resized_shape,
+                        original_shape,
+                        strict=True,
+                    )
+                ),
+                (0, 0, 0),
+            )
+        )
+
+    batch["img"] = torch.stack(processed_images)
+    batch["shape"] = tuple(updated_shapes)
+    batch["ratio_pad"] = tuple(updated_ratio_pad)
+    return batch
+
+
 def _collate_samples(batch: list[Sample]) -> Batch:
     with torch.no_grad():
         return {
-            "img": torch.stack([sample["image"] for sample in batch]),
+            "img": _to_image_batch([sample["image"] for sample in batch]),
             "ori_shape": tuple(sample["original_shape"] for sample in batch),
             "ratio_pad": tuple(sample["ratio_pad"] for sample in batch),
             "shape": tuple(sample["shape"] for sample in batch),
@@ -1199,6 +1267,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
         apply_preprocessing: bool = True,
+        preprocessing_device: Literal["cpu", "gpu"] = "cpu",
         load_masks: bool = True,
         foreground_oversampling: float = 0.0,
         background_undersampling: float = 0.0,
@@ -1216,6 +1285,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.group = group
         self.normalization = _resolve_normalization(normalization)
         self.apply_preprocessing = apply_preprocessing
+        self.preprocessing_device = preprocessing_device
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
@@ -1235,15 +1305,30 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_case_indices = tuple(
-            index for index, case_name in enumerate(self.cases) if case_name in self.foreground_case_bboxes
+            index
+            for index, case_name in enumerate(self.cases)
+            if case_name in self.foreground_case_bboxes
         )
         self.background_case_indices = tuple(
-            index for index, case_name in enumerate(self.cases) if case_name not in self.foreground_case_bboxes
+            index
+            for index, case_name in enumerate(self.cases)
+            if case_name not in self.foreground_case_bboxes
         )
         self.foreground_oversample_count = _compute_foreground_oversample_count(
             len(self.cases),
             foreground_oversampling if self.foreground_cases else 0.0,
         )
+        if (
+            self.preprocessing_device == "gpu"
+            and self.augment
+            and config is not None
+            and config.uses_cpu_augmentations()
+        ):
+            msg = (
+                "preprocessing_device='gpu' requires all configured training augmentations "
+                "to run on the GPU for whole-image loading."
+            )
+            raise ValueError(msg)
         if foreground_oversampling > 0 and not self.foreground_cases:
             LOGGER.warning(
                 "WholeImageDataset foreground oversampling requested for split '%s', "
@@ -1344,6 +1429,9 @@ class WholeImageDataset(Dataset[Sample], Sized):
     def resample_and_normalize(
         self, image: torch.Tensor
     ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
+        if self.preprocessing_device == "gpu":
+            source_shape = tuple(int(dim) for dim in image.shape[-3:])
+            return image, source_shape, source_shape
         image_resampled_normalized, original_shape, resized_shape = preprocess_image(
             image,
             self.normalization,
@@ -1381,6 +1469,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         group: Literal["train", "val", "test"] = "train",
         normalization: NormalizationConfig | list[NormalizationConfig] | None = None,
         apply_preprocessing: bool = True,
+        preprocessing_device: Literal["cpu", "gpu"] = "cpu",
         load_masks: bool = True,
         foreground_oversampling: float = 0.33,
         background_undersampling: float = 0.0,
@@ -1400,6 +1489,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.group = group
         self.normalization = _resolve_normalization(normalization)
         self.apply_preprocessing = apply_preprocessing
+        self.preprocessing_device = preprocessing_device
         self.config = config
         self.load_masks = load_masks
         self.foreground_oversampling = foreground_oversampling
@@ -1434,10 +1524,14 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_case_indices = tuple(
-            index for index, case_name in enumerate(self.cases) if case_name in self.foreground_case_bboxes
+            index
+            for index, case_name in enumerate(self.cases)
+            if case_name in self.foreground_case_bboxes
         )
         self.background_case_indices = tuple(
-            index for index, case_name in enumerate(self.cases) if case_name not in self.foreground_case_bboxes
+            index
+            for index, case_name in enumerate(self.cases)
+            if case_name not in self.foreground_case_bboxes
         )
         self.foreground_oversample_count = _compute_foreground_oversample_count(
             len(self.cases),
@@ -1696,12 +1790,15 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             )
 
         image_tensor = _array_to_runtime_tensor(image_patch)
-        image_tensor, _, resized_shape = preprocess_image(
-            image_tensor,
-            self.normalization,
-            apply_normalization=self.apply_preprocessing,
-            output_dtype=torch.float32,
-        )
+        if self.preprocessing_device == "gpu":
+            resized_shape = tuple(int(dim) for dim in image_tensor.shape[-3:])
+        else:
+            image_tensor, _, resized_shape = preprocess_image(
+                image_tensor,
+                self.normalization,
+                apply_normalization=self.apply_preprocessing,
+                output_dtype=torch.float32,
+            )
         classes, bboxes = _load_labels(self.src_path, case_name)
         masks = self._load_patch_mask(case_name, patch_origin_xyz, patch_shape_xyz)
         classes, bboxes, masks = self._crop_boxes_and_masks_to_patch(

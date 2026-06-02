@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 
+import pytest
 import torch
 import yaml
 
@@ -134,6 +135,26 @@ def test_wholeimage_dataset_can_apply_preprocessing(
     assert torch.isclose(sample["image"].max(), torch.tensor(1.0 / 255.0, dtype=torch.float32))
 
 
+def test_wholeimage_dataset_can_defer_preprocessing_to_gpu(
+    synthetic_dataset: Path,
+) -> None:
+    dataset = WholeImageDataset(
+        src_path=synthetic_dataset,
+        patch_size=PatchSize(x=16, y=16, z=32),
+        augment=False,
+        normalization={"type": "255_to_01"},
+        apply_preprocessing=True,
+        preprocessing_device="gpu",
+    )
+
+    sample = dataset.load_image_label_and_mask(0)
+
+    assert sample["image"].shape == (64, 32, 32)
+    assert sample["shape"] == (64, 32, 32)
+    assert sample["ratio_pad"] == ((1.0, 1.0, 1.0), (0, 0, 0))
+    assert torch.isclose(sample["image"].max(), torch.tensor(1.0, dtype=torch.float32))
+
+
 def test_patchwise_dataset_can_skip_normalization_for_preprocessed_inputs(
     synthetic_dataset: Path,
     monkeypatch,
@@ -151,3 +172,72 @@ def test_patchwise_dataset_can_skip_normalization_for_preprocessed_inputs(
 
     assert sample["image"].shape == (1, 32, 16, 16)
     assert torch.isclose(sample["image"].max(), torch.tensor(1.0, dtype=torch.float32))
+
+
+def test_trainer_prepares_variable_shape_batch_with_gpu_preprocessing(
+    minimal_train_config: Path,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_config_with_updates(
+        minimal_train_config,
+        tmp_path,
+        preprocessing_device="gpu",
+        normalization={"type": "255_to_01"},
+        patch_size={"x": 16, "y": 16, "z": 32},
+    )
+    trainer = _make_trainer_for_dataloader(config_path)
+
+    batch = {
+        "img": (
+            torch.ones((1, 64, 32, 32), dtype=torch.float32),
+            torch.ones((1, 48, 24, 24), dtype=torch.float32),
+        ),
+        "ori_shape": ((64, 32, 32), (48, 24, 24)),
+        "ratio_pad": (((1.0, 1.0, 1.0), (0, 0, 0)), ((1.0, 1.0, 1.0), (0, 0, 0))),
+        "shape": ((64, 32, 32), (48, 24, 24)),
+        "cls": torch.zeros((0, 1), dtype=torch.float32),
+        "bboxes": torch.zeros((0, 6), dtype=torch.float32),
+        "batch_idx": torch.zeros((0,), dtype=torch.int64),
+        "masks": (None, None),
+        "case_names": ("case1", "case2"),
+        "image_labels": ({}, {}),
+    }
+
+    prepared = trainer._prepare_training_batch(batch, run_gpu_augmentations=False)
+
+    assert isinstance(prepared["img"], torch.Tensor)
+    assert prepared["img"].shape == (2, 1, 32, 16, 16)
+    assert prepared["shape"] == ((32, 16, 16), (32, 16, 16))
+    assert prepared["ratio_pad"] == (
+        ((0.5, 0.5, 0.5), (0, 0, 0)),
+        ((2 / 3, 2 / 3, 2 / 3), (0, 0, 0)),
+    )
+    assert torch.isclose(prepared["img"].max(), torch.tensor(1.0 / 255.0, dtype=torch.float32))
+
+
+def test_wholeimage_gpu_preprocessing_rejects_cpu_augmentations(
+    synthetic_dataset: Path,
+    minimal_train_config: Path,
+    tmp_path: Path,
+) -> None:
+    config = get_cfg(
+        _write_config_with_updates(
+            minimal_train_config,
+            tmp_path,
+            data=synthetic_dataset.as_posix(),
+            preprocessing_device="gpu",
+            zoom_augmentation_device="cpu",
+        ),
+        {},
+    )
+
+    with pytest.raises(ValueError, match="preprocessing_device='gpu'"):
+        WholeImageDataset(
+            src_path=synthetic_dataset,
+            patch_size=PatchSize(x=16, y=16, z=32),
+            augment=True,
+            normalization={"type": "255_to_01"},
+            apply_preprocessing=True,
+            preprocessing_device="gpu",
+            config=config,
+        )
