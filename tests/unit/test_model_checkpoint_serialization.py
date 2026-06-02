@@ -377,7 +377,7 @@ def test_get_cfg_rejects_relative_dataset_path(minimal_train_config: Path, tmp_p
     config_path = tmp_path / "relative_dataset_path.yaml"
     config_path.write_text(yaml.safe_dump(config_data, sort_keys=False), encoding="utf-8")
 
-    with pytest.raises(FileNotFoundError, match="dataset.yaml"):
+    with pytest.raises(FileNotFoundError, match="Configured dataset folder does not exist"):
         get_cfg(config_path, {})
 
 

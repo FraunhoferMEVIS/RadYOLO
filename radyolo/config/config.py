@@ -593,7 +593,22 @@ def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
     dataset_root = yaml_config.get("data")
     if dataset_root is None:
         return int(yaml_config.get("num_classes", 0))
-    dataset_cfg = get_dataset_config(dataset_root)
+    dataset_root_path = Path(dataset_root)
+    if not dataset_root_path.exists():
+        msg = (
+            f"Configured dataset folder does not exist: '{dataset_root_path}'. "
+            "Please set the 'data' config field to an existing dataset directory."
+        )
+        raise FileNotFoundError(msg)
+    dataset_yaml_path = dataset_root_path / "dataset.yaml"
+    if not dataset_yaml_path.exists():
+        msg = (
+            f"Configured dataset folder '{dataset_root_path}' does not contain dataset.yaml "
+            f"at '{dataset_yaml_path}'."
+        )
+        raise FileNotFoundError(msg)
+
+    dataset_cfg = get_dataset_config(dataset_root_path)
     if dataset_cfg.names is None:
         msg = "dataset.yaml must define 'names' so num_classes can be inferred"
         raise ValueError(msg)
