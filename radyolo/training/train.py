@@ -352,6 +352,7 @@ class Trainer:
             rank=self.rank,
             world_size=self.world_size,
             timeout=datetime.timedelta(minutes=30),
+            device_id=self.local_rank,
         )
         LOGGER.info("Rank %d finished distributed process group initialization.", self.rank)
 
