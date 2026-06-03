@@ -28,6 +28,7 @@ from radyolo.models.layers import (
     Detect,
     ModelOutput,
     PrototypeMasksFullResolution,
+    PrototypeMasksFullResolutionV2,
     PrototypeMasksHalfResolution,
     PrototypeMasksHighResolution,
 )
@@ -370,6 +371,15 @@ class HardcodedModel(nn.Module):
                     output_channels[19],
                     num_prototype_masks,
                 )
+            elif self.prototype_layer_mode == "full_resolution_v2":
+                self.prototype_layer = PrototypeMasksFullResolutionV2(
+                    input_channels,
+                    output_channels[0],
+                    output_channels[2],
+                    output_channels[16],
+                    output_channels[19],
+                    num_prototype_masks,
+                )
             elif self.prototype_layer_mode == "half_resolution":
                 self.prototype_layer = PrototypeMasksHalfResolution(
                     output_channels[0],
@@ -449,7 +459,7 @@ class HardcodedModel(nn.Module):
             output = self.l23([o16, o19, o22])
 
         if self.enable_output_masks:
-            if self.prototype_layer_mode == "full_resolution":
+            if self.prototype_layer_mode in {"full_resolution", "full_resolution_v2"}:
                 output.prototype_masks = self.prototype_layer(x_input, o0, o2, o16, o19)
             elif self.prototype_layer_mode == "half_resolution":
                 output.prototype_masks = self.prototype_layer(o0, o2, o16, o19)

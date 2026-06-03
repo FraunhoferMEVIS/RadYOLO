@@ -1,5 +1,5 @@
 # Data and Output Settings
-data: "D:/datasets/AMOS22/radyolo_new" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/AMOS22/radyolo_new_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
 split_file_name: "data_splits.json" # (str) split file name inside the dataset folder
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
@@ -23,7 +23,7 @@ model_scale: s    # allowed values: (n, s, m, l, x)
 # Optional Segmentation Head
 segmentation_output: True            # (bool) add segmentation output to model
 prototype_masks: 8                   # (int) number of prototype masks for segmentation output
-prototype_layer: "higher_resolution" # (literal) choose one of [higher_resolution, full_resolution, half_resolution]
+prototype_layer: "full_resolution_v2" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution]
 
 # Detection Head Options
 separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits
@@ -49,7 +49,7 @@ training_mode: "wholeimage"       # (literal) choose "wholeimage" for resized fu
 patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
 voxel_size: null                  # optional resampling target in x, y, z: {x: 0.8, y: 0.8, z: 1.5} or null, only used for patchwise training
 normalization: {type: "zscore"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
-apply_preprocessing: True        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
+apply_preprocessing: False        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
 preprocessing_device: "cpu"      # (literal) choose "cpu" for dataset-worker preprocessing or "gpu" to resample/normalize on the training/validation device
 foreground_oversampling: 0.0      # (float) extra train-epoch sample fraction to draw from foreground cases, range [0, 1)
 background_undersampling: 0.0     # (float) fraction of background-only train cases to remove from each epoch, range [0, 1]

@@ -655,6 +655,61 @@ class Detect(nn.Module):
         )
 
 
+class PrototypeMasksFullResolutionV2(nn.Module):
+    """PrototypeMasks module for segmentation models."""
+
+    def __init__(
+        self,
+        input_channels_full: int,
+        input_channels_half: int,
+        input_channels_quarter: int,
+        input_channels_eigth: int,
+        input_channels_sixteenth: int,
+        prototypes: int = 8,
+    ) -> None:
+        """Initialize the PrototypeMasks module with specified number of prototypes."""
+        super().__init__()
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
+        self.upsample_half = ConvTransposed(prototypes*2, prototypes, 2, 2)
+
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+        self.reshape_full_1 = Conv(input_channels_full, prototypes, kernel_size=3)
+        self.reshape_full_2 = Conv(prototypes, prototypes, kernel_size=3)
+
+        self.cv_eigth = Conv(prototypes * 8, prototypes * 8, kernel_size=3)
+        self.cv_quater = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
+        self.cv_half = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
+        self.cv_final_1 = Conv(prototypes, prototypes, kernel_size=3)
+        self.cv_final_2 = Conv(prototypes, prototypes, kernel_size=3)
+
+    def forward(
+        self,
+        x_full: torch.Tensor,
+        x_half: torch.Tensor,
+        x_quater: torch.Tensor,
+        x_eight: torch.Tensor,
+        x_sixteenth: torch.Tensor,
+    ) -> torch.Tensor:
+        """Perform a forward pass through layers using multi-scale input feature maps."""
+        x = self.upsample_sixteenth(x_sixteenth)
+        x = self.reshape_eigth(x_eight) + x
+        x = self.cv_eigth(x)
+        x = self.upsample_eigth(x)
+        x = self.reshape_quater(x_quater) + x
+        x = self.cv_quater(x)
+        x = self.upsample_quater(x)
+        x = self.reshape_half(x_half) + x
+        x = self.cv_half(x)
+        x = self.upsample_half(x)
+        x = self.reshape_full_2(self.reshape_full_1(x_full)) + x
+        x = self.cv_final_1(x)
+        return self.cv_final_2(x)
+
+
 class PrototypeMasksFullResolution(nn.Module):
     """PrototypeMasks module for segmentation models."""
 
