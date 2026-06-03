@@ -151,9 +151,14 @@ class DefaultConfig(BaseModel):
     )  # minimum fraction of a box volume that must remain inside a sampled patch to keep it
     batch_size: int = 2  # number of images per GPU/process
     nominal_batch_size: int = 64  # nominal effective global batch size for gradient accumulation
-    optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "auto"] = (
+    optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "MuSGD", "NAdam", "RAdam", "RMSProp", "auto"] = (
         "Adam"  # optimizer to use
     )
+    muon_weight: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+    )  # MuSGD mixture: muon_weight * moun + (1 - muon_weight) * sgd
     initial_learning_rate: float = 0.01  # initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
     final_learning_rate_ratio: float = 0.01  # final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
     momentum: float = 0.937  # SGD momentum/Adam beta1

@@ -606,6 +606,7 @@ class Trainer:
             lr=self.config.initial_learning_rate,
             momentum=self.config.momentum,
             decay=weight_decay,
+            muon_weight=self.config.muon_weight,
         )
 
         # Scheduler
