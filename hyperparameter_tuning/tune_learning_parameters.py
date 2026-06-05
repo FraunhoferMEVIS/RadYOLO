@@ -412,10 +412,9 @@ def _best_rolling_average_and_epoch(
 
 def _extract_metric_from_csv(
     csv_path: Path,
-    primary_metric_column: str,
-    secondary_metric_column: str,
+    metric_columns: list[str],
     rolling_window_epochs: int,
-) -> tuple[float, float, int, int]:
+) -> tuple[dict[str, float], dict[str, int]]:
     if not csv_path.exists():
         msg = f"Missing expected metrics file: {csv_path}"
         raise FileNotFoundError(msg)
@@ -425,32 +424,75 @@ def _extract_metric_from_csv(
         msg = f"Metrics file has no rows: {csv_path}"
         raise ValueError(msg)
 
-    if primary_metric_column not in frame.columns:
+    if not metric_columns:
+        msg = "metrics.tracked_columns must define at least one metric column"
+        raise ValueError(msg)
+
+    missing_columns = [column for column in metric_columns if column not in frame.columns]
+    if missing_columns:
         msg = (
-            f"Primary metric column '{primary_metric_column}' not found in {csv_path}. "
-            f"Available columns: {list(frame.columns)}"
-        )
-        raise KeyError(msg)
-    if secondary_metric_column not in frame.columns:
-        msg = (
-            f"Secondary metric column '{secondary_metric_column}' not found in {csv_path}. "
+            f"Tracked metric columns {missing_columns!r} not found in {csv_path}. "
             f"Available columns: {list(frame.columns)}"
         )
         raise KeyError(msg)
 
     epoch_column = frame["epoch"] if "epoch" in frame.columns else pd.Series(frame.index)
-    primary_best_avg, primary_best_epoch = _best_rolling_average_and_epoch(
-        frame[primary_metric_column],
-        epoch_column,
-        rolling_window_epochs,
-    )
-    secondary_best_avg, secondary_best_epoch = _best_rolling_average_and_epoch(
-        frame[secondary_metric_column],
-        epoch_column,
-        rolling_window_epochs,
-    )
+    metric_values: dict[str, float] = {}
+    metric_best_epochs: dict[str, int] = {}
+    for metric_column in metric_columns:
+        best_avg, best_epoch = _best_rolling_average_and_epoch(
+            frame[metric_column],
+            epoch_column,
+            rolling_window_epochs,
+        )
+        metric_values[metric_column] = float(best_avg)
+        metric_best_epochs[metric_column] = int(best_epoch)
 
-    return primary_best_avg, secondary_best_avg, primary_best_epoch, secondary_best_epoch
+    return metric_values, metric_best_epochs
+
+
+def _validate_tracked_metric_columns(metrics_cfg: Mapping[str, object]) -> list[str]:
+    raw_tracked_columns = metrics_cfg.get("tracked_columns")
+    if raw_tracked_columns is None:
+        legacy_columns: list[str] = []
+        primary_metric_column = metrics_cfg.get("primary_column")
+        secondary_metric_column = metrics_cfg.get("secondary_column")
+        if primary_metric_column is not None:
+            legacy_columns.append(str(primary_metric_column))
+        if secondary_metric_column is not None:
+            legacy_columns.append(str(secondary_metric_column))
+        if legacy_columns:
+            LOGGER.warning(
+                "metrics.primary_column and metrics.secondary_column are deprecated; "
+                "please migrate to metrics.tracked_columns"
+            )
+            raw_tracked_columns = legacy_columns
+
+    if not isinstance(raw_tracked_columns, list) or not raw_tracked_columns:
+        msg = "metrics.tracked_columns must be a non-empty list"
+        raise ValueError(msg)
+
+    tracked_columns: list[str] = []
+    seen: set[str] = set()
+    for idx, column in enumerate(raw_tracked_columns, start=1):
+        if not isinstance(column, str):
+            msg = f"metrics.tracked_columns[{idx - 1}] must be a string"
+            raise TypeError(msg)
+        normalized = column.strip()
+        if not normalized:
+            msg = f"metrics.tracked_columns[{idx - 1}] must be a non-empty string"
+            raise ValueError(msg)
+        if normalized in seen:
+            msg = f"metrics.tracked_columns contains duplicate entry: {normalized!r}"
+            raise ValueError(msg)
+        seen.add(normalized)
+        tracked_columns.append(normalized)
+
+    return tracked_columns
+
+
+def _metric_report_key(prefix: str, metric_name: str) -> str:
+    return f"{prefix}/{metric_name}"
 
 
 def _normalize_name(raw: str) -> str:
@@ -525,7 +567,8 @@ def _load_existing_run_config_signature(config_path: Path) -> str | None:
 def _get_cached_completed_dataset_metrics(
     progress_entry: Mapping[str, object] | None,
     config_signature: str,
-) -> tuple[float, float, int, int, float] | None:
+    tracked_metric_columns: list[str],
+) -> tuple[dict[str, float], dict[str, int], float] | None:
     if progress_entry is None:
         return None
     if progress_entry.get("config_signature") != config_signature:
@@ -533,23 +576,44 @@ def _get_cached_completed_dataset_metrics(
     if progress_entry.get("status") != "completed":
         return None
 
-    required_keys = (
-        "primary_metric",
-        "secondary_metric",
-        "primary_best_epoch",
-        "secondary_best_epoch",
-        "training_minutes",
-    )
-    if any(key not in progress_entry for key in required_keys):
+    if "training_minutes" not in progress_entry:
         return None
 
-    return (
-        float(progress_entry["primary_metric"]),
-        float(progress_entry["secondary_metric"]),
-        int(progress_entry["primary_best_epoch"]),
-        int(progress_entry["secondary_best_epoch"]),
-        float(progress_entry["training_minutes"]),
-    )
+    metrics_payload = progress_entry.get("metrics")
+    best_epochs_payload = progress_entry.get("best_epochs")
+    if not isinstance(metrics_payload, Mapping) or not isinstance(best_epochs_payload, Mapping):
+        if len(tracked_metric_columns) != 2:
+            return None
+        legacy_keys_present = all(
+            key in progress_entry
+            for key in (
+                "primary_metric",
+                "secondary_metric",
+                "primary_best_epoch",
+                "secondary_best_epoch",
+            )
+        )
+        if not legacy_keys_present:
+            return None
+        metrics_payload = {
+            tracked_metric_columns[0]: progress_entry["primary_metric"],
+            tracked_metric_columns[1]: progress_entry["secondary_metric"],
+        }
+        best_epochs_payload = {
+            tracked_metric_columns[0]: progress_entry["primary_best_epoch"],
+            tracked_metric_columns[1]: progress_entry["secondary_best_epoch"],
+        }
+
+    metric_values: dict[str, float] = {}
+    metric_best_epochs: dict[str, int] = {}
+    for metric_name in tracked_metric_columns:
+        if metric_name not in metrics_payload or metric_name not in best_epochs_payload:
+            return None
+        metric_values[metric_name] = float(metrics_payload[metric_name])
+        metric_best_epochs[metric_name] = int(best_epochs_payload[metric_name])
+
+    training_minutes = float(progress_entry["training_minutes"])
+    return metric_values, metric_best_epochs, training_minutes
 
 
 def _should_resume_dataset_run(
@@ -574,14 +638,17 @@ def _restore_completed_dataset_metrics(
     progress_entry: Mapping[str, object] | None,
     config_signature: str,
     csv_path: Path,
-    primary_metric_column: str,
-    secondary_metric_column: str,
+    tracked_metric_columns: list[str],
     rolling_window_epochs: int,
     trial_progress: dict[str, Any],
     trial_dir: Path,
     dataset_name: str,
-) -> tuple[float, float, int, int, float] | None:
-    cached_metrics = _get_cached_completed_dataset_metrics(progress_entry, config_signature)
+) -> tuple[dict[str, float], dict[str, int], float] | None:
+    cached_metrics = _get_cached_completed_dataset_metrics(
+        progress_entry,
+        config_signature,
+        tracked_metric_columns,
+    )
     if cached_metrics is not None:
         return cached_metrics
 
@@ -592,15 +659,9 @@ def _restore_completed_dataset_metrics(
     if progress_entry.get("status") != "training_completed":
         return None
 
-    (
-        primary_metric,
-        secondary_metric,
-        primary_best_epoch,
-        secondary_best_epoch,
-    ) = _extract_metric_from_csv(
+    metric_values, metric_best_epochs = _extract_metric_from_csv(
         csv_path,
-        primary_metric_column,
-        secondary_metric_column,
+        tracked_metric_columns,
         rolling_window_epochs,
     )
     training_minutes = float(progress_entry.get("training_minutes", 0.0))
@@ -610,21 +671,13 @@ def _restore_completed_dataset_metrics(
         {
             "config_signature": config_signature,
             "status": "completed",
-            "primary_metric": float(primary_metric),
-            "secondary_metric": float(secondary_metric),
-            "primary_best_epoch": int(primary_best_epoch),
-            "secondary_best_epoch": int(secondary_best_epoch),
+            "metrics": copy.deepcopy(metric_values),
+            "best_epochs": copy.deepcopy(metric_best_epochs),
             "training_minutes": training_minutes,
         },
     )
     _write_trial_progress(trial_dir, trial_progress)
-    return (
-        float(primary_metric),
-        float(secondary_metric),
-        int(primary_best_epoch),
-        int(secondary_best_epoch),
-        training_minutes,
-    )
+    return metric_values, metric_best_epochs, training_minutes
 
 
 def _alphabetical_restore_trial_sort_key(trial: object) -> tuple[str, str]:
@@ -782,18 +835,19 @@ def _run_trial(
     common_overrides = tune_settings.get("common_train_overrides", {})
     failure_metric = float(metrics_cfg.get("failure_metric", 0.0))
 
-    primary_metric_column = str(metrics_cfg.get("primary_column", "metrics/mAP10-95"))
-    secondary_metric_column = str(metrics_cfg.get("secondary_column", "metrics/dice"))
+    tracked_metric_columns = _validate_tracked_metric_columns(metrics_cfg)
     rolling_window_epochs = int(metrics_cfg.get("rolling_window_epochs", 20))
     if rolling_window_epochs <= 0:
         msg = "metrics.rolling_window_epochs must be a positive integer"
         raise ValueError(msg)
     dataset_aggregation = str(metrics_cfg.get("dataset_aggregation", "mean"))
 
-    dataset_primary_metrics: list[float] = []
-    dataset_secondary_metrics: list[float] = []
-    dataset_primary_best_epochs: list[int] = []
-    dataset_secondary_best_epochs: list[int] = []
+    dataset_metrics_by_name: dict[str, list[float]] = {
+        metric_name: [] for metric_name in tracked_metric_columns
+    }
+    dataset_best_epochs_by_name: dict[str, list[int]] = {
+        metric_name: [] for metric_name in tracked_metric_columns
+    }
     report_payload: dict[str, float | int] = {}
 
     for dataset in datasets:
@@ -818,31 +872,20 @@ def _run_trial(
         config_path = dataset_dir / "train_config.yaml"
         config_signature = _compute_run_config_signature(run_config)
         progress_entry = _get_dataset_progress_entry(trial_progress, dataset_name)
-        primary_metric_key = f"dataset_metric/{dataset_name}"
-        secondary_metric_key = f"dataset_metric_secondary/{dataset_name}"
-        primary_epoch_key = f"dataset_best_epoch/{dataset_name}"
-        secondary_epoch_key = f"dataset_best_epoch_secondary/{dataset_name}"
         training_minutes_key = f"dataset_training_minutes/{dataset_name}"
 
         restored_metrics = _restore_completed_dataset_metrics(
             progress_entry,
             config_signature,
             results_csv_path,
-            primary_metric_column,
-            secondary_metric_column,
+            tracked_metric_columns,
             rolling_window_epochs,
             trial_progress,
             trial_dir,
             dataset_name,
         )
         if restored_metrics is not None:
-            (
-                primary_metric,
-                secondary_metric,
-                primary_best_epoch,
-                secondary_best_epoch,
-                training_minutes,
-            ) = restored_metrics
+            metric_values, metric_best_epochs, training_minutes = restored_metrics
             report_payload[f"dataset_failed/{dataset_name}"] = 0
         else:
             run_config["resume"] = _should_resume_dataset_run(
@@ -874,10 +917,13 @@ def _run_trial(
                     trial_id,
                     return_code,
                 )
-                primary_metric = failure_metric
-                secondary_metric = failure_metric
-                primary_best_epoch = -1
-                secondary_best_epoch = -1
+                metric_values = {
+                    metric_name: float(failure_metric)
+                    for metric_name in tracked_metric_columns
+                }
+                metric_best_epochs = {
+                    metric_name: -1 for metric_name in tracked_metric_columns
+                }
                 report_payload[f"dataset_failed/{dataset_name}"] = 1
                 _update_dataset_progress_entry(
                     trial_progress,
@@ -901,15 +947,9 @@ def _run_trial(
                 )
                 _write_trial_progress(trial_dir, trial_progress)
                 try:
-                    (
-                        primary_metric,
-                        secondary_metric,
-                        primary_best_epoch,
-                        secondary_best_epoch,
-                    ) = _extract_metric_from_csv(
+                    metric_values, metric_best_epochs = _extract_metric_from_csv(
                         results_csv_path,
-                        primary_metric_column,
-                        secondary_metric_column,
+                        tracked_metric_columns,
                         rolling_window_epochs,
                     )
                     report_payload[f"dataset_failed/{dataset_name}"] = 0
@@ -919,10 +959,8 @@ def _run_trial(
                         {
                             "config_signature": config_signature,
                             "status": "completed",
-                            "primary_metric": float(primary_metric),
-                            "secondary_metric": float(secondary_metric),
-                            "primary_best_epoch": int(primary_best_epoch),
-                            "secondary_best_epoch": int(secondary_best_epoch),
+                            "metrics": copy.deepcopy(metric_values),
+                            "best_epochs": copy.deepcopy(metric_best_epochs),
                             "training_minutes": float(training_minutes),
                         },
                     )
@@ -933,46 +971,54 @@ def _run_trial(
                         dataset_name,
                         trial_id,
                     )
-                    primary_metric = failure_metric
-                    secondary_metric = failure_metric
-                    primary_best_epoch = -1
-                    secondary_best_epoch = -1
+                    metric_values = {
+                        metric_name: float(failure_metric)
+                        for metric_name in tracked_metric_columns
+                    }
+                    metric_best_epochs = {
+                        metric_name: -1 for metric_name in tracked_metric_columns
+                    }
                     report_payload[f"dataset_failed/{dataset_name}"] = 1
 
-        if math.isnan(primary_metric):
-            primary_metric = failure_metric
-            primary_best_epoch = -1
-            report_payload[f"dataset_failed/{dataset_name}"] = 1
+        for metric_name in tracked_metric_columns:
+            metric_value = float(metric_values[metric_name])
+            best_epoch = int(metric_best_epochs[metric_name])
 
-        if math.isnan(secondary_metric):
-            secondary_metric = failure_metric
-            secondary_best_epoch = -1
-            report_payload[f"dataset_failed/{dataset_name}"] = 1
+            if math.isnan(metric_value):
+                metric_value = failure_metric
+                best_epoch = -1
+                report_payload[f"dataset_failed/{dataset_name}"] = 1
 
-        dataset_primary_metrics.append(float(primary_metric))
-        dataset_secondary_metrics.append(float(secondary_metric))
-        dataset_primary_best_epochs.append(int(primary_best_epoch))
-        dataset_secondary_best_epochs.append(int(secondary_best_epoch))
-        report_payload[primary_metric_key] = float(primary_metric)
-        report_payload[secondary_metric_key] = float(secondary_metric)
-        report_payload[primary_epoch_key] = int(primary_best_epoch)
-        report_payload[secondary_epoch_key] = int(secondary_best_epoch)
+            dataset_metrics_by_name[metric_name].append(metric_value)
+            dataset_best_epochs_by_name[metric_name].append(best_epoch)
+            report_payload[
+                _metric_report_key(f"dataset_metric/{dataset_name}", metric_name)
+            ] = metric_value
+            report_payload[
+                _metric_report_key(f"dataset_best_epoch/{dataset_name}", metric_name)
+            ] = best_epoch
+
         report_payload[training_minutes_key] = float(training_minutes)
 
-    aggregate_primary_metric = _aggregate(dataset_primary_metrics, dataset_aggregation)
-    aggregate_secondary_metric = _aggregate(dataset_secondary_metrics, dataset_aggregation)
+    for metric_name in tracked_metric_columns:
+        metric_values = dataset_metrics_by_name[metric_name]
+        metric_best_epochs = dataset_best_epochs_by_name[metric_name]
+        aggregate_metric_value = _aggregate(metric_values, dataset_aggregation)
 
-    report_payload["dataset_metric_mean"] = float(np.mean(dataset_primary_metrics))
-    report_payload["dataset_metric_std"] = float(np.std(dataset_primary_metrics))
-    report_payload["dataset_metric_aggregate"] = float(aggregate_primary_metric)
-    report_payload["dataset_metric_secondary_mean"] = float(np.mean(dataset_secondary_metrics))
-    report_payload["dataset_metric_secondary_std"] = float(np.std(dataset_secondary_metrics))
-    report_payload["dataset_metric_secondary_aggregate"] = float(aggregate_secondary_metric)
-    report_payload["dataset_best_epoch_mean"] = float(np.mean(dataset_primary_best_epochs))
-    report_payload["dataset_best_epoch_secondary_mean"] = float(
-        np.mean(dataset_secondary_best_epochs)
-    )
-    report_payload["num_datasets"] = len(dataset_primary_metrics)
+        report_payload[_metric_report_key("dataset_metric_mean", metric_name)] = float(
+            np.mean(metric_values)
+        )
+        report_payload[_metric_report_key("dataset_metric_std", metric_name)] = float(
+            np.std(metric_values)
+        )
+        report_payload[_metric_report_key("dataset_metric_aggregate", metric_name)] = float(
+            aggregate_metric_value
+        )
+        report_payload[_metric_report_key("dataset_best_epoch_mean", metric_name)] = float(
+            np.mean(metric_best_epochs)
+        )
+
+    report_payload["num_datasets"] = len(datasets)
 
     tune.report(report_payload)
 
@@ -1062,12 +1108,21 @@ def _load_tune_settings(
     if not isinstance(metrics_cfg, dict):
         msg = "'metrics' must be a mapping"
         raise TypeError(msg)
+    tracked_metric_columns = _validate_tracked_metric_columns(metrics_cfg)
+    metrics_cfg = copy.deepcopy(metrics_cfg)
+    metrics_cfg["tracked_columns"] = tracked_metric_columns
+
+    default_objective_metric = _metric_report_key(
+        "dataset_metric_aggregate",
+        tracked_metric_columns[0],
+    )
 
     tune_settings = {
         "output_root": str(output_root),
         "experiment_name": experiment_name,
         "datasets": _validate_dataset_entries(tune_cfg.get("datasets")),
         "metrics": metrics_cfg,
+        "default_objective_metric": default_objective_metric,
         "training_working_directory": str(
             _resolve_training_working_directory(
                 tune_cfg.get("training_working_directory"),
@@ -1112,7 +1167,9 @@ def main() -> int:
         tune_options.get("use_short_trial_dirnames", os.name == "nt")
     )
 
-    metric_name = str(tune_options.get("metric", "dataset_metric_aggregate"))
+    metric_name = str(
+        tune_options.get("metric", tune_settings["default_objective_metric"])
+    )
     metric_mode = str(tune_options.get("mode", "max"))
 
     trainable = tune.with_parameters(

@@ -7,7 +7,7 @@ experiment_name: learning_hparam_tuning
 # training_working_directory: .
 
 tune:
-  metric: dataset_metric_aggregate
+  metric: dataset_metric_aggregate/metrics/mAP10-95
   mode: max
   num_samples: 100
   max_concurrent_trials: 2
@@ -18,13 +18,17 @@ tune:
     gpu: 1
 
 metrics:
-  # Primary metric used for optimization.
-  # Per training run: take rolling average over `rolling_window_epochs`, then use
-  # the maximum rolling-average value over all valid epoch timestamps.
-  primary_column: metrics/mAP10-95
-  # Secondary metric tracked in parallel with the same rolling-window logic.
-  secondary_column: metrics/dice
-  # Rolling window size used for both primary and secondary metric extraction.
+  # Metric columns tracked from results.csv.
+  # Per training run: for each metric take the rolling average over
+  # `rolling_window_epochs`, then use the maximum rolling-average value over
+  # all valid epoch timestamps.
+  tracked_columns:
+    - metrics/mAP10-95
+    - metrics/dice
+    - metrics/image_label_balanced_accuracy
+    - metrics/image_label_multiclass_roc_auc
+    - metrics/image_label_c_index
+  # Rolling window size used for all tracked metric extraction.
   rolling_window_epochs: 20
   # How to aggregate per-dataset training metrics into the objective reported to Ray Tune.
   dataset_aggregation: mean
