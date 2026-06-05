@@ -1,5 +1,5 @@
 # Data and Output Settings
-data: "D:/datasets/AMOS22/radyolo_new_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/HECKTOR_2026/radyolo_hecktor_2026_128_128_128_zscore_float16" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
 split_file_name: "data_splits.json" # (str) split file name inside the dataset folder
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
@@ -17,20 +17,20 @@ resume: True              # (bool) resume training from last checkpoint
 seed: 0                   # (int) random seed for reproducibility
 
 # Model Parameters
-input_channels: 1 # number of input channels for model
+input_channels: 2 # number of input channels for model
 model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Optional Segmentation Head
 segmentation_output: True            # (bool) add segmentation output to model
 prototype_masks: 8                   # (int) number of prototype masks for segmentation output
-prototype_layer: "full_resolution_v2" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution]
+prototype_layer: "higher_resolution" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution]
 
 # Detection Head Options
 separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits
 include_stride4_output: False  # (bool) if True, add a detection head on stride 4 level (otherwise only on stride levels 8, 16, 32)
 
 # Global Image-Label Head
-enable_image_label_head: False                  # (bool) enable the global image-label head for dataset.yaml image_label_tasks
+enable_image_label_head: True                  # (bool) enable the global image-label head for dataset.yaml image_label_tasks
 image_label_head_feature_maps: ["o10", "o16", "o19", "o22"] # (list[literal]) selectable inputs from [o10, o16, o19, o22]
 image_label_head_projection_channels: 128      # (int) shared projection width for each selected feature map via 1x1x1 convolutions
 image_label_head_mlp_hidden_layers: 1          # (int) number of hidden layers in the shared MLP trunk
@@ -41,12 +41,19 @@ image_label_multiclass_cce_class_weights: {}   # (dict[str, list[float]]) option
 image_label_survival_num_bins: 32              # (int) number of monotone survival thresholds per survival task
 image_label_survival_mtlr_gain: 1.0            # (float) gain for masked multi-task logistic survival loss; ignored when 0
 image_label_survival_cox_gain: 1.0             # (float) gain for Cox partial likelihood on the derived survival risk; ignored when 0
+enable_tabular_image_label_fusion: True       # (bool) fuse tabular inputs into image-wise prediction head using a transformer encoder
+tabular_transformer_d_model: 64                # (int) transformer token width for tabular feature encoding
+tabular_transformer_num_heads: 4               # (int) multi-head attention heads for tabular encoder
+tabular_transformer_num_layers: 2              # (int) transformer encoder depth for tabular inputs
+tabular_transformer_feedforward_channels: 256  # (int) feedforward width inside each tabular transformer block
+tabular_transformer_dropout: 0.1               # (float) dropout applied in tabular transformer encoder
+tabular_feature_mask_augmentation_prob: 0.1    # (float) train-only probability to randomly mask each observed tabular feature for robustness against missingness
 
 # Hyperparameters
 epochs: 1000                      # (int) number of epochs to train for
 patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training
 training_mode: "wholeimage"       # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
-patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
+patch_size: {x: 128, y: 128, z: 128} # input patch size stored in x, y, z (width, height, depth) order
 voxel_size: null                  # optional resampling target in x, y, z: {x: 0.8, y: 0.8, z: 1.5} or null, only used for patchwise training
 normalization: {type: "zscore"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 apply_preprocessing: False        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata

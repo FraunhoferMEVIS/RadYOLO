@@ -37,6 +37,7 @@ from radyolo.data.data import (
     build_dataloader,
     preprocess_batch_images,
 )
+from radyolo.data.augmentations import apply_tabular_mask_augmentation
 from radyolo.models.model import (
     HardcodedModel,
     build_model_from_config,
@@ -783,7 +784,11 @@ class Trainer:
                             self._log_non_finite_input_batch(prepared_batch)
                         if self._distributed_any(skip_due_to_non_finite_input):
                             continue
-                        raw_predictions = model(prepared_batch["img"])
+                        raw_predictions = model(
+                            prepared_batch["img"],
+                            tabular_values=prepared_batch.get("tabular_values"),
+                            tabular_mask=prepared_batch.get("tabular_mask"),
+                        )
                         if isinstance(raw_predictions, torch.Tensor):
                             raise TypeError(raw_predictions)
 
@@ -967,6 +972,21 @@ class Trainer:
                 self.config,
                 self.config.patch_size,
                 placement="gpu",
+            )
+        if "tabular_values" in batch:
+            batch["tabular_values"] = batch["tabular_values"].to(
+                self.device,
+                non_blocking=True,
+            )
+        if "tabular_mask" in batch:
+            batch["tabular_mask"] = batch["tabular_mask"].to(
+                self.device,
+                non_blocking=True,
+            )
+        if self.config.enable_tabular_image_label_fusion:
+            apply_tabular_mask_augmentation(
+                batch,
+                self.config.tabular_feature_mask_augmentation_prob,
             )
         return batch
 

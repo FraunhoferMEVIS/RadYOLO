@@ -117,6 +117,13 @@ class DefaultConfig(BaseModel):
     image_label_survival_num_bins: int = Field(32, ge=1)
     image_label_survival_mtlr_gain: float = Field(1.0, ge=0.0)
     image_label_survival_cox_gain: float = Field(1.0, ge=0.0)
+    enable_tabular_image_label_fusion: bool = False
+    tabular_transformer_d_model: int = Field(64, ge=1)
+    tabular_transformer_num_heads: int = Field(4, ge=1)
+    tabular_transformer_num_layers: int = Field(2, ge=1)
+    tabular_transformer_feedforward_channels: int = Field(256, ge=1)
+    tabular_transformer_dropout: float = Field(0.1, ge=0.0, lt=1.0)
+    tabular_feature_mask_augmentation_prob: float = Field(0.1, ge=0.0, le=1.0)
 
     # Hyperparameters
     epochs: int = 1000  # number of epochs to train for
@@ -408,6 +415,17 @@ class DefaultConfig(BaseModel):
             raise ValueError(msg)
         if self.enable_image_label_head and not self.image_label_head_feature_maps:
             msg = "image_label_head_feature_maps must contain at least one feature map when enabled"
+            raise ValueError(msg)
+        if self.enable_tabular_image_label_fusion and not self.enable_image_label_head:
+            msg = (
+                "enable_tabular_image_label_fusion=True requires enable_image_label_head=True"
+            )
+            raise ValueError(msg)
+        if self.tabular_transformer_d_model % self.tabular_transformer_num_heads != 0:
+            msg = (
+                "tabular_transformer_d_model must be divisible by "
+                "tabular_transformer_num_heads"
+            )
             raise ValueError(msg)
         if not np.isfinite(self.image_label_survival_mtlr_gain):
             msg = "image_label_survival_mtlr_gain must be finite"

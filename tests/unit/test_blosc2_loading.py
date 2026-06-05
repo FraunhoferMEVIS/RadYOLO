@@ -8,6 +8,7 @@ import torch
 from radyolo.config.spatial import PatchSize
 from radyolo.data.data import WholeImageDataset
 from radyolo.data.preprocess_data import preprocess_dataset
+from radyolo.data.tabular import load_case_tabular_inputs
 
 
 def test_dataset_loads_preprocessed_blosc2_images_and_masks(
@@ -61,8 +62,20 @@ def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
     dataset_path = tmp_path / "dataset_with_image_labels"
     shutil.copytree(synthetic_dataset, dataset_path)
     (dataset_path / "labels_image").mkdir()
+    (dataset_path / "inputs_tabular").mkdir()
     (dataset_path / "labels_image" / "case1.json").write_text(
         json.dumps({"tumor_stage": 2, "survival_days": 418.5, "relapse": False}),
+        encoding="utf-8",
+    )
+    (dataset_path / "inputs_tabular" / "case1.json").write_text(
+        json.dumps(
+            {
+                "Age": 73.0,
+                "Gender": 1.0,
+                "Treatment": 1.0,
+                "HPV_Status": None,
+            }
+        ),
         encoding="utf-8",
     )
     (dataset_path / "dataset.yaml").write_text(
@@ -101,6 +114,15 @@ def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
         {"tumor_stage": 2, "survival_days": 418.5, "relapse": False},
     )
     assert (preprocessed_dataset / "labels_image" / "case1.json").exists()
+    assert (preprocessed_dataset / "inputs_tabular" / "case1.json").exists()
+
+    tabular_values, tabular_mask = load_case_tabular_inputs(
+        preprocessed_dataset,
+        "case1",
+        ("Age", "Gender", "Treatment", "HPV_Status"),
+    )
+    assert torch.equal(tabular_mask, torch.tensor([True, True, True, False]))
+    assert torch.allclose(tabular_values, torch.tensor([73.0, 1.0, 1.0, 0.0]))
 
 
 def test_dataset_loads_null_global_image_labels_as_none(

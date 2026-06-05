@@ -145,7 +145,11 @@ class Validator:
             batch: Batch = self.preprocess(raw_batch)
 
             with torch.autocast(self.device.type), torch.no_grad():
-                model_output: ModelOutput = model(batch["img"])
+                model_output: ModelOutput = model(
+                    batch["img"],
+                    tabular_values=batch.get("tabular_values"),
+                    tabular_mask=batch.get("tabular_mask"),
+                )
 
                 if self.training:
                     validation_loss += loss(
@@ -252,6 +256,16 @@ class Validator:
 
         for k in ["batch_idx", "cls", "bboxes"]:
             batch[k] = batch[k].to(self.device)
+        if "tabular_values" in batch:
+            batch["tabular_values"] = batch["tabular_values"].to(
+                self.device,
+                non_blocking=True,
+            )
+        if "tabular_mask" in batch:
+            batch["tabular_mask"] = batch["tabular_mask"].to(
+                self.device,
+                non_blocking=True,
+            )
 
         return batch
 
