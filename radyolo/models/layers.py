@@ -780,7 +780,6 @@ class PrototypeMasksHalfResolution(nn.Module):
         self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
         self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
         self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
-        self.upsample_half = ConvTransposed(prototypes*2, prototypes, 2, 2)
 
         self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
         self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
