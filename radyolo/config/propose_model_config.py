@@ -175,6 +175,16 @@ def _build_estimation_config(  # noqa: PLR0913
     else:
         config_data = {}
 
+    image_label_head_enabled = (
+        bool(enable_image_label_head)
+        if enable_image_label_head is not None
+        else bool(config_data.get("enable_image_label_head", False))
+    )
+    # Tabular fusion is only valid when the image-label head is enabled.
+    tabular_fusion_enabled = image_label_head_enabled and bool(
+        config_data.get("enable_tabular_image_label_fusion", False)
+    )
+
     config_data.update(
         {
             "input_channels": input_channels,
@@ -192,11 +202,8 @@ def _build_estimation_config(  # noqa: PLR0913
             "segmentation_output": segmentation_output,
             "include_stride4_output": include_stride4_output,
             "prototype_masks": prototype_masks,
-            "enable_image_label_head": (
-                bool(enable_image_label_head)
-                if enable_image_label_head is not None
-                else bool(config_data.get("enable_image_label_head", False))
-            ),
+            "enable_image_label_head": image_label_head_enabled,
+            "enable_tabular_image_label_fusion": tabular_fusion_enabled,
             "experiment_name": config_data.get("experiment_name", "memory_estimate"),
         }
     )
@@ -903,6 +910,9 @@ def propose_model_config(
     enable_image_label_head = bool(dataset_yaml.get("image_label_tasks")) and bool(
         reference_config.get("enable_image_label_head", False)
     )
+    enable_tabular_image_label_fusion = enable_image_label_head and bool(
+        reference_config.get("enable_tabular_image_label_fusion", False)
+    )
 
     masks_dir = dataset_path / "masks"
     has_masks = bool(
@@ -970,6 +980,7 @@ def propose_model_config(
             "normalization": runtime_normalization,
             "segmentation_output": has_masks,
             "enable_image_label_head": enable_image_label_head,
+            "enable_tabular_image_label_fusion": enable_tabular_image_label_fusion,
             "experiment_name": (
                 f"{dataset_path.name}_{model_scale}_{patch_size.x}"
                 f"x{patch_size.y}x{patch_size.z}"

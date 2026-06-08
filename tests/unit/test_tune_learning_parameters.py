@@ -134,6 +134,8 @@ def test_load_tune_settings_validates_template_without_dataset_yaml(
     tune_config_path.write_text(
         (
             f"template_config: {template_config_path.as_posix()}\n"
+            "metrics:\n"
+            "  tracked_columns: [metrics/mAP10-95, metrics/dice]\n"
             "search_space:\n"
             "  workers:\n"
             "    type: choice\n"
@@ -212,6 +214,7 @@ def test_should_resume_dataset_run_uses_existing_train_config_for_legacy_runs(tm
 
 def test_get_cached_completed_dataset_metrics_requires_completed_status() -> None:
     config_signature = _compute_run_config_signature({"epochs": 5})
+    tracked_metric_columns = ["metrics/mAP10-95", "metrics/dice"]
 
     cached_metrics = _get_cached_completed_dataset_metrics(
         {
@@ -224,9 +227,14 @@ def test_get_cached_completed_dataset_metrics_requires_completed_status() -> Non
             "training_minutes": 12.5,
         },
         config_signature,
+        tracked_metric_columns,
     )
 
-    assert cached_metrics == (0.8, 0.7, 8, 7, 12.5)
+    assert cached_metrics == (
+        {"metrics/mAP10-95": 0.8, "metrics/dice": 0.7},
+        {"metrics/mAP10-95": 8, "metrics/dice": 7},
+        12.5,
+    )
 
 
 def test_restore_completed_dataset_metrics_finalizes_training_completed_entry(
@@ -248,21 +256,29 @@ def test_restore_completed_dataset_metrics_finalizes_training_completed_entry(
 
     monkeypatch.setattr(
         "hyperparameter_tuning.tune_learning_parameters._extract_metric_from_csv",
-        lambda *args, **kwargs: (0.81, 0.72, 11, 10),
+        lambda *args, **kwargs: (
+            {"metrics/mAP10-95": 0.81, "metrics/dice": 0.72},
+            {"metrics/mAP10-95": 11, "metrics/dice": 10},
+        ),
     )
 
     metrics = _restore_completed_dataset_metrics(
         trial_progress["datasets"]["dataset_a"],
         config_signature,
         csv_path,
-        "metrics/mAP10-95",
-        "metrics/dice",
+        ["metrics/mAP10-95", "metrics/dice"],
         5,
         trial_progress,
         tmp_path,
         "dataset_a",
     )
 
-    assert metrics == (0.81, 0.72, 11, 10, 9.75)
+    assert metrics == (
+        {"metrics/mAP10-95": 0.81, "metrics/dice": 0.72},
+        {"metrics/mAP10-95": 11, "metrics/dice": 10},
+        9.75,
+    )
     assert trial_progress["datasets"]["dataset_a"]["status"] == "completed"
-    assert trial_progress["datasets"]["dataset_a"]["primary_metric"] == pytest.approx(0.81)
+    stored_metrics = trial_progress["datasets"]["dataset_a"]["metrics"]
+    assert stored_metrics["metrics/mAP10-95"] == pytest.approx(0.81)
+    assert stored_metrics["metrics/dice"] == pytest.approx(0.72)

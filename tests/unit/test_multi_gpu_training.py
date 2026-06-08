@@ -610,7 +610,13 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
             super().__init__()
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
 
-        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
+        def forward(
+            self,
+            _img: torch.Tensor,
+            tabular_values: torch.Tensor | None = None,
+            tabular_mask: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor]:
+            del tabular_values, tabular_mask
             return (self.weight.unsqueeze(0),)
 
     class RecordingEMA:
@@ -723,7 +729,13 @@ def test_trainer_skips_non_finite_loss_batch(minimal_train_config, monkeypatch) 
             super().__init__()
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
 
-        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
+        def forward(
+            self,
+            _img: torch.Tensor,
+            tabular_values: torch.Tensor | None = None,
+            tabular_mask: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor]:
+            del tabular_values, tabular_mask
             return (self.weight.unsqueeze(0),)
 
     class RecordingEMA:
@@ -839,7 +851,13 @@ def test_trainer_skips_non_finite_input_batch(
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
             self.forward_calls = 0
 
-        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
+        def forward(
+            self,
+            _img: torch.Tensor,
+            tabular_values: torch.Tensor | None = None,
+            tabular_mask: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor]:
+            del tabular_values, tabular_mask
             self.forward_calls += 1
             return (self.weight.unsqueeze(0),)
 
@@ -966,7 +984,13 @@ def test_distributed_non_finite_loss_uses_zero_backward_surrogate(
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
             self.mask_weight = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32))
 
-        def forward(self, _img: torch.Tensor) -> ModelOutput:
+        def forward(
+            self,
+            _img: torch.Tensor,
+            tabular_values: torch.Tensor | None = None,
+            tabular_mask: torch.Tensor | None = None,
+        ) -> ModelOutput:
+            del tabular_values, tabular_mask
             raw_prediction = self.weight.unsqueeze(0)
             mask_coefficients = self.mask_weight.view(1, 1, 1)
             prototype_masks = self.mask_weight.view(1, 1, 1, 1, 1)
