@@ -31,6 +31,7 @@ from radyolo.models.layers import (
     PrototypeMasksFullResolution,
     PrototypeMasksFullResolutionV2,
     PrototypeMasksHalfResolution,
+    PrototypeMasksHalfResolutionV2,
     PrototypeMasksHighResolution,
 )
 from radyolo.utils.util import intersect_dicts, make_divisible, select_device, unwrap_model
@@ -557,6 +558,14 @@ class HardcodedModel(nn.Module):
                     output_channels[19],
                     num_prototype_masks,
                 )
+            elif self.prototype_layer_mode == "half_resolution_v2":
+                self.prototype_layer = PrototypeMasksHalfResolutionV2(
+                    output_channels[0],
+                    output_channels[2],
+                    output_channels[16],
+                    output_channels[19],
+                    num_prototype_masks,
+                )
             else:
                 self.prototype_layer = PrototypeMasksHighResolution(
                     output_channels[0], output_channels[2], output_channels[16], num_prototype_masks
@@ -636,7 +645,7 @@ class HardcodedModel(nn.Module):
         if self.enable_output_masks:
             if self.prototype_layer_mode in {"full_resolution", "full_resolution_v2"}:
                 output.prototype_masks = self.prototype_layer(x_input, o0, o2, o16, o19)
-            elif self.prototype_layer_mode == "half_resolution":
+            elif self.prototype_layer_mode in {"half_resolution", "half_resolution_v2"}:
                 output.prototype_masks = self.prototype_layer(o0, o2, o16, o19)
             else:
                 output.prototype_masks = self.prototype_layer(o0, o2, o16)

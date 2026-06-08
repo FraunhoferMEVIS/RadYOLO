@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 DEPRECATED_CONFIG_KEYS = {"deterministic", "num_classes", "nms_time_limit", "verbose"}
-PrototypeLayer = Literal["higher_resolution", "full_resolution", "full_resolution_v2", "half_resolution"]
+PrototypeLayer = Literal["higher_resolution", "full_resolution", "full_resolution_v2", "half_resolution", "half_resolution_v2"]
 ImageLabelHeadFeature = Literal["o10", "o16", "o19", "o22"]
 
 

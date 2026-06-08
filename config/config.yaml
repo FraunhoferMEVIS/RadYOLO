@@ -23,7 +23,7 @@ model_scale: s    # allowed values: (n, s, m, l, x)
 # Optional Segmentation Head
 segmentation_output: True            # (bool) add segmentation output to model
 prototype_masks: 8                   # (int) number of prototype masks for segmentation output
-prototype_layer: "higher_resolution" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution]
+prototype_layer: "half_resolution_v2" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution, half_resolution_v2]
 
 # Detection Head Options
 separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits
