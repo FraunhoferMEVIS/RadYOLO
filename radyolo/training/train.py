@@ -771,7 +771,7 @@ class Trainer:
                             all_gpu_steps_start - previous_gpu_steps_end
                         )
                     # Forward
-                    with torch.autocast(self.device.type):
+                    with torch.autocast(device_type=self.device.type, enabled=self.config.amp):
                         prepared_batch = self._prepare_training_batch(
                             batch,
                             run_gpu_augmentations,
