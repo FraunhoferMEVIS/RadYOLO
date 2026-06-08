@@ -109,10 +109,10 @@ validation_plot_difference_channels: [2, 0] # (list[int]) channels used for diff
 confidence_threshold_plotting: 0.1          # (float) object confidence threshold used when rendering validation plots
 
 # Zoom Augmentation
-max_zoom: 1.4
-min_zoom: 0.7
+max_zoom: 1.5
+min_zoom: 0.65
 out_zoom_padding: "constant"
-prob_zoom: 0.4
+prob_zoom: 0.5
 zoom_uniform: false  # if false, enable anisotropic per-axis zoom factors
 zoom_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
@@ -138,28 +138,28 @@ cutout_params:   # Cutout params (size_fraction, repeats)
 # Intensity Augmentation Parameters
 do_batchgenerators_intensity_augmentation: True
 do_intensity_augmentations_per_channel: False
-intensity_noise_prob: 0.1
+intensity_noise_prob: 0.2
 intensity_noise_variance: [0.0, 0.1]
 intensity_noise_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 intensity_blur_prob: 0.2
 intensity_blur_sigma: [0.5, 1.0]
 intensity_blur_augmentation_device: "gpu"  # set to "cpu" or "gpu"
-intensity_mult_brightness_prob: 0.15
+intensity_mult_brightness_prob: 0.2
 intensity_mult_brightness_range: [0.75, 1.25]
 intensity_mult_brightness_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 intensity_add_brightness_prob: 0.15
 intensity_add_brightness_mu: 0.0
-intensity_add_brightness_sigma: 0.4
+intensity_add_brightness_sigma: 0.3
 intensity_add_brightness_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 intensity_contrast_prob: 0.15
 intensity_contrast_range: [0.75, 1.25]
 intensity_contrast_augmentation_device: "gpu"  # set to "cpu" or "gpu"
-intensity_lowres_prob: 0.25
+intensity_lowres_prob: 0.20
 intensity_lowres_scale: [0.5, 1.0]
 intensity_lowres_augmentation_device: "gpu"  # set to "cpu" or "gpu"
-intensity_gamma_prob: 0.4
+intensity_gamma_prob: 0.3
 intensity_gamma_range: [0.7, 1.5]
-intensity_gamma_p_invert: 0.25
+intensity_gamma_p_invert: 0.1
 intensity_gamma_p_retain_stats: 1.0
 intensity_gamma_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
@@ -167,7 +167,7 @@ intensity_gamma_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 gin_layers: 4
 gin_channels: 2
 gin_prob_kernel_size_one: 0.8
-gin_prob: 0.3
+gin_prob: 0.0
 gin_augmentation_device: "gpu"  # set to "cpu" or "gpu"
 
 # Channel Dropout Augmentation (drop at most one channel)
