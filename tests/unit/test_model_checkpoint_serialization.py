@@ -134,6 +134,8 @@ def test_save_model_copies_best_validation_artifacts(
 
     validation_summary = trainer.save_dir / "validation_summary.png"
     validation_summary.write_bytes(b"summary")
+    validation_image_labels = trainer.save_dir / "validation_image_labels.png"
+    validation_image_labels.write_bytes(b"image-label-summary")
     validation_samples = trainer.save_dir / "validation_samples"
     validation_samples.mkdir(exist_ok=True)
     (validation_samples / "sample.txt").write_text("best sample", encoding="utf-8")
@@ -171,6 +173,7 @@ def test_save_model_copies_best_validation_artifacts(
 
     assert saved_paths == [[trainer.last_model_path, trainer.best_model_path]]
     assert (trainer.save_dir / "validation_summary_best.png").read_bytes() == b"summary"
+    assert (trainer.save_dir / "validation_image_labels_best.png").read_bytes() == b"image-label-summary"
     assert (trainer.save_dir / "validation_samples_best" / "sample.txt").read_text(
         encoding="utf-8"
     ) == "best sample"

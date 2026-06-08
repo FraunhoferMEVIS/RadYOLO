@@ -29,6 +29,7 @@ from radyolo.config.config import (
     load_model_checkpoint,
     save_model_checkpoint,
 )
+from radyolo.data.augmentations import apply_tabular_mask_augmentation
 from radyolo.data.data import (
     BackgroundUndersamplingSampler,
     PatchWiseDataset,
@@ -37,7 +38,6 @@ from radyolo.data.data import (
     build_dataloader,
     preprocess_batch_images,
 )
-from radyolo.data.augmentations import apply_tabular_mask_augmentation
 from radyolo.models.model import (
     HardcodedModel,
     build_model_from_config,
@@ -1196,6 +1196,13 @@ class Trainer:
         validation_summary = self.save_dir / "validation_summary.png"
         if validation_summary.exists():
             shutil.copy2(validation_summary, self.save_dir / "validation_summary_best.png")
+
+        validation_image_labels = self.save_dir / "validation_image_labels.png"
+        if validation_image_labels.exists():
+            shutil.copy2(
+                validation_image_labels,
+                self.save_dir / "validation_image_labels_best.png",
+            )
 
         validation_samples = self.save_dir / "validation_samples"
         validation_samples_best = self.save_dir / "validation_samples_best"

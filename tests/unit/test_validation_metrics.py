@@ -320,6 +320,65 @@ def test_validator_print_results_includes_image_label_metrics_in_main_summary(
     assert "Image labels " not in caplog.text
 
 
+def test_validator_print_results_saves_image_label_validation_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": True,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.image_label_task_specs = {
+        "stage": ImageLabelTaskSpec(
+            type="multiclass",
+            classes={0: "I", 1: "II", 2: "III"},
+        ),
+        "rfs": ImageLabelTaskSpec(
+            type="survival",
+            masking="relapse",
+            survival_bin_thresholds=(0.0, 1.0, 2.0),
+        ),
+    }
+    validator.init_metrics()
+    validator.seen = 3
+    validator.nt_per_class = np.array([3], dtype=np.int64)
+    validator.nt_per_image = np.array([3], dtype=np.int64)
+    validator.image_label_multiclass_targets["stage"] = [np.array([0, 1, 2], dtype=np.int64)]
+    validator.image_label_multiclass_logits["stage"] = [
+        np.array(
+            [
+                [10.0, 0.0, 0.0],
+                [0.0, 10.0, 0.0],
+                [0.0, 0.0, 10.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+    validator.image_label_survival_times["rfs"] = [np.array([1.0, 2.0, 3.0], dtype=np.float64)]
+    validator.image_label_survival_events["rfs"] = [np.array([True, True, False], dtype=np.bool_)]
+    validator.image_label_survival_logits["rfs"] = [
+        np.array(
+            [
+                [-6.0, -6.0, -6.0],
+                [0.0, 0.0, 0.0],
+                [6.0, 6.0, 6.0],
+            ],
+            dtype=np.float64,
+        )
+    ]
+
+    monkeypatch.setattr(validator.metrics, "plot_summary", lambda **kwargs: None)
+
+    validator.print_results()
+
+    assert (tmp_path / "validation_image_labels.png").exists()
+
+
 def test_metric_update_accepts_named_arguments() -> None:
     metric = Metric()
     metric.update(

@@ -23,7 +23,10 @@ from radyolo.validation.metrics import (
     ConfusionMatrix,
     DetMetrics,
 )
-from radyolo.validation.plotting import plot_validation_case
+from radyolo.validation.plotting import (
+    plot_image_label_validation_summary,
+    plot_validation_case,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -926,6 +929,15 @@ class Validator:
                     gt_cls=gt_cls,
                 )
             self.metrics.plot_summary(confusion_matrix=f1_confusion_matrix)
+            plot_image_label_validation_summary(
+                save_dir=self.save_dir,
+                task_specs=self.image_label_task_specs,
+                multiclass_logits=self.image_label_multiclass_logits,
+                multiclass_targets=self.image_label_multiclass_targets,
+                survival_logits=self.image_label_survival_logits,
+                survival_times=self.image_label_survival_times,
+                survival_events=self.image_label_survival_events,
+            )
 
     def plot_validation_cases(self, batch: Batch, preds: list[torch.Tensor]) -> None:
         """Plot one 2x3 comparison figure per validation case."""

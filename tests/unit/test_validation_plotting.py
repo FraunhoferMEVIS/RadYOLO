@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 import torch
 from matplotlib.figure import Figure
 
 from radyolo.validation import plotting
+from radyolo.data.image_labels import ImageLabelTaskSpec
 from radyolo.validation.plotting import plot_validation_case
 
 
@@ -208,3 +210,109 @@ def test_plot_results_uses_shared_palette_for_series(tmp_path: Path, monkeypatch
     loss_curves_figure = captured_figures[0]
     expected_color = plotting.palette_mpl(0)
     assert loss_curves_figure.axes[0].lines[0].get_color() == expected_color
+
+
+def test_plot_image_label_validation_summary_saves_combined_artifact(tmp_path: Path) -> None:
+    plotting.plot_image_label_validation_summary(
+        save_dir=tmp_path,
+        task_specs={
+            "stage": ImageLabelTaskSpec(
+                type="multiclass",
+                classes={0: "I", 1: "II", 2: "III"},
+            ),
+            "rfs": ImageLabelTaskSpec(
+                type="survival",
+                masking="relapse",
+                unit="years",
+                survival_bin_thresholds=(0.0, 1.0, 2.0),
+            ),
+        },
+        multiclass_logits={
+            "stage": [
+                np.array(
+                    [
+                        [10.0, 0.0, 0.0],
+                        [0.0, 10.0, 0.0],
+                        [0.0, 0.0, 10.0],
+                    ],
+                    dtype=np.float64,
+                )
+            ]
+        },
+        multiclass_targets={"stage": [np.array([0, 1, 2], dtype=np.int64)]},
+        survival_logits={
+            "rfs": [
+                np.array(
+                    [
+                        [-6.0, -6.0, -6.0],
+                        [0.0, 0.0, 0.0],
+                        [6.0, 6.0, 6.0],
+                    ],
+                    dtype=np.float64,
+                )
+            ]
+        },
+        survival_times={"rfs": [np.array([1.0, 2.0, 3.0], dtype=np.float64)]},
+        survival_events={"rfs": [np.array([True, True, False], dtype=np.bool_)]},
+    )
+
+    output_path = tmp_path / "validation_image_labels.png"
+    assert output_path.exists()
+    assert output_path.stat().st_size > 0
+
+
+def test_image_label_confusion_matrix_uses_predicted_rows_and_reference_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_matrices: list[np.ndarray] = []
+
+    class _DummyHeatmap:
+        def set_facecolor(self, _color: object) -> None:
+            return None
+
+    def _capture_heatmap(matrix: np.ndarray, *args: object, **kwargs: object) -> _DummyHeatmap:
+        captured_matrices.append(np.array(matrix, copy=True))
+        return _DummyHeatmap()
+
+    monkeypatch.setattr(plotting.sns, "heatmap", _capture_heatmap)
+
+    plotting.plot_image_label_validation_summary(
+        save_dir=tmp_path,
+        task_specs={
+            "stage": ImageLabelTaskSpec(
+                type="multiclass",
+                classes={0: "A", 1: "B", 2: "C"},
+            )
+        },
+        multiclass_logits={
+            "stage": [
+                np.array(
+                    [
+                        [9.0, 1.0, 0.0],  # true 0 -> pred 0
+                        [8.0, 1.0, 0.0],  # true 1 -> pred 0
+                        [0.0, 9.0, 1.0],  # true 1 -> pred 1
+                        [0.0, 8.0, 1.0],  # true 2 -> pred 1
+                    ],
+                    dtype=np.float64,
+                )
+            ]
+        },
+        multiclass_targets={"stage": [np.array([0, 1, 1, 2], dtype=np.int64)]},
+        survival_logits={},
+        survival_times={},
+        survival_events={},
+    )
+
+    # First heatmap is normalized confusion matrix.
+    normalized_matrix = captured_matrices[0]
+    # With rows=predicted, cols=reference and column normalization:
+    # ref 0 -> pred0:1.0 ; ref 1 -> pred0:0.5,pred1:0.5 ; ref2 -> pred1:1.0
+    expected = np.array(
+        [
+            [1.0, 0.5, np.nan],
+            [np.nan, 0.5, 1.0],
+            [np.nan, np.nan, np.nan],
+        ]
+    )
+    assert np.nan_to_num(normalized_matrix) == pytest.approx(np.nan_to_num(expected))

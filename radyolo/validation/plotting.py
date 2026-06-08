@@ -18,11 +18,16 @@ import torch
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageDraw, ImageFont
+import seaborn as sns
+from sklearn.metrics import confusion_matrix as sk_confusion_matrix
+from sklearn.metrics import roc_auc_score, roc_curve
 
 from radyolo.utils import ops
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from radyolo.data.image_labels import ImageLabelTaskSpec
 
 plt.switch_backend("Agg")
 
@@ -78,6 +83,7 @@ BACKGROUND_CURVE_COLOR = "#a6bbc8"
 OPERATING_POINT_COLOR = "#f58220"
 BEST_POINT_COLOR = "#179c7d"
 CONFUSION_MATRIX_BASE_COLOR = "#005b7f"
+IMAGE_LABEL_SUMMARY_FNAME = "validation_image_labels.png"
 
 
 def _hex_to_rgb(color_hex: str) -> tuple[int, int, int]:
@@ -911,6 +917,346 @@ def _plot_results_grid(
     except OSError as e:
         LOGGER.warning("Could not save plot %s: %s", save_path, e)
     plt.close(fig)
+
+
+def _concat_or_empty(
+    arrays: list[npt.NDArray],
+    *,
+    dtype: object,
+    shape: tuple[int, ...],
+) -> npt.NDArray:
+    if not arrays:
+        return np.zeros(shape, dtype=dtype)
+    return np.concatenate(arrays, axis=0)
+
+
+def _softmax(logits: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    shifted_logits = logits - np.max(logits, axis=1, keepdims=True)
+    exponentials = np.exp(shifted_logits)
+    return exponentials / exponentials.sum(axis=1, keepdims=True)
+
+
+def _survival_bin_widths(thresholds: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    if thresholds.size == 1:
+        return np.ones_like(thresholds)
+    trailing_width = thresholds[-1] - thresholds[-2]
+    if trailing_width <= 0:
+        trailing_width = 1.0
+    return np.diff(thresholds, append=thresholds[-1] + trailing_width)
+
+
+def _plot_confusion_matrix_axis(
+    ax: plt.Axes,
+    matrix: npt.NDArray[np.float64],
+    *,
+    class_names: list[str],
+    normalize: bool,
+    title: str,
+) -> None:
+    display_matrix = matrix.astype(np.float64, copy=True)
+    if normalize:
+        column_sums = display_matrix.sum(axis=0, keepdims=True)
+        display_matrix = np.divide(
+            display_matrix,
+            np.where(column_sums == 0.0, 1.0, column_sums),
+            out=np.zeros_like(display_matrix),
+            where=column_sums != 0.0,
+        )
+    display_matrix[display_matrix < 0.005] = np.nan
+    sns.heatmap(
+        display_matrix,
+        ax=ax,
+        annot=True,
+        fmt=".2f" if normalize else ".0f",
+        cmap=confusion_matrix_cmap(),
+        square=True,
+        vmin=0.0,
+        xticklabels=class_names,
+        yticklabels=class_names,
+    ).set_facecolor((1, 1, 1))
+    ax.set_xlabel("Reference")
+    ax.set_ylabel("Predicted")
+    ax.set_title(title)
+
+
+def _plot_multiclass_roc_axis(
+    ax: plt.Axes,
+    probabilities: npt.NDArray[np.float64],
+    targets: npt.NDArray[np.int64],
+    *,
+    class_names: list[str],
+    title_prefix: str,
+) -> None:
+    if probabilities.size == 0 or targets.size == 0:
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title(f"{title_prefix} ROC Curve")
+        ax.text(0.5, 0.5, "No ROC data", ha="center", va="center", transform=ax.transAxes)
+        return
+
+    num_classes = probabilities.shape[1]
+    one_hot_targets = np.eye(num_classes, dtype=np.int64)[targets]
+    auc_values: list[float] = []
+    for class_index, class_name in enumerate(class_names):
+        class_targets = one_hot_targets[:, class_index]
+        if class_targets.min() == class_targets.max():
+            continue
+        fpr, tpr, _ = roc_curve(class_targets, probabilities[:, class_index])
+        class_auc = float(roc_auc_score(class_targets, probabilities[:, class_index]))
+        auc_values.append(class_auc)
+        ax.plot(
+            fpr,
+            tpr,
+            linewidth=1.5,
+            label=f"{class_name} {class_auc:.3f}",
+            color=palette_mpl(class_index),
+        )
+
+    if not auc_values:
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title(f"{title_prefix} ROC Curve")
+        ax.text(0.5, 0.5, "Undefined ROC", ha="center", va="center", transform=ax.transAxes)
+        return
+
+    mean_fpr = np.linspace(0.0, 1.0, 200)
+    interpolated_tprs: list[npt.NDArray[np.float64]] = []
+    for class_index in range(num_classes):
+        class_targets = one_hot_targets[:, class_index]
+        if class_targets.min() == class_targets.max():
+            continue
+        fpr, tpr, _ = roc_curve(class_targets, probabilities[:, class_index])
+        interpolated_tprs.append(np.interp(mean_fpr, fpr, tpr))
+    if interpolated_tprs:
+        mean_tpr = np.mean(interpolated_tprs, axis=0)
+        mean_auc = float(np.mean(auc_values))
+        ax.plot(
+            mean_fpr,
+            mean_tpr,
+            linewidth=3,
+            color=named_plot_color("mean"),
+            label=f"macro avg {mean_auc:.3f}",
+        )
+    ax.plot([0, 1], [0, 1], linestyle="--", color=named_plot_color("background"), linewidth=1)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.grid(True, axis="both", alpha=0.2, linewidth=0.6)
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.set_title(f"{title_prefix} ROC Curve")
+
+
+def _plot_survival_axis(
+    ax: plt.Axes,
+    logits: npt.NDArray[np.float64],
+    survival_times: npt.NDArray[np.float64],
+    event_indicators: npt.NDArray[np.bool_],
+    thresholds: npt.NDArray[np.float64],
+    *,
+    title_prefix: str,
+    unit: str | None,
+) -> None:
+    if logits.size == 0 or survival_times.size == 0 or event_indicators.size == 0:
+        ax.set_title(f"{title_prefix} Survival Metric")
+        ax.text(0.5, 0.5, "No survival metric data", ha="center", va="center", transform=ax.transAxes)
+        ax.set_xlabel(unit or "Time")
+        ax.set_ylabel("Probability")
+        ax.set_ylim(0, 1)
+        return
+
+    probabilities = 1.0 / (1.0 + np.exp(-logits))
+    all_mean = probabilities.mean(axis=0)
+    event_mask = event_indicators.astype(bool)
+    censored_mask = np.logical_not(event_mask)
+    empirical = np.mean(survival_times[:, None] >= thresholds[None, :], axis=0)
+
+    ax.plot(
+        thresholds,
+        all_mean,
+        linewidth=3,
+        color=named_plot_color("mean"),
+        label="Predicted mean",
+    )
+    ax.plot(
+        thresholds,
+        empirical,
+        linewidth=2,
+        linestyle="--",
+        color=named_plot_color("operating"),
+        label="Observed fraction",
+    )
+    if event_mask.any():
+        ax.plot(
+            thresholds,
+            probabilities[event_mask].mean(axis=0),
+            linewidth=1.5,
+            color=palette_mpl(0),
+            alpha=0.8,
+            label="Events mean",
+        )
+    if censored_mask.any():
+        ax.plot(
+            thresholds,
+            probabilities[censored_mask].mean(axis=0),
+            linewidth=1.5,
+            color=palette_mpl(1),
+            alpha=0.8,
+            label="Censored mean",
+        )
+
+    risk_scores = -(probabilities * _survival_bin_widths(thresholds)).sum(axis=1)
+    try:
+        from sksurv.metrics import concordance_index_censored
+
+        c_index = float(concordance_index_censored(event_indicators, survival_times, risk_scores)[0])
+    except Exception:
+        c_index = float("nan")
+
+    x_label = "Time"
+    if unit:
+        x_label = f"Time ({unit})"
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Survival probability")
+    ax.set_ylim(0, 1)
+    ax.grid(True, axis="both", alpha=0.2, linewidth=0.6)
+    ax.legend(loc="best", fontsize=8, framealpha=0.9)
+    ax.set_title(f"{title_prefix} Survival Metric (c-index {c_index:.3f})")
+
+
+def plot_image_label_validation_summary(
+    *,
+    save_dir: Path,
+    task_specs: dict[str, "ImageLabelTaskSpec"],
+    multiclass_logits: dict[str, list[npt.NDArray[np.float64]]],
+    multiclass_targets: dict[str, list[npt.NDArray[np.int64]]],
+    survival_logits: dict[str, list[npt.NDArray[np.float64]]],
+    survival_times: dict[str, list[npt.NDArray[np.float64]]],
+    survival_events: dict[str, list[npt.NDArray[np.bool_]]],
+) -> None:
+    """Save a combined validation figure for image-label metrics."""
+    multiclass_tasks = [
+        (task_name, task_spec)
+        for task_name, task_spec in task_specs.items()
+        if task_spec.type == "multiclass"
+    ]
+    survival_tasks = [
+        (task_name, task_spec)
+        for task_name, task_spec in task_specs.items()
+        if task_spec.type == "survival"
+    ]
+    if not multiclass_tasks and not survival_tasks:
+        return
+
+    row_count = len(multiclass_tasks) + len(survival_tasks)
+    figure = plt.figure(figsize=(18, max(4.8 * row_count, 4.8)), constrained_layout=True)
+    outer_grid = figure.add_gridspec(row_count, 3, hspace=0.06, wspace=0.06)
+
+    current_row = 0
+    for task_name, task_spec in multiclass_tasks:
+        logits_batches = multiclass_logits.get(task_name, [])
+        target_batches = multiclass_targets.get(task_name, [])
+        class_ids = sorted(task_spec.classes or {})
+        class_names = (
+            [task_spec.classes[class_id] for class_id in class_ids]
+            if task_spec.classes
+            else [str(class_id) for class_id in class_ids]
+        )
+
+        ax_norm = figure.add_subplot(outer_grid[current_row, 0])
+        ax_raw = figure.add_subplot(outer_grid[current_row, 1])
+        ax_roc = figure.add_subplot(outer_grid[current_row, 2])
+
+        if logits_batches and target_batches:
+            logits = _concat_or_empty(logits_batches, dtype=np.float64, shape=(0, len(class_ids)))
+            targets = _concat_or_empty(target_batches, dtype=np.int64, shape=(0,))
+            probabilities = _softmax(logits)
+            predictions = probabilities.argmax(axis=1)
+            # sklearn returns rows=true(reference), cols=predicted; transpose to keep
+            # this project's confusion-matrix convention rows=predicted, cols=reference.
+            raw_matrix = sk_confusion_matrix(targets, predictions, labels=class_ids).T
+            _plot_confusion_matrix_axis(
+                ax_norm,
+                raw_matrix,
+                class_names=class_names,
+                normalize=True,
+                title=f"{task_name} Confusion Matrix (Normalized)",
+            )
+            _plot_confusion_matrix_axis(
+                ax_raw,
+                raw_matrix,
+                class_names=class_names,
+                normalize=False,
+                title=f"{task_name} Confusion Matrix",
+            )
+            _plot_multiclass_roc_axis(
+                ax_roc,
+                probabilities,
+                targets,
+                class_names=class_names,
+                title_prefix=task_name,
+            )
+        else:
+            for axis, title in (
+                (ax_norm, f"{task_name} Confusion Matrix (Normalized)"),
+                (ax_raw, f"{task_name} Confusion Matrix"),
+                (ax_roc, f"{task_name} ROC Curve"),
+            ):
+                axis.set_title(title)
+                axis.text(
+                    0.5,
+                    0.5,
+                    "No image-label data",
+                    ha="center",
+                    va="center",
+                    transform=axis.transAxes,
+                )
+                axis.set_xticks([])
+                axis.set_yticks([])
+
+        current_row += 1
+
+    for task_name, task_spec in survival_tasks:
+        logits_batches = survival_logits.get(task_name, [])
+        time_batches = survival_times.get(task_name, [])
+        event_batches = survival_events.get(task_name, [])
+        ax_survival = figure.add_subplot(outer_grid[current_row, :])
+
+        if logits_batches and time_batches and event_batches:
+            thresholds = np.asarray(task_spec.survival_bin_thresholds or (), dtype=np.float64)
+            logits = _concat_or_empty(logits_batches, dtype=np.float64, shape=(0, thresholds.size))
+            times = _concat_or_empty(time_batches, dtype=np.float64, shape=(0,))
+            events = _concat_or_empty(event_batches, dtype=np.bool_, shape=(0,))
+            _plot_survival_axis(
+                ax_survival,
+                logits,
+                times,
+                events,
+                thresholds,
+                title_prefix=task_name,
+                unit=task_spec.unit,
+            )
+        else:
+            ax_survival.set_title(f"{task_name} Survival Metric")
+            ax_survival.text(
+                0.5,
+                0.5,
+                "No image-label data",
+                ha="center",
+                va="center",
+                transform=ax_survival.transAxes,
+            )
+            ax_survival.set_xticks([])
+            ax_survival.set_yticks([])
+        current_row += 1
+
+    output_path = save_dir / IMAGE_LABEL_SUMMARY_FNAME
+    figure.savefig(output_path, dpi=250)
+    plt.close(figure)
 
 
 def output_to_target(
