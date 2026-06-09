@@ -885,16 +885,21 @@ class Trainer:
                 metrics: dict[str, float] = {}
                 fitness = 0.0
                 if validator is not None and (self.config.val or final_epoch or stop):
+                    validation_start = time.perf_counter()
                     metrics, fitness, best_fitness = self.validate(
                         validator=validator,
                         ema=ema,
                         best_fitness=best_fitness,
+                    )
+                    timing_values["timing/validation_s"] = (
+                        time.perf_counter() - validation_start
                     )
 
                 self.save_metrics(
                     metrics={
                         **(self.label_loss_items(tloss) if tloss is not None else {}),
                         **metrics,
+                        "train/peak_memory_gb": float(self.epoch_peak_memory_gb),
                         **timing_values,
                     },
                     train_time_start=train_time_start,
@@ -946,6 +951,7 @@ class Trainer:
         keys = (
             "timing/gpu_steps_total_s",
             "timing/post_gpu_to_next_gpu_steps_s",
+            "timing/validation_s",
         )
         return dict.fromkeys(keys, 0.0)
 
