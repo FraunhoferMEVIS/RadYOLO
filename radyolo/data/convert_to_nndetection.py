@@ -20,6 +20,8 @@ import yaml
 from nibabel.filebasedimages import ImageFileError
 from tqdm.auto import tqdm
 
+from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -63,14 +65,18 @@ def _load_dataset_names(dataset_yaml: Path) -> dict[int, str] | None:
     return None
 
 
-def _read_splits(dataset_dir: Path, fold: int) -> SplitSets:
-    splits_path = dataset_dir / "data_splits.json"
+def _read_splits(
+    dataset_dir: Path,
+    fold: int,
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
+) -> SplitSets:
+    splits_path = dataset_dir / split_file_name
     if not splits_path.exists():
         # Fallback: all images -> train; none for val/test
         images = sorted((dataset_dir / "images").glob("*.nii.gz"))
         case_ids = [p.stem for p in images]
         LOGGER.warning(
-            "data_splits.json not found; assigning all %d cases to train set.", len(case_ids)
+            "%s not found; assigning all %d cases to train set.", split_file_name, len(case_ids)
         )
         return SplitSets(train=case_ids, val=[], test=[])
 
@@ -78,7 +84,7 @@ def _read_splits(dataset_dir: Path, fold: int) -> SplitSets:
         splits = json.load(f)
     if not isinstance(splits, list) or fold >= len(splits):
         number_of_splits = len(splits) if isinstance(splits, list) else "invalid"
-        msg = f"Invalid fold {fold}; data_splits.json contains {number_of_splits} entries"
+        msg = f"Invalid fold {fold}; {split_file_name} contains {number_of_splits} entries"
         raise ValueError(msg)
     entry = splits[fold]
     return SplitSets(
@@ -232,6 +238,7 @@ def convert_dataset_to_nndetection(
     include_val_in_train: bool = True,
     modality_name: str = "CT",
     workers: int = 0,
+    split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
 ) -> Path:
     """Convert RadYOLO dataset to nnDetection format.
 
@@ -254,7 +261,7 @@ def convert_dataset_to_nndetection(
     # test folders are created only if needed later
 
     names = _load_dataset_names(dataset_dir / "dataset.yaml")
-    splits = _read_splits(dataset_dir, fold=fold)
+    splits = _read_splits(dataset_dir, fold=fold, split_file_name=split_file_name)
 
     # Helper: choose train set
     train_cases: list[str] = list(splits.train)
@@ -375,14 +382,14 @@ def convert_dataset_to_nndetection(
 
     # Write splits_final.pkl (list of 5 OrderedDicts with 'train' and 'val')
     try:
-        with (dataset_dir / "data_splits.json").open("r", encoding="utf-8") as f:
+        with (dataset_dir / split_file_name).open("r", encoding="utf-8") as f:
             all_splits = json.load(f)
         if not isinstance(all_splits, list):
-            msg = "data_splits.json malformed: expected a list"
+            msg = f"{split_file_name} malformed: expected a list"
             raise TypeError(msg)
         n_folds = len(all_splits)
         if n_folds < 5:
-            LOGGER.warning("Only %d folds found in data_splits.json; writing %d.", n_folds, n_folds)
+            LOGGER.warning("Only %d folds found in %s; writing %d.", n_folds, split_file_name, n_folds)
         result_list: list[OrderedDict[str, np.ndarray]] = []
         for i, fold_entry in enumerate(all_splits[:5]):
             train_list = [_sanitize_name(cid) for cid in fold_entry.get("train", [])]
@@ -392,7 +399,7 @@ def convert_dataset_to_nndetection(
         with splits_pkl.open("wb") as f:
             pickle.dump(result_list, f)
     except Exception:
-        LOGGER.exception("Failed to write splits_final.pkl from data_splits.json")
+        LOGGER.exception("Failed to write splits_final.pkl from %s", split_file_name)
 
     LOGGER.info(
         "nnDetection conversion done: %d train cases%s -> %s",

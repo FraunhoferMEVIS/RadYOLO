@@ -766,6 +766,13 @@ def preprocess_data(  # noqa: PLR0913
     show_default=True,
     help="Number of parallel processes (0 = use CPU count).",
 )
+@click.option(
+    "--split-file-name",
+    default="data_splits.json",
+    show_default=True,
+    type=str,
+    help="Name of the split file to read from the input dataset.",
+)
 def convert_to_nndetection(
     dataset_path: Path,
     out_root: Path,
@@ -775,6 +782,7 @@ def convert_to_nndetection(
     include_val_in_train: bool,
     modality: str,
     workers: int,
+    split_file_name: str,
 ) -> int:
     """Convert a RadYOLO dataset to nnDetection Task folder structure.
 
@@ -790,6 +798,7 @@ def convert_to_nndetection(
             include_val_in_train=include_val_in_train,
             modality_name=modality,
             workers=workers,
+            split_file_name=split_file_name,
         )
         LOGGER.info("Created %s", task_dir)
     except Exception as e:
