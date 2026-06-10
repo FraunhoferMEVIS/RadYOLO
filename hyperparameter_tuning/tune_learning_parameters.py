@@ -430,16 +430,23 @@ def _extract_metric_from_csv(
 
     missing_columns = [column for column in metric_columns if column not in frame.columns]
     if missing_columns:
-        msg = (
-            f"Tracked metric columns {missing_columns!r} not found in {csv_path}. "
-            f"Available columns: {list(frame.columns)}"
+        LOGGER.warning(
+            "Tracked metric columns %s not found in %s. Defaulting missing metrics to 0.0. "
+            "Available columns: %s",
+            missing_columns,
+            csv_path,
+            list(frame.columns),
         )
-        raise KeyError(msg)
 
     epoch_column = frame["epoch"] if "epoch" in frame.columns else pd.Series(frame.index)
     metric_values: dict[str, float] = {}
     metric_best_epochs: dict[str, int] = {}
     for metric_column in metric_columns:
+        if metric_column not in frame.columns:
+            metric_values[metric_column] = 0.0
+            metric_best_epochs[metric_column] = -1
+            continue
+
         best_avg, best_epoch = _best_rolling_average_and_epoch(
             frame[metric_column],
             epoch_column,
