@@ -79,6 +79,9 @@ class PredictionConfig:
     preprocessing_on_gpu: bool = True
     num_load_workers: int = 2
     num_write_workers: int = 2
+    split_file: Path | None = None
+    split_fold: int = 0
+    split_group: str = "test"
 
 
 def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
@@ -96,6 +99,45 @@ def _iter_nifti(input_dir: Path) -> Iterable[Path]:
 
 def _case_name_from_path(img_path: Path) -> str:
     return img_path.stem.replace(".nii", "")
+
+
+def _load_case_names_from_split_file(
+    split_file: Path,
+    *,
+    fold: int,
+    group: str,
+) -> set[str]:
+    with split_file.open(encoding="utf-8") as file:
+        split_data = json.load(file)
+
+    if isinstance(split_data, dict):
+        folds = [split_data]
+    elif isinstance(split_data, list):
+        folds = split_data
+    else:
+        msg = "Split file must contain either a dict or a list of dicts."
+        raise TypeError(msg)
+
+    if fold < 0 or fold >= len(folds):
+        msg = f"Split fold index {fold} is out of range for file {split_file}."
+        raise ValueError(msg)
+
+    fold_entry = folds[fold]
+    if not isinstance(fold_entry, dict):
+        msg = f"Split fold entry at index {fold} must be a dict."
+        raise TypeError(msg)
+
+    selected_cases = fold_entry.get(group)
+    if not isinstance(selected_cases, list) or not all(
+        isinstance(case_name, str) for case_name in selected_cases
+    ):
+        msg = (
+            f"Split group '{group}' must exist in fold {fold} and map to a list "
+            "of case names."
+        )
+        raise ValueError(msg)
+
+    return set(selected_cases)
 
 
 def _resolve_normalization(
@@ -867,6 +909,9 @@ def _validate_prediction_config(prediction_cfg: PredictionConfig) -> None:
     if not 0.0 < prediction_cfg.patch_border_weight <= 1.0:
         msg = "patch_border_weight must be in the range (0, 1]."
         raise ValueError(msg)
+    if prediction_cfg.split_group not in {"train", "val", "test"}:
+        msg = "split_group must be one of 'train', 'val' or 'test'."
+        raise ValueError(msg)
 
 
 def _validate_loaded_model_prediction_config(
@@ -1008,8 +1053,28 @@ def run_prediction(prediction_cfg: PredictionConfig) -> int:
         if not prediction_cfg.output_dir.exists():
             prediction_cfg.output_dir.mkdir(parents=True, exist_ok=True)
         files = list(_iter_nifti(prediction_cfg.input_dir))
+        if prediction_cfg.split_file is not None:
+            selected_case_names = _load_case_names_from_split_file(
+                prediction_cfg.split_file,
+                fold=prediction_cfg.split_fold,
+                group=prediction_cfg.split_group,
+            )
+            files = [
+                file_path
+                for file_path in files
+                if _case_name_from_path(file_path) in selected_case_names
+            ]
         if not files:
-            LOGGER.error("No .nii.gz files found in %s", prediction_cfg.input_dir)
+            if prediction_cfg.split_file is None:
+                LOGGER.error("No .nii.gz files found in %s", prediction_cfg.input_dir)
+            else:
+                LOGGER.error(
+                    "No .nii.gz files in %s matched split selection %s (fold=%d, group=%s)",
+                    prediction_cfg.input_dir,
+                    prediction_cfg.split_file,
+                    prediction_cfg.split_fold,
+                    prediction_cfg.split_group,
+                )
             return 1
         result = _run_prediction_pipeline(prediction_cfg, files)
         if result != 0:

@@ -8,31 +8,22 @@ import sys
 from pathlib import Path
 
 import click
-import tqdm_loggable
-import tqdm_loggable.utils
 import yaml
 
-from radyolo.config.config import DatasetConfig, load_model_checkpoint
+from radyolo.config.config import load_model_checkpoint
 from radyolo.config.propose_model_config import propose_model_config as propose_model_config_fn
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
-from radyolo.data.data import PatchWiseDataset, WholeImageDataset, build_dataloader
 from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
-from radyolo.models.model import (
-    build_model_from_config,
-    get_model_min_stride,
-    load_checkpoint_model,
-)
+from radyolo.models.model import build_model_from_config
 from radyolo.training.train import LOG_LEVEL_ENV, Trainer
 from radyolo.utils.logging_utils import configure_tqdm_logging
-from radyolo.utils.util import ModelEMA
 from radyolo.validation.evaluate_predictions import evaluate_prediction_folder
 from radyolo.validation.plotting import plot_results as plot_results_
-from radyolo.validation.validate import Validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -137,111 +128,6 @@ def train(config: Path) -> int:
     try:
         trainer = Trainer(cfg=config)
         trainer.train()
-    except Exception as e:
-        LOGGER.exception("An unexpected error occurred", exc_info=e)
-        return 1
-    else:
-        return 0
-
-
-@main.command("test")
-@click.argument(
-    "model_path",
-    metavar="MODEL-PATH",
-    type=click.Path(
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-        path_type=Path,
-    ),
-)
-@click.argument(
-    "dataset_folder",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-        path_type=Path,
-    ),
-    metavar="DATASET-FOLDER",
-)
-@click.option("--fold", default=0, help="Fold from dataset splits file to use.")
-@click.option(
-    "--group", default="test", help="Group from datas splits to use. Can be train, val or test."
-)
-def test(model_path: Path, dataset_folder: Path, fold: int, group: str) -> int:
-    """Test a radyolo model.
-
-    MODEL: specifies the path to a model checkpoint.
-    dataset_folder: specifies the path to a dataset folder.
-    fold: specifies which fold to use from the data splits file.
-    group: specifies which group from data split to use. Can be train, val or test.
-    """
-    try:
-        if not model_path.exists():
-            LOGGER.error(f"Model checkpoint {model_path} does not exist.")
-            return 1
-
-        if not dataset_folder.exists():
-            LOGGER.error(f"Dataset configuration {dataset_folder} does not exist.")
-            return 1
-
-        dataset_path = dataset_folder / "dataset.yaml"
-        with dataset_path.open() as f:
-            yaml_config = yaml.safe_load(f)
-        dataset_config = DatasetConfig.model_validate(yaml_config)
-
-        loaded_model = load_checkpoint_model(model_path)
-        model = loaded_model.model
-        train_config = loaded_model.train_config
-        device = loaded_model.device
-
-        dataset_class = (
-            PatchWiseDataset if train_config.training_mode == "patchwise" else WholeImageDataset
-        )
-        foreground_oversampling = (
-            train_config.foreground_oversampling
-            if train_config.training_mode == "patchwise"
-            else 0.0
-        )
-
-        dataset = dataset_class(
-            src_path=dataset_folder,
-            fold=fold,
-            group=group,
-            patch_size=train_config.patch_size,
-            augment=False,
-            min_stride=get_model_min_stride(model),
-            normalization=train_config.normalization,
-            apply_preprocessing=train_config.apply_preprocessing,
-            load_masks=train_config.segmentation_output,
-            foreground_oversampling=foreground_oversampling,
-            min_box_crop_fraction=train_config.min_box_crop_fraction,
-            split_file_name=train_config.split_file_name,
-        )
-
-        dataloader = build_dataloader(
-            dataset=dataset,
-            batch_size=1,
-            workers=2,
-            shuffle=False,
-            device=device,
-        )
-
-        run_dir = model_path.parent.parent if model_path.parent.name == "weights" else model_path.parent
-        validator = Validator(
-            dataloader=dataloader,
-            save_dir=run_dir / "validation" / group,
-            config=train_config,
-            names=dataset_config.names,
-            save_predictions=True,
-        )
-
-        validator(trainer=None, model=model)
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1
@@ -929,6 +815,36 @@ def convert_to_nndetection(
     show_default=True,
     help="Number of writer processes that export JSON and masks.",
 )
+@click.option(
+    "--split-file",
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+    default=None,
+    help=(
+        "Optional data split JSON file. If set, only cases from the selected split fold/group "
+        "are predicted."
+    ),
+)
+@click.option(
+    "--split-fold",
+    default=0,
+    type=click.IntRange(min=0),
+    show_default=True,
+    help="Fold index to use from --split-file.",
+)
+@click.option(
+    "--split-group",
+    default="test",
+    type=click.Choice(["train", "val", "test"], case_sensitive=False),
+    show_default=True,
+    help="Group to use from --split-file.",
+)
 def predict(
     model_path: Path,
     input_dir: Path,
@@ -945,6 +861,9 @@ def predict(
     preprocessing_on_gpu: bool,
     num_load_workers: int,
     num_write_workers: int,
+    split_file: Path | None,
+    split_fold: int,
+    split_group: str,
 ) -> int:
     """Run inference on .nii.gz images in INPUT_DIR and write JSON (and masks) to OUTPUT_DIR."""
     try:
@@ -973,6 +892,9 @@ def predict(
                 preprocessing_on_gpu=preprocessing_on_gpu,
                 num_load_workers=num_load_workers,
                 num_write_workers=num_write_workers,
+                split_file=split_file,
+                split_fold=split_fold,
+                split_group=split_group.lower(),
             )
         )
     except Exception as e:  # pragma: no cover
