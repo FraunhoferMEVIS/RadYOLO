@@ -8,7 +8,7 @@ import torch
 import yaml
 
 from radyolo.utils.ops import box_iou
-from radyolo.validation.metrics import DetMetrics, _compute_froc_score
+from radyolo.validation.metrics import FROC_TARGETS, DetMetrics, _compute_froc_score
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -273,8 +273,15 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
         num_images=len(common_cases),
     )
 
-    metrics_dict = {key: float(value) for key, value in metrics.results_dict.items()}
-    metrics_dict["metrics/FROC"] = _compute_froc_score(
+    metrics_summary = {
+        "metrics/precision": float(metrics.metrics.mp),
+        "metrics/recall": float(metrics.metrics.mr),
+        "metrics/mAP10": float(metrics.metrics.map10),
+        "metrics/mAP10_agnostic": float(metrics.metrics.map10_agnostic),
+        "metrics/mAP10_95": float(metrics.metrics.map),
+        "metrics/mAP10_95_agnostic": float(metrics.metrics.map_agnostic),
+    }
+    metrics_summary["metrics/FROC"] = _compute_froc_score(
         metrics.metrics.froc_avg_fp,
         metrics.metrics.froc_sensitivity,
     )
@@ -293,27 +300,69 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
             }
         )
 
+    pr_recall_axis = metrics.metrics.px.astype(np.float64, copy=False)
+    pr_precision_curves = metrics.metrics.prec_values.astype(np.float64, copy=False)
+    class_names_by_id = {
+        int(class_id): names.get(int(class_id), f"class_{int(class_id)}")
+        for class_id in metrics.ap_class_index
+    }
+
     return {
-        "prediction_dir": str(predictions_dir),
-        "labels_dir": str(labels_dir),
-        "case_counts": {
-            "predictions": len(prediction_files),
-            "references": len(label_files),
-            "common": len(common_cases),
-            "missing_in_predictions": len(missing_in_predictions),
-            "missing_in_labels": len(missing_in_labels),
-        },
-        "missing_cases": {
-            "missing_in_predictions": missing_in_predictions,
-            "missing_in_labels": missing_in_labels,
-        },
-        "object_counts": {
-            "predictions": total_predictions,
-            "references": total_references,
-        },
         "metrics": {
-            key: float(value)
-            for key, value in metrics_dict.items()
+            "summary": metrics_summary,
+            "per_class": per_class,
         },
-        "per_class": per_class,
+        "metadata": {
+            "prediction_dir": str(predictions_dir),
+            "labels_dir": str(labels_dir),
+            "case_counts": {
+                "predictions": len(prediction_files),
+                "references": len(label_files),
+                "common": len(common_cases),
+                "missing_in_predictions": len(missing_in_predictions),
+                "missing_in_labels": len(missing_in_labels),
+            },
+            "missing_cases": {
+                "missing_in_predictions": missing_in_predictions,
+                "missing_in_labels": missing_in_labels,
+            },
+            "objects_counts": {
+                "predictions": total_predictions,
+                "references": total_references,
+            },
+        },
+        "curves": {
+            "froc": {
+                "avg_fp_per_image": metrics.metrics.froc_avg_fp.astype(
+                    np.float64,
+                    copy=False,
+                ).tolist(),
+                "sensitivity": metrics.metrics.froc_sensitivity.astype(
+                    np.float64,
+                    copy=False,
+                ).tolist(),
+                "confidence": metrics.metrics.froc_confidence.astype(
+                    np.float64,
+                    copy=False,
+                ).tolist(),
+                "score_targets_fp_per_image": [float(target) for target in FROC_TARGETS],
+                "score": float(metrics_summary["metrics/FROC"]),
+            },
+            "precision_recall": {
+                "recall_axis": pr_recall_axis.tolist(),
+                "mean_precision": (
+                    pr_precision_curves.mean(axis=0)
+                    if pr_precision_curves.size
+                    else np.zeros_like(pr_recall_axis)
+                ).tolist(),
+                "per_class_precision": [
+                    {
+                        "class": int(class_id),
+                        "name": class_names_by_id.get(int(class_id), f"class_{int(class_id)}"),
+                        "precision": pr_precision_curves[row_index].tolist(),
+                    }
+                    for row_index, class_id in enumerate(metrics.ap_class_index)
+                ],
+            },
+        },
     }

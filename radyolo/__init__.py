@@ -930,22 +930,33 @@ def predict(
 @click.option(
     "--output",
     type=click.Path(
-        file_okay=True,
-        dir_okay=False,
+        file_okay=False,
+        dir_okay=True,
         writable=True,
         resolve_path=True,
         path_type=Path,
     ),
-    default=Path("results.json"),
+    default=Path("evaluation_results"),
     show_default=True,
-    help="Path to the JSON file that will receive the evaluation summary.",
+    help="Output directory where metrics.json, metadata.json, and curves.json will be written.",
 )
 def evaluate_predictions(predictions_dir: Path, labels_dir: Path, output: Path) -> int:
     """Compute detection metrics for prediction JSON files against RadYOLO label files."""
     try:
         summary = evaluate_prediction_folder(predictions_dir, labels_dir)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "metrics.json").write_text(
+            json.dumps(summary["metrics"], indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        (output / "metadata.json").write_text(
+            json.dumps(summary["metadata"], indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        (output / "curves.json").write_text(
+            json.dumps(summary["curves"], indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     except Exception as e:  # pragma: no cover
@@ -953,5 +964,5 @@ def evaluate_predictions(predictions_dir: Path, labels_dir: Path, output: Path) 
         msg = "Prediction evaluation failed. See logs for details."
         raise click.ClickException(msg) from e
 
-    click.echo(f"Wrote results to: {output!s}")
+    click.echo(f"Wrote evaluation files to: {output!s}")
     return 0
