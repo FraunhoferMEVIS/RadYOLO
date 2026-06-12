@@ -21,6 +21,7 @@ plt.switch_backend("Agg")
 
 LOGGER = logging.getLogger(__name__)
 MC_CURVE_SMOOTHING_FRACTION = 0.05
+FROC_TARGETS = (0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 
 
 class ConfusionMatrix:
@@ -365,6 +366,30 @@ def _select_froc_target_indices(
         index = int(np.searchsorted(avg_fp, target, side="right") - 1)
         indices[target] = max(index, 0)
     return indices
+
+
+def _compute_froc_score(
+    avg_fp: npt.NDArray[np.floating],
+    sensitivity: npt.NDArray[np.floating],
+    targets: tuple[float, ...] = FROC_TARGETS,
+) -> float:
+    """Compute a single FROC score by averaging sensitivity at standard FP/image targets."""
+    if avg_fp.size == 0 or sensitivity.size == 0:
+        return 0.0
+
+    # FROC x-axis is cumulative average false positives/image, so enforce monotonicity for robust
+    # interpolation in degenerate cases with duplicate confidence scores.
+    avg_fp_monotonic = np.maximum.accumulate(avg_fp.astype(np.float64, copy=False))
+    sensitivity_values = sensitivity.astype(np.float64, copy=False)
+    target_values = np.asarray(targets, dtype=np.float64)
+    sampled_sensitivity = np.interp(
+        target_values,
+        avg_fp_monotonic,
+        sensitivity_values,
+        left=float(sensitivity_values[0]),
+        right=float(sensitivity_values[-1]),
+    )
+    return float(sampled_sensitivity.mean())
 
 
 def compute_class_agnostic_map(

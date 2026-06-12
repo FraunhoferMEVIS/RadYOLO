@@ -8,7 +8,7 @@ import torch
 import yaml
 
 from radyolo.utils.ops import box_iou
-from radyolo.validation.metrics import DetMetrics
+from radyolo.validation.metrics import DetMetrics, _compute_froc_score
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -270,6 +270,13 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
         conf=_concat_or_default(conf_stats, shape=(0,), dtype=np.float32),
         pred_cls=_concat_or_default(pred_class_stats, shape=(0,), dtype=np.int64),
         target_cls=_concat_or_default(target_class_stats, shape=(0,), dtype=np.int64),
+        num_images=len(common_cases),
+    )
+
+    metrics_dict = {key: float(value) for key, value in metrics.results_dict.items()}
+    metrics_dict["metrics/FROC"] = _compute_froc_score(
+        metrics.metrics.froc_avg_fp,
+        metrics.metrics.froc_sensitivity,
     )
 
     per_class: list[dict[str, Any]] = []
@@ -306,7 +313,7 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
         },
         "metrics": {
             key: float(value)
-            for key, value in metrics.results_dict.items()
+            for key, value in metrics_dict.items()
         },
         "per_class": per_class,
     }

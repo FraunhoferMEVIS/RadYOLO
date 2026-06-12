@@ -62,6 +62,7 @@ def test_evaluate_predictions_cli_uses_only_common_cases(tmp_path) -> None:
     assert summary["metrics"]["metrics/mAP10Agn"] == pytest.approx(0.995, abs=1e-6)
     assert summary["metrics"]["metrics/mAP10-95"] == pytest.approx(0.995, abs=1e-6)
     assert summary["metrics"]["metrics/mAP10-95Agn"] == pytest.approx(0.995, abs=1e-6)
+    assert summary["metrics"]["metrics/FROC"] == pytest.approx(1.0, abs=1e-6)
 
 
 def test_evaluate_predictions_cli_fails_without_common_cases(tmp_path) -> None:
