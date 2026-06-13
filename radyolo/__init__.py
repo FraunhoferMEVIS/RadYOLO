@@ -751,7 +751,7 @@ def convert_to_nndetection(
 )
 @click.option(
     "--clip-boxes-to-image/--no-clip-boxes-to-image",
-    default=False,
+    default=True,
     help="Override whether predicted 3D boxes are clipped to image bounds before export.",
 )
 @click.option(
