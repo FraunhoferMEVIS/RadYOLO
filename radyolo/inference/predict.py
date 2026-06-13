@@ -440,7 +440,7 @@ def _relative_box(
     box_image_xyzxyz: torch.Tensor, original_shape: tuple[int, int, int]
 ) -> list[float]:
     rel_box = box_image_xyzxyz.clone()
-    d, w, h = original_shape  # note tensor original ordering (D,W,H)
+    d, h, w = original_shape  # preprocess_image returns spatial shape in D, H, W (Z, Y, X)
     rel_box[0] /= w
     rel_box[1] /= h
     rel_box[2] /= d

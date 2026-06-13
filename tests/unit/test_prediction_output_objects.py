@@ -191,7 +191,15 @@ def test_relative_box_normalizes_against_original_shape() -> None:
 
     relative = _relative_box(box, (20, 40, 80))
 
-    assert relative == [0.05, 0.05, 0.3, 0.2, 0.125, 0.6]
+    assert relative == [0.025, 0.1, 0.3, 0.1, 0.25, 0.6]
+
+
+def test_relative_box_uses_xyx_denominators_for_anisotropic_shape() -> None:
+    box = torch.tensor([200.0, 30.0, 100.0, 250.0, 50.0, 200.0], dtype=torch.float32)
+
+    relative = _relative_box(box, (320, 60, 320))
+
+    assert relative == [0.625, 0.5, 0.3125, 0.78125, 0.833333, 0.625]
 
 
 def test_box_image_to_world_applies_affine_to_all_box_corners() -> None:
