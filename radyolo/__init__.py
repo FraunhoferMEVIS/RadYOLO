@@ -739,7 +739,7 @@ def convert_to_nndetection(
 @click.option(
     "--nms-iou",
     "--iou",
-    default=0.2,
+    default=0.1,
     type=float,
     help="IoU threshold for NMS.",
 )
