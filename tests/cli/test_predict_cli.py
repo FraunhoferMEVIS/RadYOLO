@@ -43,7 +43,7 @@ def test_predict_cli_passes_clip_override(monkeypatch, tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert captured["config"].clip_boxes_to_image is False
     assert captured["config"].confidence_threshold == 0.1
-    assert captured["config"].nms_iou_threshold == 0.2
+    assert captured["config"].nms_iou_threshold == 0.1
     assert captured["config"].device == "0"
     assert captured["config"].overwrite_patch_size is None
     assert captured["config"].overwrite_normalization is None
@@ -80,7 +80,7 @@ def test_predict_cli_uses_current_defaults(
 
     assert result.exit_code == 0
     assert captured["config"].confidence_threshold == 0.1
-    assert captured["config"].nms_iou_threshold == 0.2
+    assert captured["config"].nms_iou_threshold == 0.1
     assert captured["config"].device == "0"
     assert captured["config"].clip_boxes_to_image is True
     assert captured["config"].overwrite_patch_size is None
