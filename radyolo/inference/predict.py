@@ -49,9 +49,9 @@ class _WriteTask:
     image_results: list[dict[str, object]]
     affine: np.ndarray
     original_shape: tuple[int, int, int]
-    prototype_masks: torch.Tensor | None
-    mask_detections: list[torch.Tensor]
-    merged_mask_probabilities: list[torch.Tensor] = field(default_factory=list)
+    prototype_masks: np.ndarray | None
+    mask_detections: list[np.ndarray]
+    merged_mask_probabilities: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -376,16 +376,29 @@ def _reconstruct_patch_mask_to_image(
     return full_mask
 
 
+def _to_numpy_float32_contiguous(tensor: torch.Tensor | np.ndarray) -> np.ndarray:
+    if isinstance(tensor, np.ndarray):
+        return np.ascontiguousarray(tensor, dtype=np.float32)
+    return tensor.detach().to(device="cpu", dtype=torch.float32).contiguous().numpy()
+
+
+def _to_torch_float32_contiguous(array: torch.Tensor | np.ndarray) -> torch.Tensor:
+    if isinstance(array, torch.Tensor):
+        return array.detach().to(device="cpu", dtype=torch.float32).contiguous()
+    return torch.from_numpy(np.ascontiguousarray(array)).to(dtype=torch.float32)
+
+
 def _save_merged_mask_probability(
-    mask_probability: torch.Tensor,
+    mask_probability: torch.Tensor | np.ndarray,
     original_shape: tuple[int, int, int],
     mask_affine: np.ndarray,
     mask_dir: Path,
     det_index: int,
     case_name: str,
 ) -> str:
+    mask_probability_tensor = _to_torch_float32_contiguous(mask_probability)
     mask_up = F.interpolate(
-        mask_probability.unsqueeze(0).unsqueeze(0),
+        mask_probability_tensor.unsqueeze(0).unsqueeze(0),
         size=original_shape,
         mode="trilinear",
         align_corners=False,
@@ -438,19 +451,21 @@ def _relative_box(
 
 
 def _reconstruct_and_save_mask(
-    det: torch.Tensor,
-    proto: torch.Tensor,
+    det: torch.Tensor | np.ndarray,
+    proto: torch.Tensor | np.ndarray,
     original_shape: tuple[int, int, int],
     mask_affine: np.ndarray,
     mask_dir: Path,
     det_index: int,
     case_name: str,
 ) -> str | None:
-    nm = det.shape[0] - 8
+    det_tensor = _to_torch_float32_contiguous(det)
+    proto_tensor = _to_torch_float32_contiguous(proto)
+    nm = det_tensor.shape[0] - 8
     if nm <= 0:
         return None
-    coeff = det[8 : 8 + nm].to(device=proto.device)
-    mask_prob = ops.reconstruct_mask_probabilities(coeff, proto)
+    coeff = det_tensor[8 : 8 + nm]
+    mask_prob = ops.reconstruct_mask_probabilities(coeff, proto_tensor)
     mask_prob_r = mask_prob.unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
     mask_up = F.interpolate(
         mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
@@ -472,9 +487,9 @@ def _build_prediction_entries(
     original_shape: tuple[int, int, int],
     names: dict[int, str],
     include_masks: bool,
-) -> tuple[list[dict[str, object]], list[torch.Tensor]]:
+) -> tuple[list[dict[str, object]], list[np.ndarray]]:
     image_results: list[dict[str, object]] = []
-    mask_detections: list[torch.Tensor] = []
+    mask_detections: list[np.ndarray] = []
     for det_i, det in enumerate(detections):
         box_image_xyzxyz = det[:6]
         try:
@@ -493,7 +508,7 @@ def _build_prediction_entries(
         }
         if include_masks:
             entry["mask_path"] = f"{case_name}_det{det_i}.nii.gz"
-            mask_detections.append(det.detach().to(dtype=torch.float32).clone())
+            mask_detections.append(_to_numpy_float32_contiguous(det))
         image_results.append(entry)
     return image_results, mask_detections
 
@@ -539,8 +554,8 @@ def _predict_whole_image(
         prediction_config,
         len(names),
     )
-    prototype_masks: torch.Tensor | None = None
-    mask_detections: list[torch.Tensor] = []
+    prototype_masks: np.ndarray | None = None
+    mask_detections: list[np.ndarray] = []
     image_results: list[dict[str, object]] = []
     if detections.numel():
         ops.scale_boxes(
@@ -559,9 +574,7 @@ def _predict_whole_image(
             include_masks=model_output.mask_coefficients is not None and proto_masks is not None,
         )
         if mask_detections and proto_masks is not None:
-            prototype_masks = (
-                proto_masks[0].detach().to(device="cpu", dtype=torch.float32).contiguous()
-            )
+            prototype_masks = _to_numpy_float32_contiguous(proto_masks[0])
     return _WriteTask(
         case_name=loaded_image.case_name,
         image_results=image_results,
@@ -609,7 +622,7 @@ def _predict_patchwise_image(
         torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     )
     merged_detections: list[torch.Tensor] = []
-    merged_masks: list[torch.Tensor] = []
+    merged_masks: list[np.ndarray] = []
     for patch_origin_xyz in _iter_patch_origins(
         inference_shape_xyz,
         patch_shape_xyz,
@@ -657,7 +670,7 @@ def _predict_patchwise_image(
                     patch_origin_xyz,
                 )
                 if full_mask is not None:
-                    merged_masks.append(full_mask)
+                    merged_masks.append(_to_numpy_float32_contiguous(full_mask))
 
     merged_prediction_tensor, keep_indices = _merge_patch_detections(
         merged_detections,
