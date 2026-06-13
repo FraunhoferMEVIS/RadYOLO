@@ -737,6 +737,7 @@ def convert_to_nndetection(
     help="Confidence threshold.",
 )
 @click.option(
+    "--nms-iou",
     "--iou",
     default=0.2,
     type=float,
@@ -850,7 +851,7 @@ def predict(
     input_dir: Path,
     output_dir: Path,
     conf: float | None,
-    iou: float | None,
+    nms_iou: float | None,
     device: str,
     clip_boxes_to_image: bool,
     overwrite_patch_size: tuple[int, int, int] | None,
@@ -873,7 +874,7 @@ def predict(
                 input_dir=input_dir,
                 output_dir=output_dir,
                 confidence_threshold=conf,
-                nms_iou_threshold=iou,
+                nms_iou_threshold=nms_iou,
                 device=device,
                 clip_boxes_to_image=clip_boxes_to_image,
                 overwrite_patch_size=(
