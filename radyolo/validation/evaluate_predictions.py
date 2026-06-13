@@ -78,7 +78,8 @@ def _load_prediction_case(prediction_path: Path) -> torch.Tensor:
         rel_box = entry.get("box_relative_xyzxyz")
         if not isinstance(rel_box, list) or len(rel_box) != 6:
             msg = (
-                f"Prediction {index} in {prediction_path} is missing box_relative_xyzxyz with 6 values."
+                f"Prediction {index} in {prediction_path} is missing "
+                "box_relative_xyzxyz with 6 values."
             )
             raise ValueError(msg)
         class_id = int(entry["class"])
@@ -169,6 +170,165 @@ def _concat_or_default(
     return torch.cat(tensors, 0).cpu().numpy()
 
 
+def _to_curve_metrics(
+    tp: torch.Tensor,
+    fp: torch.Tensor,
+    num_references: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if tp.ndim != 2 or fp.ndim != 2 or tp.shape != fp.shape:
+        msg = (
+            "tp/fp tensors must have shape (num_predictions, num_thresholds), "
+            f"got {tp.shape}/{fp.shape}"
+        )
+        raise ValueError(msg)
+
+    tp_counts = tp.to(dtype=torch.int64).sum(dim=0).cpu().numpy().astype(np.float64, copy=False)
+    fp_counts = fp.to(dtype=torch.int64).sum(dim=0).cpu().numpy().astype(np.float64, copy=False)
+
+    if num_references > 0:
+        fn_counts = np.maximum(float(num_references) - tp_counts, 0.0)
+        recall = tp_counts / float(num_references)
+    else:
+        fn_counts = np.zeros_like(tp_counts)
+        recall = np.where(fp_counts > 0.0, 0.0, 1.0)
+
+    precision_den = tp_counts + fp_counts
+    precision = np.divide(
+        tp_counts,
+        precision_den,
+        out=np.zeros_like(tp_counts),
+        where=precision_den > 0.0,
+    )
+    f1_den = precision + recall
+    f1 = np.divide(
+        2.0 * precision * recall,
+        f1_den,
+        out=np.zeros_like(precision),
+        where=f1_den > 0.0,
+    )
+    return precision, recall, f1, fn_counts
+
+
+def _to_scalar_case_metrics(
+    *,
+    case_name: str,
+    num_predictions: int,
+    num_references: int,
+    tp: torch.Tensor,
+    fp: torch.Tensor,
+    tp_agnostic: torch.Tensor,
+    fp_agnostic: torch.Tensor,
+) -> dict[str, Any]:
+    precision_curve, recall_curve, f1_curve, fn_curve = _to_curve_metrics(tp, fp, num_references)
+    precision_curve_agn, recall_curve_agn, f1_curve_agn, fn_curve_agn = _to_curve_metrics(
+        tp_agnostic,
+        fp_agnostic,
+        num_references,
+    )
+    iou10_index = 0
+
+    return {
+        "case": case_name,
+        "counts": {
+            "predictions": int(num_predictions),
+            "references": int(num_references),
+            "tp_iou10": int(tp[:, iou10_index].sum().item()),
+            "fp_iou10": int(fp[:, iou10_index].sum().item()),
+            "fn_iou10": int(fn_curve[iou10_index]),
+            "tp_iou10_agnostic": int(tp_agnostic[:, iou10_index].sum().item()),
+            "fp_iou10_agnostic": int(fp_agnostic[:, iou10_index].sum().item()),
+            "fn_iou10_agnostic": int(fn_curve_agn[iou10_index]),
+        },
+        "metrics": {
+            "precision_iou10": float(precision_curve[iou10_index]),
+            "recall_iou10": float(recall_curve[iou10_index]),
+            "f1_iou10": float(f1_curve[iou10_index]),
+            "precision_iou10_95_mean": float(precision_curve.mean()),
+            "recall_iou10_95_mean": float(recall_curve.mean()),
+            "f1_iou10_95_mean": float(f1_curve.mean()),
+            "precision_iou10_agnostic": float(precision_curve_agn[iou10_index]),
+            "recall_iou10_agnostic": float(recall_curve_agn[iou10_index]),
+            "f1_iou10_agnostic": float(f1_curve_agn[iou10_index]),
+            "precision_iou10_95_mean_agnostic": float(precision_curve_agn.mean()),
+            "recall_iou10_95_mean_agnostic": float(recall_curve_agn.mean()),
+            "f1_iou10_95_mean_agnostic": float(f1_curve_agn.mean()),
+        },
+        # Lower values are worse and appear first after sorting.
+        "ranking": {
+            "worst_first_score": float(f1_curve.mean()),
+        },
+    }
+
+
+def _sort_per_case_results(per_case_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        per_case_results,
+        key=lambda case: (
+            float(case["ranking"]["worst_first_score"]),
+            float(case["metrics"]["recall_iou10_95_mean"]),
+            float(case["metrics"]["precision_iou10_95_mean"]),
+            case["case"],
+        ),
+    )
+
+
+def _evaluate_single_case(
+    *,
+    case_name: str,
+    detections: torch.Tensor,
+    gt_cls: torch.Tensor,
+    gt_boxes: torch.Tensor,
+) -> tuple[
+    dict[str, Any],
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+    | None,
+]:
+    pred_cls = detections[:, 7].to(dtype=torch.int64)
+    conf = detections[:, 6]
+
+    if gt_boxes.shape[0] == 0:
+        shape = (detections.shape[0], IOU_THRESHOLDS.shape[0])
+        tp = torch.zeros(shape, dtype=torch.bool)
+        fp = torch.ones(shape, dtype=torch.bool)
+        tp_agnostic = torch.zeros(shape, dtype=torch.bool)
+        fp_agnostic = torch.ones(shape, dtype=torch.bool)
+    elif detections.shape[0] == 0:
+        shape = (0, IOU_THRESHOLDS.shape[0])
+        tp = torch.zeros(shape, dtype=torch.bool)
+        fp = torch.zeros(shape, dtype=torch.bool)
+        tp_agnostic = torch.zeros(shape, dtype=torch.bool)
+        fp_agnostic = torch.zeros(shape, dtype=torch.bool)
+    else:
+        iou = box_iou(gt_boxes, detections[:, :6])
+        tp, fp = _match_predictions(
+            pred_cls,
+            gt_cls,
+            iou,
+            class_agnostic=False,
+        )
+        tp_agnostic, fp_agnostic = _match_predictions(
+            pred_cls,
+            gt_cls,
+            iou,
+            class_agnostic=True,
+        )
+
+    per_case_metrics = _to_scalar_case_metrics(
+        case_name=case_name,
+        num_predictions=int(detections.shape[0]),
+        num_references=int(gt_cls.shape[0]),
+        tp=tp,
+        fp=fp,
+        tp_agnostic=tp_agnostic,
+        fp_agnostic=fp_agnostic,
+    )
+
+    if detections.shape[0] == 0:
+        return per_case_metrics, None
+
+    return per_case_metrics, (tp, fp, tp_agnostic, fp_agnostic, conf, pred_cls)
+
+
 def _load_names(labels_dir: Path, observed_class_ids: set[int]) -> dict[int, str]:
     dataset_yaml = labels_dir.parent / "dataset.yaml"
     if dataset_yaml.exists():
@@ -205,6 +365,7 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
     observed_class_ids: set[int] = set()
     total_predictions = 0
     total_references = 0
+    per_case_results: list[dict[str, Any]] = []
 
     for case_name in common_cases:
         detections = _load_prediction_case(prediction_files[case_name])
@@ -219,31 +380,18 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
 
         target_class_stats.append(gt_cls)
 
-        if detections.shape[0] == 0:
+        per_case_metrics, aggregate_payload = _evaluate_single_case(
+            case_name=case_name,
+            detections=detections,
+            gt_cls=gt_cls,
+            gt_boxes=gt_boxes,
+        )
+        per_case_results.append(per_case_metrics)
+
+        if aggregate_payload is None:
             continue
 
-        pred_cls = detections[:, 7].to(dtype=torch.int64)
-        conf = detections[:, 6]
-        if gt_boxes.shape[0] == 0:
-            shape = (detections.shape[0], IOU_THRESHOLDS.shape[0])
-            tp = torch.zeros(shape, dtype=torch.bool)
-            fp = torch.ones(shape, dtype=torch.bool)
-            tp_agnostic = torch.zeros(shape, dtype=torch.bool)
-            fp_agnostic = torch.ones(shape, dtype=torch.bool)
-        else:
-            iou = box_iou(gt_boxes, detections[:, :6])
-            tp, fp = _match_predictions(
-                pred_cls,
-                gt_cls,
-                iou,
-                class_agnostic=False,
-            )
-            tp_agnostic, fp_agnostic = _match_predictions(
-                pred_cls,
-                gt_cls,
-                iou,
-                class_agnostic=True,
-            )
+        tp, fp, tp_agnostic, fp_agnostic, conf, pred_cls = aggregate_payload
 
         tp_stats.append(tp)
         fp_stats.append(fp)
@@ -311,6 +459,7 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
         "metrics": {
             "summary": metrics_summary,
             "per_class": per_class,
+            "per_case": _sort_per_case_results(per_case_results),
         },
         "metadata": {
             "prediction_dir": str(predictions_dir),

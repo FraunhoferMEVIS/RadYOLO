@@ -939,15 +939,24 @@ def predict(
     ),
     default=Path("evaluation_results"),
     show_default=True,
-    help="Output directory where metrics.json, metadata.json, and curves.json will be written.",
+    help=(
+        "Output directory where metrics.json, metrics_per_case.json, metadata.json, "
+        "and curves.json will be written."
+    ),
 )
 def evaluate_predictions(predictions_dir: Path, labels_dir: Path, output: Path) -> int:
     """Compute detection metrics for prediction JSON files against RadYOLO label files."""
     try:
         summary = evaluate_prediction_folder(predictions_dir, labels_dir)
         output.mkdir(parents=True, exist_ok=True)
+        metrics_payload = dict(summary["metrics"])
+        per_case_payload = metrics_payload.pop("per_case", [])
         (output / "metrics.json").write_text(
-            json.dumps(summary["metrics"], indent=2, sort_keys=True),
+            json.dumps(metrics_payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        (output / "metrics_per_case.json").write_text(
+            json.dumps(per_case_payload, indent=2, sort_keys=True),
             encoding="utf-8",
         )
         (output / "metadata.json").write_text(
