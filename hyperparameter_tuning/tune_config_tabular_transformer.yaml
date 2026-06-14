@@ -1,0 +1,131 @@
+template_config: ../config/config.yaml
+output_root: hyperparameter_tuning/runs
+experiment_name: tabular_transformer_hecktor_example
+
+# Keep the tabular-only dataloader in-process so cached tensors stay local to each trial.
+dataloader_workers: 0
+
+tune:
+  metric: dataset_metric_aggregate/metrics/image_label_balanced_accuracy
+  mode: max
+  num_samples: 50
+  max_concurrent_trials: 1
+  use_short_trial_dirnames: true
+  resources:
+    cpu: 6
+    gpu: 1
+
+metrics:
+  tracked_columns:
+    - metrics/image_label_balanced_accuracy
+    - metrics/image_label_multiclass_roc_auc
+    - metrics/image_label_c_index
+  rolling_window_epochs: 20
+  dataset_aggregation: mean
+  failure_metric: 0.0
+
+common_train_overrides:
+  enable_image_label_head: true
+  enable_tabular_image_label_fusion: true
+  plots: false
+  resume: false
+  exist_ok: true
+
+  # Standard RadYOLO training hyperparameters used by the tabular-only loop.
+  epochs: 1000
+  patience: 300
+  batch_size: 2
+  nominal_batch_size: 14
+  optimizer: SGD
+  muon_weight: 0.5
+  initial_learning_rate: 0.0143
+  final_learning_rate_ratio: 0.0164
+  momentum: 0.875
+  weight_decay: 5.45e-06
+  warmup_epochs: 4.4
+  warmup_momentum: 0.72
+  warmup_bias_lr: 0.0021
+  grad_clip_max_norm: 11.6
+  image_label_multiclass_cce_gain: 1.0
+  image_label_survival_mtlr_gain: 1.0
+  image_label_survival_cox_gain: 1.0
+  image_label_survival_num_bins: 32
+
+datasets:
+  - name: HECKTOR_cropped
+    data: D:/datasets/HECKTOR_2026/radyolo_hecktor_2026
+    fold: 0
+    split_file_name: data_splits.json
+    overrides:
+      input_channels: 2
+      model_scale: s
+      patch_size: {x: 128, y: 128, z: 128}
+      apply_preprocessing: false
+      normalization:
+        type: none
+
+search_space:
+  optimizer:
+    type: choice
+    values: [MuSGD, SGD]
+
+  muon_weight:
+    type: uniform
+    lower: 0.05
+    upper: 0.95
+
+  image_label_head_projection_channels:
+    type: qrandint
+    lower: 32
+    upper: 256
+    q: 1
+    cast: int
+  image_label_head_mlp_hidden_layers:
+    type: qrandint
+    lower: 1
+    upper: 4
+    q: 1
+    cast: int
+  image_label_head_mlp_hidden_channels:
+    type: qrandint
+    lower: 32
+    upper: 512
+    q: 1
+    cast: int
+  image_label_head_dropout:
+    type: uniform
+    lower: 0.0
+    upper: 0.5
+
+  tabular_transformer_d_model:
+    type: qrandint
+    lower: 24
+    upper: 192
+    q: 24
+    cast: int
+  tabular_transformer_num_heads:
+    type: qrandint
+    lower: 2
+    upper: 10
+    q: 2
+    cast: int
+  tabular_transformer_num_layers:
+    type: qrandint
+    lower: 2
+    upper: 6
+    q: 1
+    cast: int
+  tabular_transformer_feedforward_channels:
+    type: qrandint
+    lower: 64
+    upper: 512
+    q: 8
+    cast: int
+  tabular_transformer_dropout:
+    type: uniform
+    lower: 0.0
+    upper: 0.5
+  tabular_feature_mask_augmentation_prob:
+    type: uniform
+    lower: 0.0
+    upper: 0.3
