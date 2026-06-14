@@ -13,7 +13,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -70,7 +70,10 @@ from radyolo.data.tabular import (  # noqa: E402
     load_tabular_feature_names,
 )
 from radyolo.models.layers import ModelOutput  # noqa: E402
-from radyolo.models.model import TabularTransformerEncoder  # noqa: E402
+from radyolo.models.model import (  # noqa: E402
+    TabularTransformerEncoder,
+    TabularTransformerEncoderV2,
+)
 from radyolo.training.loss import (  # noqa: E402
     ImageLabelClassificationLoss,
     ImageLabelSurvivalLoss,
@@ -160,6 +163,7 @@ class TabularImageLabelModel(nn.Module):
         image_label_head_mlp_hidden_layers: int,
         image_label_head_mlp_hidden_channels: int,
         image_label_head_dropout: float,
+        tabular_transformer_variant: Literal["v1", "v2"],
         tabular_transformer_d_model: int,
         tabular_transformer_num_heads: int,
         tabular_transformer_num_layers: int,
@@ -171,7 +175,12 @@ class TabularImageLabelModel(nn.Module):
             msg = "Tabular image-label model requires at least one image-label task"
             raise ValueError(msg)
         self.image_label_task_specs = dict(task_specs)
-        self.tabular_encoder = TabularTransformerEncoder(
+        tabular_encoder_class: type[TabularTransformerEncoder | TabularTransformerEncoderV2]
+        if tabular_transformer_variant == "v2":
+            tabular_encoder_class = TabularTransformerEncoderV2
+        else:
+            tabular_encoder_class = TabularTransformerEncoder
+        self.tabular_encoder = tabular_encoder_class(
             num_features=num_features,
             d_model=tabular_transformer_d_model,
             num_heads=tabular_transformer_num_heads,
@@ -438,6 +447,7 @@ def _build_model(
         image_label_head_mlp_hidden_layers=config.image_label_head_mlp_hidden_layers,
         image_label_head_mlp_hidden_channels=config.image_label_head_mlp_hidden_channels,
         image_label_head_dropout=config.image_label_head_dropout,
+        tabular_transformer_variant=config.tabular_transformer_variant,
         tabular_transformer_d_model=config.tabular_transformer_d_model,
         tabular_transformer_num_heads=config.tabular_transformer_num_heads,
         tabular_transformer_num_layers=config.tabular_transformer_num_layers,

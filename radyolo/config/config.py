@@ -118,6 +118,7 @@ class DefaultConfig(BaseModel):
     image_label_survival_mtlr_gain: float = Field(1.0, ge=0.0)
     image_label_survival_cox_gain: float = Field(1.0, ge=0.0)
     enable_tabular_image_label_fusion: bool = False
+    tabular_transformer_variant: Literal["v1", "v2"] = "v1"
     tabular_transformer_d_model: int = Field(64, ge=1)
     tabular_transformer_num_heads: int = Field(4, ge=1)
     tabular_transformer_num_layers: int = Field(2, ge=1)

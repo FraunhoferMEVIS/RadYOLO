@@ -42,6 +42,7 @@ image_label_survival_num_bins: 32              # (int) number of monotone surviv
 image_label_survival_mtlr_gain: 1.0            # (float) gain for masked multi-task logistic survival loss; ignored when 0
 image_label_survival_cox_gain: 1.0             # (float) gain for Cox partial likelihood on the derived survival risk; ignored when 0
 enable_tabular_image_label_fusion: True       # (bool) fuse tabular inputs into image-wise prediction head using a transformer encoder
+tabular_transformer_variant: "v1"             # (literal) choose tabular encoder variant, choices=[v1, v2]; v1 preserves historical behavior
 tabular_transformer_d_model: 64                # (int) transformer token width for tabular feature encoding
 tabular_transformer_num_heads: 4               # (int) multi-head attention heads for tabular encoder
 tabular_transformer_num_layers: 2              # (int) transformer encoder depth for tabular inputs
