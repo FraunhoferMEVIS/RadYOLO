@@ -410,9 +410,6 @@ def convert_dataset_to_nndetection(
     return task_dir
 
 
-__all__ = ["convert_dataset_to_nndetection"]
-
-
 def _convert_one_case(
     dataset_dir_str: str, cid: str, out_img_dir_str: str, out_lbl_dir_str: str
 ) -> tuple[bool, str, str, list[str], str, str]:

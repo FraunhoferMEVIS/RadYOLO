@@ -15,6 +15,7 @@ from radyolo.config.propose_model_config import propose_model_config as propose_
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
+from radyolo.data.convert_to_nnunet import convert_dataset_to_nnunet
 from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import export_model
@@ -687,6 +688,129 @@ def convert_to_nndetection(
             split_file_name=split_file_name,
         )
         LOGGER.info("Created %s", task_dir)
+    except Exception as e:
+        LOGGER.exception("Failed to convert dataset", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("convert-to-nnunet")
+@click.argument(
+    "dataset_path",
+    metavar="DATASET-PATH",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--out-root",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=Path.cwd(),
+    show_default=True,
+    help="Root folder containing DatasetXXX_* folders (nnUNet_raw).",
+)
+@click.option(
+    "--dataset-id",
+    "task_id",
+    type=int,
+    default=100,
+    show_default=True,
+    help="Dataset number for DatasetXXX_Name.",
+)
+@click.option(
+    "--task-id",
+    "task_id",
+    type=int,
+    help="Alias for --dataset-id.",
+    hidden=True,
+)
+@click.option(
+    "--dataset-name",
+    "task_name",
+    type=str,
+    default=None,
+    help="Dataset name (defaults to dataset folder name).",
+)
+@click.option(
+    "--task-name",
+    "task_name",
+    type=str,
+    help="Alias for --dataset-name.",
+    hidden=True,
+)
+@click.option(
+    "--fold", type=int, default=0, show_default=True, help="Fold index from data_splits.json."
+)
+@click.option(
+    "--include-val-in-train/--no-include-val-in-train",
+    default=True,
+    show_default=True,
+    help="Add validation cases to imagesTr/labelsTr so exported nnU-Net splits remain usable.",
+)
+@click.option(
+    "--modality",
+    type=str,
+    default="CT",
+    show_default=True,
+    help="Base modality name for dataset.json channel_names.",
+)
+@click.option(
+    "--workers",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Number of parallel processes (0 = use CPU count).",
+)
+@click.option(
+    "--split-file-name",
+    default="data_splits.json",
+    show_default=True,
+    type=str,
+    help="Name of the split file to read from the input dataset.",
+)
+@click.option(
+    "--export-split-file-name",
+    default="splits_final.json",
+    show_default=True,
+    type=str,
+    help="Name of the nnU-Net split file to write into the output dataset folder.",
+)
+def convert_to_nnunet(  # noqa: PLR0913
+    dataset_path: Path,
+    out_root: Path,
+    task_id: int,
+    task_name: str | None,
+    fold: int,
+    include_val_in_train: bool,
+    modality: str,
+    workers: int,
+    split_file_name: str,
+    export_split_file_name: str,
+) -> int:
+    """Convert a RadYOLO dataset to nnU-Net Dataset folder structure.
+
+    DATASET_PATH must contain images/ (.nii.gz), labels/ (.txt) and optional masks/ (.nii.gz).
+    """
+    try:
+        dataset_dir = convert_dataset_to_nnunet(
+            dataset_dir=dataset_path,
+            out_root=out_root,
+            dataset_id=task_id,
+            dataset_name=task_name,
+            fold=fold,
+            include_val_in_train=include_val_in_train,
+            modality_name=modality,
+            workers=workers,
+            split_file_name=split_file_name,
+            export_split_file_name=export_split_file_name,
+        )
+        LOGGER.info("Created %s", dataset_dir)
     except Exception as e:
         LOGGER.exception("Failed to convert dataset", exc_info=e)
         return 1
