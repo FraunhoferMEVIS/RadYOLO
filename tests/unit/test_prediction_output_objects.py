@@ -405,6 +405,123 @@ def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> 
     assert captured["original_shape"] == (2, 2, 2)
 
 
+def test_predict_loaded_image_skips_masks_when_disabled(monkeypatch, tmp_path) -> None:
+    loaded_image = _LoadedImageTask(
+        case_name="case_no_masks",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+    )
+
+    class _DummySegmentationModel:
+        device = torch.device("cpu")
+
+        def __call__(self, image: torch.Tensor) -> ModelOutput:
+            del image
+            return ModelOutput(
+                decoded_boxes=torch.zeros((1, 6, 1), dtype=torch.float32),
+                class_probabilities=torch.ones((1, 1, 1), dtype=torch.float32),
+                mask_coefficients=torch.ones((1, 2, 1), dtype=torch.float32),
+                prototype_masks=torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
+            )
+
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.tensor(
+                [[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.95, 0.0, 0.5, 0.25]],
+                dtype=torch.float32,
+            ),
+            torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
+        ),
+    )
+
+    write_task = _predict_loaded_image(
+        loaded_image,
+        model=_DummySegmentationModel(),
+        train_config=_DummyTrainConfig(),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="cpu",
+            clip_boxes_to_image=False,
+            save_masks=False,
+        ),
+    )
+
+    assert write_task.image_results
+    assert "mask_path" not in write_task.image_results[0]
+    assert write_task.prototype_masks is None
+    assert write_task.mask_detections == []
+
+
+def test_predict_patchwise_image_skips_mask_reconstruction_when_disabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    loaded_image = _LoadedImageTask(
+        case_name="case_patch_no_masks",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+    )
+
+    class _DummySegmentationModel:
+        device = torch.device("cpu")
+
+        def __call__(self, image: torch.Tensor) -> ModelOutput:
+            del image
+            return ModelOutput(
+                decoded_boxes=torch.zeros((1, 6, 1), dtype=torch.float32),
+                class_probabilities=torch.ones((1, 1, 1), dtype=torch.float32),
+                mask_coefficients=torch.ones((1, 2, 1), dtype=torch.float32),
+                prototype_masks=torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
+            )
+
+    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.tensor(
+                [[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.9, 0.0, 0.2, 0.3]],
+                dtype=torch.float32,
+            ),
+            torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
+        ),
+    )
+
+    def fail_reconstruct(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("mask reconstruction should not run when save_masks is disabled")
+
+    monkeypatch.setattr(predict_module, "_reconstruct_patch_mask_to_image", fail_reconstruct)
+
+    write_task = _predict_patchwise_image(
+        loaded_image,
+        model=_DummySegmentationModel(),
+        train_config=_DummyTrainConfig(training_mode="patchwise"),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="cpu",
+            clip_boxes_to_image=False,
+            save_masks=False,
+        ),
+    )
+
+    assert write_task.image_results
+    assert "mask_path" not in write_task.image_results[0]
+    assert write_task.merged_mask_probabilities == []
+
+
 def test_get_patch_starts_covers_image_with_requested_overlap() -> None:
     assert _get_patch_starts(10, 4, 0.5) == [0, 2, 4, 6]
     assert _get_patch_starts(3, 4, 0.5) == [0]

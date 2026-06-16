@@ -941,6 +941,12 @@ def convert_to_nnunet(  # noqa: PLR0913
     help="Number of writer processes that export JSON and masks.",
 )
 @click.option(
+    "--save-masks/--no-save-masks",
+    default=True,
+    show_default=True,
+    help="Export segmentation masks when the model outputs mask coefficients.",
+)
+@click.option(
     "--split-file",
     type=click.Path(
         exists=True,
@@ -986,6 +992,7 @@ def predict(
     preprocessing_on_gpu: bool,
     num_load_workers: int,
     num_write_workers: int,
+    save_masks: bool,
     split_file: Path | None,
     split_fold: int,
     split_group: str,
@@ -1017,6 +1024,7 @@ def predict(
                 preprocessing_on_gpu=preprocessing_on_gpu,
                 num_load_workers=num_load_workers,
                 num_write_workers=num_write_workers,
+                save_masks=save_masks,
                 split_file=split_file,
                 split_fold=split_fold,
                 split_group=split_group.lower(),

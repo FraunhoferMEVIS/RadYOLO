@@ -82,6 +82,7 @@ class PredictionConfig:
     split_file: Path | None = None
     split_fold: int = 0
     split_group: str = "test"
+    save_masks: bool = True
 
 
 def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
@@ -571,9 +572,13 @@ def _predict_whole_image(
             affine=loaded_image.affine,
             original_shape=original_shape,
             names=names,
-            include_masks=model_output.mask_coefficients is not None and proto_masks is not None,
+            include_masks=(
+                prediction_config.save_masks
+                and model_output.mask_coefficients is not None
+                and proto_masks is not None
+            ),
         )
-        if mask_detections and proto_masks is not None:
+        if prediction_config.save_masks and mask_detections and proto_masks is not None:
             prototype_masks = _to_numpy_float32_contiguous(proto_masks[0])
     return _WriteTask(
         case_name=loaded_image.case_name,
@@ -661,7 +666,11 @@ def _predict_patchwise_image(
             merged_detections.append(
                 _shift_detection_to_image(weighted_detection, patch_origin_xyz)
             )
-            if model_output.mask_coefficients is not None and prototype_cpu is not None:
+            if (
+                prediction_config.save_masks
+                and model_output.mask_coefficients is not None
+                and prototype_cpu is not None
+            ):
                 full_mask = _reconstruct_patch_mask_to_image(
                     detection.detach().to(dtype=torch.float32).clone(),
                     prototype_cpu,
@@ -704,7 +713,7 @@ def _predict_patchwise_image(
         affine=loaded_image.affine,
         original_shape=original_shape,
         names=names,
-        include_masks=bool(selected_masks),
+        include_masks=prediction_config.save_masks and bool(selected_masks),
     )
     return _WriteTask(
         case_name=loaded_image.case_name,
