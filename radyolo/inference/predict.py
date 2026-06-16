@@ -62,6 +62,13 @@ class _WorkerFailure:
     traceback_text: str
 
 
+@dataclass(slots=True)
+class _PatchMaskCandidate:
+    detection: torch.Tensor
+    prototype_masks: torch.Tensor
+    patch_origin_xyz: tuple[int, int, int]
+
+
 @dataclass
 class PredictionConfig:
     model_path: Path
@@ -627,7 +634,7 @@ def _predict_patchwise_image(
         torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     )
     merged_detections: list[torch.Tensor] = []
-    merged_masks: list[np.ndarray] = []
+    patch_mask_candidates: list[_PatchMaskCandidate | None] = []
     for patch_origin_xyz in _iter_patch_origins(
         inference_shape_xyz,
         patch_shape_xyz,
@@ -657,6 +664,11 @@ def _predict_patchwise_image(
             if proto_masks is not None
             else None
         )
+        has_patch_masks = (
+            prediction_config.save_masks
+            and model_output.mask_coefficients is not None
+            and prototype_cpu is not None
+        )
         for detection in detections:
             weighted_detection = _apply_patch_border_weight(
                 detection,
@@ -666,20 +678,16 @@ def _predict_patchwise_image(
             merged_detections.append(
                 _shift_detection_to_image(weighted_detection, patch_origin_xyz)
             )
-            if (
-                prediction_config.save_masks
-                and model_output.mask_coefficients is not None
-                and prototype_cpu is not None
-            ):
-                full_mask = _reconstruct_patch_mask_to_image(
-                    detection.detach().to(dtype=torch.float32).clone(),
-                    prototype_cpu,
-                    patch_shape_zyx,
-                    inference_shape,
-                    patch_origin_xyz,
+            if has_patch_masks:
+                patch_mask_candidates.append(
+                    _PatchMaskCandidate(
+                        detection=detection.detach().to(dtype=torch.float32).clone(),
+                        prototype_masks=prototype_cpu,
+                        patch_origin_xyz=patch_origin_xyz,
+                    )
                 )
-                if full_mask is not None:
-                    merged_masks.append(_to_numpy_float32_contiguous(full_mask))
+            else:
+                patch_mask_candidates.append(None)
 
     merged_prediction_tensor, keep_indices = _merge_patch_detections(
         merged_detections,
@@ -699,7 +707,23 @@ def _predict_patchwise_image(
 
     if prediction_config.clip_boxes_to_image:
         ops.clip_boxes(merged_prediction_tensor[:, :6], inference_shape)
-    selected_masks = [merged_masks[index] for index in keep_indices] if merged_masks else []
+    selected_masks: list[np.ndarray] = []
+    if prediction_config.save_masks:
+        for index in keep_indices:
+            if index >= len(patch_mask_candidates):
+                continue
+            candidate = patch_mask_candidates[index]
+            if candidate is None:
+                continue
+            full_mask = _reconstruct_patch_mask_to_image(
+                candidate.detection,
+                candidate.prototype_masks,
+                patch_shape_zyx,
+                inference_shape,
+                candidate.patch_origin_xyz,
+            )
+            if full_mask is not None:
+                selected_masks.append(_to_numpy_float32_contiguous(full_mask))
     ops.scale_boxes(
         inference_shape,
         merged_prediction_tensor[:, :6],

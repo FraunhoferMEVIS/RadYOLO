@@ -522,6 +522,97 @@ def test_predict_patchwise_image_skips_mask_reconstruction_when_disabled(
     assert write_task.merged_mask_probabilities == []
 
 
+def test_predict_patchwise_image_reconstructs_masks_only_for_kept_detections(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    loaded_image = _LoadedImageTask(
+        case_name="case_patch_kept_masks",
+        affine=np.eye(4, dtype=np.float32),
+        image=np.zeros((4, 5, 6), dtype=np.float32),
+    )
+
+    class _DummySegmentationModel:
+        device = torch.device("cpu")
+
+        def __call__(self, image: torch.Tensor) -> ModelOutput:
+            del image
+            return ModelOutput(
+                decoded_boxes=torch.zeros((1, 6, 2), dtype=torch.float32),
+                class_probabilities=torch.ones((1, 1, 2), dtype=torch.float32),
+                mask_coefficients=torch.ones((1, 2, 2), dtype=torch.float32),
+                prototype_masks=torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
+            )
+
+    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module,
+        "_postprocess_single",
+        lambda model_output, train_config, prediction_config, num_classes: (
+            torch.tensor(
+                [
+                    [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.8, 0.0, 0.2, 0.3],
+                    [0.0, 0.0, 0.0, 1.2, 1.2, 1.2, 0.7, 0.0, 0.4, 0.5],
+                ],
+                dtype=torch.float32,
+            ),
+            torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
+        ),
+    )
+
+    def fake_merge_patch_detections(
+        detections,
+        *,
+        iou_threshold: float,
+        agnostic_nms: bool,
+        max_det: int,
+    ):
+        del iou_threshold, agnostic_nms, max_det
+        return torch.stack([detections[1]], dim=0), [1]
+
+    reconstructed: list[float] = []
+
+    def fake_reconstruct_patch_mask_to_image(
+        detection: torch.Tensor,
+        prototype_masks: torch.Tensor,
+        patch_shape_zyx: tuple[int, int, int],
+        image_shape_zyx: tuple[int, int, int],
+        patch_origin_xyz: tuple[int, int, int],
+    ) -> torch.Tensor:
+        del prototype_masks, patch_shape_zyx, image_shape_zyx, patch_origin_xyz
+        reconstructed.append(float(detection[6].item()))
+        return torch.ones((6, 5, 4), dtype=torch.float32)
+
+    monkeypatch.setattr(predict_module, "_merge_patch_detections", fake_merge_patch_detections)
+    monkeypatch.setattr(
+        predict_module,
+        "_reconstruct_patch_mask_to_image",
+        fake_reconstruct_patch_mask_to_image,
+    )
+
+    write_task = _predict_patchwise_image(
+        loaded_image,
+        model=_DummySegmentationModel(),
+        train_config=_DummyTrainConfig(training_mode="patchwise"),
+        names={0: "class_0"},
+        prediction_config=PredictionConfig(
+            model_path=tmp_path / "model.pt",
+            input_dir=tmp_path / "input",
+            output_dir=tmp_path / "output",
+            confidence_threshold=0.1,
+            nms_iou_threshold=0.2,
+            device="cpu",
+            clip_boxes_to_image=False,
+            save_masks=True,
+        ),
+    )
+
+    assert reconstructed == pytest.approx([0.7])
+    assert len(write_task.merged_mask_probabilities) == 1
+    assert write_task.image_results
+    assert "mask_path" in write_task.image_results[0]
+
+
 def test_get_patch_starts_covers_image_with_requested_overlap() -> None:
     assert _get_patch_starts(10, 4, 0.5) == [0, 2, 4, 6]
     assert _get_patch_starts(3, 4, 0.5) == [0]
