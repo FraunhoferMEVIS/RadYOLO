@@ -124,6 +124,8 @@ class DefaultConfig(BaseModel):
     tabular_transformer_num_layers: int = Field(2, ge=1)
     tabular_transformer_feedforward_channels: int = Field(256, ge=1)
     tabular_transformer_dropout: float = Field(0.1, ge=0.0, lt=1.0)
+    tabular_transformer_v2_per_feature_value_projection: bool = False
+    tabular_transformer_v2_shared_mask_token: bool = False
     tabular_feature_mask_augmentation_prob: float = Field(0.1, ge=0.0, le=1.0)
 
     # Hyperparameters

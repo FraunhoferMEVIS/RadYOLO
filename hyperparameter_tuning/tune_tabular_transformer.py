@@ -169,25 +169,34 @@ class TabularImageLabelModel(nn.Module):
         tabular_transformer_num_layers: int,
         tabular_transformer_feedforward_channels: int,
         tabular_transformer_dropout: float,
+        tabular_transformer_v2_per_feature_value_projection: bool,
+        tabular_transformer_v2_shared_mask_token: bool,
     ) -> None:
         super().__init__()
         if not task_specs:
             msg = "Tabular image-label model requires at least one image-label task"
             raise ValueError(msg)
         self.image_label_task_specs = dict(task_specs)
-        tabular_encoder_class: type[TabularTransformerEncoder | TabularTransformerEncoderV2]
         if tabular_transformer_variant == "v2":
-            tabular_encoder_class = TabularTransformerEncoderV2
+            self.tabular_encoder = TabularTransformerEncoderV2(
+                num_features=num_features,
+                d_model=tabular_transformer_d_model,
+                num_heads=tabular_transformer_num_heads,
+                num_layers=tabular_transformer_num_layers,
+                feedforward_channels=tabular_transformer_feedforward_channels,
+                dropout=tabular_transformer_dropout,
+                per_feature_value_projection=tabular_transformer_v2_per_feature_value_projection,
+                shared_mask_token=tabular_transformer_v2_shared_mask_token,
+            )
         else:
-            tabular_encoder_class = TabularTransformerEncoder
-        self.tabular_encoder = tabular_encoder_class(
-            num_features=num_features,
-            d_model=tabular_transformer_d_model,
-            num_heads=tabular_transformer_num_heads,
-            num_layers=tabular_transformer_num_layers,
-            feedforward_channels=tabular_transformer_feedforward_channels,
-            dropout=tabular_transformer_dropout,
-        )
+            self.tabular_encoder = TabularTransformerEncoder(
+                num_features=num_features,
+                d_model=tabular_transformer_d_model,
+                num_heads=tabular_transformer_num_heads,
+                num_layers=tabular_transformer_num_layers,
+                feedforward_channels=tabular_transformer_feedforward_channels,
+                dropout=tabular_transformer_dropout,
+            )
         self.tabular_projection = nn.Sequential(
             nn.Linear(tabular_transformer_d_model, image_label_head_projection_channels),
             nn.SiLU(),
@@ -453,6 +462,10 @@ def _build_model(
         tabular_transformer_num_layers=config.tabular_transformer_num_layers,
         tabular_transformer_feedforward_channels=config.tabular_transformer_feedforward_channels,
         tabular_transformer_dropout=config.tabular_transformer_dropout,
+        tabular_transformer_v2_per_feature_value_projection=(
+            config.tabular_transformer_v2_per_feature_value_projection
+        ),
+        tabular_transformer_v2_shared_mask_token=config.tabular_transformer_v2_shared_mask_token,
     )
 
 

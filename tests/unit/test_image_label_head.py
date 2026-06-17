@@ -13,7 +13,7 @@ from radyolo.config.config import get_cfg
 from radyolo.data.augmentations import apply_tabular_mask_augmentation
 from radyolo.data.image_labels import ImageLabelTaskSpec
 from radyolo.models.layers import ModelOutput
-from radyolo.models.model import build_model_from_config
+from radyolo.models.model import TabularTransformerEncoderV2, build_model_from_config
 from radyolo.training.loss import (
     ImageLabelClassificationLoss,
     ImageLabelSurvivalLoss,
@@ -213,6 +213,60 @@ def test_build_model_from_config_fuses_tabular_inputs_for_image_label_head(tmp_p
         with_all_missing.image_label_outputs["stage"],
         with_implicit_missing.image_label_outputs["stage"],
     )
+
+
+def test_build_model_from_config_supports_v2_tabular_projection_and_mask_options(
+    tmp_path: Path,
+) -> None:
+    dataset_path = _write_image_label_dataset(tmp_path / "dataset")
+    config_path = _write_train_config(
+        tmp_path / "train.yaml",
+        dataset_path,
+        overrides={
+            "enable_tabular_image_label_fusion": True,
+            "tabular_transformer_variant": "v2",
+            "tabular_transformer_d_model": 8,
+            "tabular_transformer_num_heads": 2,
+            "tabular_transformer_num_layers": 1,
+            "tabular_transformer_feedforward_channels": 16,
+            "tabular_transformer_dropout": 0.0,
+            "tabular_transformer_v2_per_feature_value_projection": True,
+            "tabular_transformer_v2_shared_mask_token": True,
+        },
+    )
+    config = get_cfg(config_path, {})
+
+    model = build_model_from_config(config)
+    model.eval()
+
+    encoder = model.image_label_head.tabular_encoder
+    assert isinstance(encoder, TabularTransformerEncoderV2)
+    assert encoder.feature_value_projections is not None
+    assert len(encoder.feature_value_projections) == 3
+    assert encoder.feature_value_projection is None
+    assert encoder.mask_token is not None
+    assert encoder.mask_tokens is None
+
+    images = torch.zeros((2, 1, 32, 32, 32), dtype=torch.float32)
+    tabular_values = torch.tensor(
+        [
+            [73.0, 1.0, 0.0],
+            [55.0, 0.0, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+    tabular_mask = torch.tensor(
+        [
+            [True, True, False],
+            [True, True, True],
+        ],
+        dtype=torch.bool,
+    )
+
+    with torch.no_grad():
+        output = model(images, tabular_values=tabular_values, tabular_mask=tabular_mask)
+    assert output.image_label_outputs is not None
+    assert output.image_label_outputs["stage"].shape == (2, 3)
 
 
 def test_config_rejects_tabular_fusion_without_dataset_tabular_feature_names(tmp_path: Path) -> None:

@@ -48,6 +48,8 @@ tabular_transformer_num_heads: 4               # (int) multi-head attention head
 tabular_transformer_num_layers: 2              # (int) transformer encoder depth for tabular inputs
 tabular_transformer_feedforward_channels: 256  # (int) feedforward width inside each tabular transformer block
 tabular_transformer_dropout: 0.1               # (float) dropout applied in tabular transformer encoder
+tabular_transformer_v2_per_feature_value_projection: False  # (bool) for v2: use separate value projection per tabular feature instead of one shared linear layer
+tabular_transformer_v2_shared_mask_token: False  # (bool) for v2: use one shared mask token across features instead of per-feature mask tokens
 tabular_feature_mask_augmentation_prob: 0.1    # (float) train-only probability to randomly mask each observed tabular feature for robustness against missingness
 
 # Hyperparameters

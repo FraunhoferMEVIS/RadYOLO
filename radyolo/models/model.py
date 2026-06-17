@@ -269,6 +269,8 @@ class TabularTransformerEncoderV2(nn.Module):
         num_layers: int,
         feedforward_channels: int,
         dropout: float,
+        per_feature_value_projection: bool = False,
+        shared_mask_token: bool = False,
     ) -> None:
         super().__init__()
         if num_features < 1:
@@ -282,9 +284,23 @@ class TabularTransformerEncoderV2(nn.Module):
             raise ValueError(msg)
         self.num_features = num_features
         self.output_width = d_model
-        self.feature_value_projection = nn.Linear(1, d_model)
+        self.per_feature_value_projection = per_feature_value_projection
+        if self.per_feature_value_projection:
+            self.feature_value_projections = nn.ModuleList(
+                nn.Linear(1, d_model) for _ in range(num_features)
+            )
+            self.feature_value_projection = None
+        else:
+            self.feature_value_projection = nn.Linear(1, d_model)
+            self.feature_value_projections = None
         self.feature_embeddings = nn.Parameter(torch.empty(num_features, d_model))
-        self.mask_tokens = nn.Parameter(torch.empty(num_features, d_model))
+        self.shared_mask_token = shared_mask_token
+        if self.shared_mask_token:
+            self.mask_token = nn.Parameter(torch.empty(1, d_model))
+            self.mask_tokens = None
+        else:
+            self.mask_tokens = nn.Parameter(torch.empty(num_features, d_model))
+            self.mask_token = None
         self.cls_token = nn.Parameter(torch.empty(1, 1, d_model))
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -305,7 +321,10 @@ class TabularTransformerEncoderV2(nn.Module):
 
     def _reset_parameters(self) -> None:
         nn.init.normal_(self.feature_embeddings, mean=0.0, std=0.02)
-        nn.init.normal_(self.mask_tokens, mean=0.0, std=0.02)
+        if self.mask_tokens is not None:
+            nn.init.normal_(self.mask_tokens, mean=0.0, std=0.02)
+        if self.mask_token is not None:
+            nn.init.normal_(self.mask_token, mean=0.0, std=0.02)
         nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
 
     def forward(self, values: torch.Tensor, observed_mask: torch.Tensor) -> torch.Tensor:
@@ -322,13 +341,35 @@ class TabularTransformerEncoderV2(nn.Module):
             )
             raise ValueError(msg)
 
-        projected_values = self.feature_value_projection(values.unsqueeze(-1))
+        if self.feature_value_projections is not None:
+            projected_values = torch.stack(
+                [
+                    projection(values[:, feature_index : feature_index + 1])
+                    for feature_index, projection in enumerate(self.feature_value_projections)
+                ],
+                dim=1,
+            )
+        else:
+            if self.feature_value_projection is None:
+                msg = "feature_value_projection is not initialized"
+                raise RuntimeError(msg)
+            projected_values = self.feature_value_projection(values.unsqueeze(-1))
         expanded_feature_embeddings = self.feature_embeddings.unsqueeze(0).expand(
             values.shape[0],
             -1,
             -1,
         )
-        expanded_mask_tokens = self.mask_tokens.unsqueeze(0).expand(values.shape[0], -1, -1)
+        if self.mask_tokens is not None:
+            expanded_mask_tokens = self.mask_tokens.unsqueeze(0).expand(values.shape[0], -1, -1)
+        else:
+            if self.mask_token is None:
+                msg = "mask_token is not initialized"
+                raise RuntimeError(msg)
+            expanded_mask_tokens = self.mask_token.unsqueeze(0).expand(
+                values.shape[0],
+                self.num_features,
+                -1,
+            )
         observed_mask_expanded = observed_mask.unsqueeze(-1)
         feature_tokens = torch.where(observed_mask_expanded, projected_values, expanded_mask_tokens)
         feature_tokens = feature_tokens + expanded_feature_embeddings
@@ -407,6 +448,8 @@ class HardcodedModel(nn.Module):
         tabular_transformer_num_layers: int = 2,
         tabular_transformer_feedforward_channels: int = 256,
         tabular_transformer_dropout: float = 0.1,
+        tabular_transformer_v2_per_feature_value_projection: bool = False,
+        tabular_transformer_v2_shared_mask_token: bool = False,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
@@ -582,21 +625,28 @@ class HardcodedModel(nn.Module):
         if self.enable_image_label_head:
             tabular_encoder = None
             if self.enable_tabular_image_label_fusion:
-                tabular_encoder_class: type[
-                    TabularTransformerEncoder | TabularTransformerEncoderV2
-                ]
                 if tabular_transformer_variant == "v2":
-                    tabular_encoder_class = TabularTransformerEncoderV2
+                    tabular_encoder = TabularTransformerEncoderV2(
+                        num_features=len(self.tabular_feature_names),
+                        d_model=tabular_transformer_d_model,
+                        num_heads=tabular_transformer_num_heads,
+                        num_layers=tabular_transformer_num_layers,
+                        feedforward_channels=tabular_transformer_feedforward_channels,
+                        dropout=tabular_transformer_dropout,
+                        per_feature_value_projection=(
+                            tabular_transformer_v2_per_feature_value_projection
+                        ),
+                        shared_mask_token=tabular_transformer_v2_shared_mask_token,
+                    )
                 else:
-                    tabular_encoder_class = TabularTransformerEncoder
-                tabular_encoder = tabular_encoder_class(
-                    num_features=len(self.tabular_feature_names),
-                    d_model=tabular_transformer_d_model,
-                    num_heads=tabular_transformer_num_heads,
-                    num_layers=tabular_transformer_num_layers,
-                    feedforward_channels=tabular_transformer_feedforward_channels,
-                    dropout=tabular_transformer_dropout,
-                )
+                    tabular_encoder = TabularTransformerEncoder(
+                        num_features=len(self.tabular_feature_names),
+                        d_model=tabular_transformer_d_model,
+                        num_heads=tabular_transformer_num_heads,
+                        num_layers=tabular_transformer_num_layers,
+                        feedforward_channels=tabular_transformer_feedforward_channels,
+                        dropout=tabular_transformer_dropout,
+                    )
             self.image_label_head = GlobalImageLabelHead(
                 feature_channels={
                     "o10": output_channels[10],
@@ -821,6 +871,10 @@ def build_model_from_config(
         tabular_transformer_num_layers=train_config.tabular_transformer_num_layers,
         tabular_transformer_feedforward_channels=train_config.tabular_transformer_feedforward_channels,
         tabular_transformer_dropout=train_config.tabular_transformer_dropout,
+        tabular_transformer_v2_per_feature_value_projection=(
+            train_config.tabular_transformer_v2_per_feature_value_projection
+        ),
+        tabular_transformer_v2_shared_mask_token=train_config.tabular_transformer_v2_shared_mask_token,
     )
     if state_dict is not None:
         model.load(state_dict)
