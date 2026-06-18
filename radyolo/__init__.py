@@ -18,7 +18,7 @@ from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from radyolo.data.convert_to_nnunet import convert_dataset_to_nnunet
 from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
-from radyolo.export.onnx_export import export_model
+from radyolo.export.onnx_export import build_export_metadata, export_model
 from radyolo.inference.predict import PredictionConfig, run_prediction
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import LOG_LEVEL_ENV, Trainer
@@ -45,6 +45,30 @@ def _parse_normalization_option(
         msg = "Normalization must parse to a dict or list of dicts."
         raise click.BadParameter(msg)
     return parsed_value
+
+
+def _parse_metadata_overwrite_option(
+    _ctx: click.Context,
+    _param: click.Parameter,
+    value: tuple[str, ...],
+) -> dict[str, object]:
+    overrides: dict[str, object] = {}
+    for entry in value:
+        if "=" not in entry:
+            msg = (
+                "Metadata overwrite entries must have the format KEY=VALUE, "
+                f"but got '{entry}'."
+            )
+            raise click.BadParameter(msg)
+        key, raw_value = entry.split("=", 1)
+        key = key.strip()
+        try:
+            parsed_value = yaml.safe_load(raw_value)
+        except yaml.YAMLError as exc:
+            msg = f"Invalid metadata value for '{key}': {exc}"
+            raise click.BadParameter(msg) from exc
+        overrides[key] = parsed_value
+    return overrides
 
 
 class StdoutFilter(logging.Filter):
@@ -156,7 +180,22 @@ def train(config: Path) -> int:
     show_default=True,
     help="Internal compute dtype for the exported ONNX graph. Inputs and outputs stay float32.",
 )
-def onnx_export(model_path: Path, internal_dtype: str) -> int:
+@click.option(
+    "--metadata-overwrite",
+    "metadata_overrides",
+    multiple=True,
+    callback=_parse_metadata_overwrite_option,
+    help=(
+        "Override exported ONNX metadata property as KEY=VALUE. "
+        "Can be passed multiple times. VALUE is parsed as YAML/JSON; "
+        'example: --metadata-overwrite "normalization={type: none}".'
+    ),
+)
+def onnx_export(
+    model_path: Path,
+    internal_dtype: str,
+    metadata_overrides: dict[str, object],
+) -> int:
     """Export a ModelCheckpoint to ONNX-Format.
 
     This command expects a PATH to a ModelCheckpoint loadable by `torch.load()`, usually
@@ -174,7 +213,18 @@ def onnx_export(model_path: Path, internal_dtype: str) -> int:
         )
 
         input_shape = (train_config.input_channels, *train_config.patch_size.get_zyx())
-        export_model(model, input_shape, model_path, internal_dtype=internal_dtype.lower())
+        metadata = build_export_metadata(
+            train_config=train_config,
+            checkpoint_path=model_path,
+            metadata_overrides=metadata_overrides,
+        )
+        export_model(
+            model,
+            input_shape,
+            model_path,
+            internal_dtype=internal_dtype.lower(),
+            metadata=metadata,
+        )
     except Exception as e:  # pragma: no cover
         LOGGER.exception("An unexpected error occurred", exc_info=e)
         return 1
