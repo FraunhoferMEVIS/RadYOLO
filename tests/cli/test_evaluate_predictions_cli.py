@@ -228,3 +228,74 @@ def test_evaluate_predictions_cli_handles_reference_class_without_predictions(tm
 
     assert [entry["class"] for entry in per_class_precision] == [0, 1]
     assert all(len(entry["precision"]) == 1000 for entry in per_class_precision)
+
+
+def test_evaluate_predictions_cli_matches_dots_and_underscores(tmp_path) -> None:
+    predictions_dir = tmp_path / "predictions"
+    labels_dir = tmp_path / "labels"
+    output_dir = tmp_path / "results"
+    predictions_dir.mkdir()
+    labels_dir.mkdir()
+
+    (labels_dir / "series.001.txt").write_text("0 0.5 0.5 0.5 0.5 0.5 0.5\n", encoding="utf-8")
+    (predictions_dir / "series_001.json").write_text(
+        json.dumps(
+            [
+                {
+                    "class": 0,
+                    "confidence": 0.95,
+                    "box_relative_xyzxyz": [0.25, 0.25, 0.25, 0.75, 0.75, 0.75],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "evaluate-predictions",
+            str(predictions_dir),
+            str(labels_dir),
+            "--output",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    metadata_payload = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+    per_case_payload = json.loads((output_dir / "metrics_per_case.json").read_text(encoding="utf-8"))
+
+    assert metadata_payload["case_counts"]["common"] == 1
+    assert metadata_payload["case_counts"]["missing_in_predictions"] == 0
+    assert metadata_payload["case_counts"]["missing_in_labels"] == 0
+    assert len(per_case_payload) == 1
+    assert per_case_payload[0]["case"] == "series_001 (label:series.001)"
+
+
+def test_evaluate_predictions_cli_fails_on_ambiguous_normalized_case_names(tmp_path) -> None:
+    predictions_dir = tmp_path / "predictions"
+    labels_dir = tmp_path / "labels"
+    output_dir = tmp_path / "results"
+    predictions_dir.mkdir()
+    labels_dir.mkdir()
+
+    (labels_dir / "case_a.txt").write_text("0 0.5 0.5 0.5 0.5 0.5 0.5\n", encoding="utf-8")
+    (predictions_dir / "case.a.json").write_text("[]", encoding="utf-8")
+    (predictions_dir / "case_a.json").write_text("[]", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "evaluate-predictions",
+            str(predictions_dir),
+            str(labels_dir),
+            "--output",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Ambiguous prediction case names after normalization" in result.output

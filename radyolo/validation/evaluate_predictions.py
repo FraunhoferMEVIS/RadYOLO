@@ -343,13 +343,54 @@ def _load_names(labels_dir: Path, observed_class_ids: set[int]) -> dict[int, str
     return {class_id: f"class_{class_id}" for class_id in range(max_class_id + 1)}
 
 
+def _normalize_case_name(case_name: str) -> str:
+    # Treat dots and underscores as equivalent delimiters when matching case IDs.
+    return case_name.replace(".", "_")
+
+
+def _index_cases_by_normalized_name(
+    files: dict[str, Path],
+    *,
+    kind: str,
+) -> dict[str, tuple[str, Path]]:
+    indexed: dict[str, tuple[str, Path]] = {}
+    for stem, path in files.items():
+        normalized = _normalize_case_name(stem)
+        existing = indexed.get(normalized)
+        if existing is not None and existing[0] != stem:
+            msg = (
+                f"Ambiguous {kind} case names after normalization: "
+                f"'{existing[0]}' and '{stem}' both normalize to '{normalized}'."
+            )
+            raise ValueError(msg)
+        indexed[normalized] = (stem, path)
+    return indexed
+
+
 def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[str, Any]:
     prediction_files = {path.stem: path for path in sorted(predictions_dir.glob("*.json"))}
     label_files = {path.stem: path for path in sorted(labels_dir.glob("*.txt"))}
 
-    common_cases = sorted(set(prediction_files) & set(label_files))
-    missing_in_predictions = sorted(set(label_files) - set(prediction_files))
-    missing_in_labels = sorted(set(prediction_files) - set(label_files))
+    prediction_index = _index_cases_by_normalized_name(prediction_files, kind="prediction")
+    label_index = _index_cases_by_normalized_name(label_files, kind="reference")
+
+    common_normalized_cases = sorted(set(prediction_index) & set(label_index))
+    common_cases = [
+        (
+            prediction_index[normalized][0],
+            label_index[normalized][0],
+            prediction_index[normalized][1],
+            label_index[normalized][1],
+        )
+        for normalized in common_normalized_cases
+    ]
+
+    missing_in_predictions = sorted(
+        label_index[normalized][0] for normalized in set(label_index) - set(prediction_index)
+    )
+    missing_in_labels = sorted(
+        prediction_index[normalized][0] for normalized in set(prediction_index) - set(label_index)
+    )
 
     if not common_cases:
         msg = "No common case names found between prediction JSON files and reference label files."
@@ -367,9 +408,9 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
     total_references = 0
     per_case_results: list[dict[str, Any]] = []
 
-    for case_name in common_cases:
-        detections = _load_prediction_case(prediction_files[case_name])
-        gt_cls, gt_boxes = _load_reference_case(label_files[case_name])
+    for prediction_case_name, label_case_name, prediction_path, label_path in common_cases:
+        detections = _load_prediction_case(prediction_path)
+        gt_cls, gt_boxes = _load_reference_case(label_path)
 
         total_predictions += int(detections.shape[0])
         total_references += int(gt_cls.shape[0])
@@ -379,6 +420,10 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
             observed_class_ids.update(int(cls) for cls in detections[:, 7].tolist())
 
         target_class_stats.append(gt_cls)
+
+        case_name = prediction_case_name
+        if prediction_case_name != label_case_name:
+            case_name = f"{prediction_case_name} (label:{label_case_name})"
 
         per_case_metrics, aggregate_payload = _evaluate_single_case(
             case_name=case_name,
