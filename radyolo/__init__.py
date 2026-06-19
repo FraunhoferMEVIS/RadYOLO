@@ -19,6 +19,9 @@ from radyolo.data.convert_to_nnunet import convert_dataset_to_nnunet
 from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import build_export_metadata, export_model
+from radyolo.inference.merge_prediction_masks import (
+    merge_prediction_masks as merge_prediction_masks_fn,
+)
 from radyolo.inference.predict import PredictionConfig, run_prediction
 from radyolo.models.model import build_model_from_config
 from radyolo.training.train import LOG_LEVEL_ENV, Trainer
@@ -1157,4 +1160,39 @@ def evaluate_predictions(predictions_dir: Path, labels_dir: Path, output: Path) 
         raise click.ClickException(msg) from e
 
     click.echo(f"Wrote evaluation files to: {output!s}")
+    return 0
+
+
+@main.command("merge-prediction-masks")
+@click.argument(
+    "predictions_dir",
+    metavar="PREDICTIONS-DIR",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+@click.option(
+    "--confidence-threshold",
+    default=0.1,
+    type=float,
+    show_default=True,
+    help="Minimum detection confidence to include a mask in the merged output.",
+)
+def merge_prediction_masks(predictions_dir: Path, confidence_threshold: float) -> int:
+    """Merge per-detection prediction masks into one semantic mask per case."""
+    try:
+        output_dir = merge_prediction_masks_fn(
+            predictions_dir=predictions_dir,
+            confidence_threshold=confidence_threshold,
+        )
+    except Exception as e:  # pragma: no cover
+        LOGGER.exception("Merging prediction masks failed", exc_info=e)
+        return 1
+
+    click.echo(f"Wrote merged masks to: {output_dir!s}")
     return 0
