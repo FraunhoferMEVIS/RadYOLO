@@ -8,6 +8,7 @@ from typing import Any
 
 import nibabel as nib
 import numpy as np
+from tqdm_loggable.auto import tqdm
 
 LOGGER = logging.getLogger(__name__)
 
@@ -100,7 +101,12 @@ def merge_prediction_masks(
     output_dir = predictions_dir / "masks_merged"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for prediction_path in sorted(predictions_dir.glob("*.json")):
+    prediction_paths = sorted(predictions_dir.glob("*.json"))
+    for prediction_path in tqdm(
+        prediction_paths,
+        desc="Merging prediction masks",
+        unit="case",
+    ):
         case_name = prediction_path.stem
         parsed = json.loads(prediction_path.read_text(encoding="utf-8"))
         if not isinstance(parsed, list):
