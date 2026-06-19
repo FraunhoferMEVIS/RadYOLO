@@ -187,3 +187,44 @@ def test_evaluate_predictions_cli_reports_per_case_worst_first(tmp_path) -> None
 
     assert [entry["case"] for entry in per_case] == ["case_bad", "case_good"]
     assert per_case[0]["metrics"]["f1_iou10_95_mean"] <= per_case[1]["metrics"]["f1_iou10_95_mean"]
+
+
+def test_evaluate_predictions_cli_handles_reference_class_without_predictions(tmp_path) -> None:
+    predictions_dir = tmp_path / "predictions"
+    labels_dir = tmp_path / "labels"
+    output_dir = tmp_path / "results"
+    predictions_dir.mkdir()
+    labels_dir.mkdir()
+
+    # Two reference classes, but only class 0 has a prediction.
+    labels = "0 0.5 0.5 0.5 0.5 0.5 0.5\n1 0.2 0.2 0.2 0.2 0.2 0.2\n"
+    predictions = [
+        {
+            "class": 0,
+            "confidence": 0.95,
+            "box_relative_xyzxyz": [0.25, 0.25, 0.25, 0.75, 0.75, 0.75],
+        }
+    ]
+
+    (labels_dir / "case_common.txt").write_text(labels, encoding="utf-8")
+    (predictions_dir / "case_common.json").write_text(json.dumps(predictions), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "evaluate-predictions",
+            str(predictions_dir),
+            str(labels_dir),
+            "--output",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    curves_payload = json.loads((output_dir / "curves.json").read_text(encoding="utf-8"))
+    per_class_precision = curves_payload["precision_recall"]["per_class_precision"]
+
+    assert [entry["class"] for entry in per_class_precision] == [0, 1]
+    assert all(len(entry["precision"]) == 1000 for entry in per_class_precision)

@@ -450,10 +450,21 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
 
     pr_recall_axis = metrics.metrics.px.astype(np.float64, copy=False)
     pr_precision_curves = metrics.metrics.prec_values.astype(np.float64, copy=False)
+    class_ids = [int(class_id) for class_id in metrics.ap_class_index]
     class_names_by_id = {
-        int(class_id): names.get(int(class_id), f"class_{int(class_id)}")
-        for class_id in metrics.ap_class_index
+        class_id: names.get(class_id, f"class_{class_id}")
+        for class_id in class_ids
     }
+    num_pr_rows = int(pr_precision_curves.shape[0])
+    per_class_precision = [
+        {
+            "class": class_id,
+            "name": class_names_by_id.get(class_id, f"class_{class_id}"),
+            "precision": pr_precision_curves[row_index].tolist(),
+        }
+        for row_index, class_id in enumerate(class_ids)
+        if row_index < num_pr_rows
+    ]
 
     return {
         "metrics": {
@@ -504,14 +515,7 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
                     if pr_precision_curves.size
                     else np.zeros_like(pr_recall_axis)
                 ).tolist(),
-                "per_class_precision": [
-                    {
-                        "class": int(class_id),
-                        "name": class_names_by_id.get(int(class_id), f"class_{int(class_id)}"),
-                        "precision": pr_precision_curves[row_index].tolist(),
-                    }
-                    for row_index, class_id in enumerate(metrics.ap_class_index)
-                ],
+                "per_class_precision": per_class_precision,
             },
         },
     }

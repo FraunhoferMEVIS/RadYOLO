@@ -507,7 +507,7 @@ def ap_per_class(
     nc: int = unique_classes.shape[0]  # number of classes, number of detections
 
     # Create Precision-Recall curve and compute AP for each class
-    x, prec_values = np.linspace(0, 1, 1000), []
+    x = np.linspace(0, 1, 1000)
 
     if nc == 0:
         empty_curve = np.zeros((0, 1000), dtype=np.float32)
@@ -530,6 +530,7 @@ def ap_per_class(
 
     # Average precision, precision and recall curves
     ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+    prec_values = np.zeros((nc, 1000), dtype=np.float32)
     for class_index, c in enumerate(unique_classes):
         indices = pred_cls == c
         number_of_labels = counts[class_index]
@@ -554,9 +555,8 @@ def ap_per_class(
         for j in range(tp.shape[1]):
             ap[class_index, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
             if j == 0:
-                prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.1
-
-    prec_values = np.array(prec_values)  # (nc, 1000)
+                # Keep one row per class so this array stays aligned with unique_classes.
+                prec_values[class_index] = np.interp(x, mrec, mpre).astype(np.float32, copy=False)
 
     # Compute F1 (harmonic mean of precision and recall)
     f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
