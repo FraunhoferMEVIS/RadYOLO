@@ -14,6 +14,9 @@ from radyolo.config.config import load_model_checkpoint
 from radyolo.config.propose_model_config import propose_model_config as propose_model_config_fn
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
+from radyolo.data.convert_to_integer_encoded_masks import (
+    convert_dataset_to_integer_encoded_masks,
+)
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from radyolo.data.convert_to_nnunet import convert_dataset_to_nnunet
 from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
@@ -864,6 +867,31 @@ def convert_to_nnunet(  # noqa: PLR0913
             export_split_file_name=export_split_file_name,
         )
         LOGGER.info("Created %s", dataset_dir)
+    except Exception as e:
+        LOGGER.exception("Failed to convert dataset", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("convert-to-integer-encoded-masks")
+@click.argument(
+    "dataset_path",
+    metavar="DATASET-PATH",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+def convert_to_integer_encoded_masks(dataset_path: Path) -> int:
+    """Create integer encoded instance masks from a RadYOLO dataset."""
+    try:
+        output_dir = convert_dataset_to_integer_encoded_masks(dataset_path)
+        LOGGER.info("Created %s", output_dir)
     except Exception as e:
         LOGGER.exception("Failed to convert dataset", exc_info=e)
         return 1
