@@ -23,11 +23,19 @@ model_scale: s    # allowed values: (n, s, m, l, x)
 # Optional Segmentation Head
 segmentation_output: True            # (bool) add segmentation output to model
 prototype_masks: 8                   # (int) number of prototype masks for segmentation output
-prototype_layer: "full_resolution_v2" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution, half_resolution_v2]
+prototype_layer: "half_resolution_v2" # (literal) choose one of [higher_resolution, full_resolution, full_resolution_v2, half_resolution, half_resolution_v2]
+segmentation_head_convolutions: "regular" # (literal) choose segmentation coefficient head convolutions, choices=[regular, separable]
+segmentation_head_channel_factor: 0.25 # (float) multiplier applied to the first detection feature width for segmentation coefficient head hidden channels
 
 # Detection Head Options
 separate_objectness_head: True # (bool) if True, add a separate objectness output and use CCE loss for class logits
 include_stride4_output: False  # (bool) if True, add a detection head on stride 4 level (otherwise only on stride levels 8, 16, 32)
+classification_head_convolutions: "separable" # (literal) choose classification head convolutions, choices=[regular, separable]
+objectness_head_convolutions: "separable" # (literal) choose objectness head convolutions, choices=[regular, separable]
+box_head_convolutions: "regular" # (literal) choose box head convolutions, choices=[regular, separable]
+classification_head_channel_factor: 1.0 # (float) multiplier applied to the first detection feature width for classification head hidden channels
+objectness_head_channel_factor: 1.0 # (float) multiplier applied to the first detection feature width for objectness head hidden channels
+box_head_channel_factor: 0.25 # (float) multiplier applied to the first detection feature width for box head hidden channels
 
 # Global Image-Label Head
 enable_image_label_head: False                  # (bool) enable the global image-label head for dataset.yaml image_label_tasks

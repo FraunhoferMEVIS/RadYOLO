@@ -9,6 +9,7 @@ from torch import nn
 
 from radyolo.config.config import (
     DefaultConfig,
+    HeadConvolutionType,
     ImageLabelHeadFeature,
     ModelCheckpoint,
     PrototypeLayer,
@@ -33,6 +34,8 @@ from radyolo.models.layers import (
     PrototypeMasksHalfResolution,
     PrototypeMasksHalfResolutionV2,
     PrototypeMasksHighResolution,
+    build_detection_head_layers,
+    resolve_head_hidden_channels,
 )
 from radyolo.utils.util import intersect_dicts, make_divisible, select_device, unwrap_model
 
@@ -431,8 +434,16 @@ class HardcodedModel(nn.Module):
         enable_output_masks: bool = True,
         num_prototype_masks: int = 8,
         prototype_layer: PrototypeLayer = "higher_resolution",
+        segmentation_head_convolutions: HeadConvolutionType = "regular",
+        segmentation_head_channel_factor: float = 0.25,
         separate_objectness_head: bool = False,
         include_stride4_output: bool = False,
+        classification_head_convolutions: HeadConvolutionType = "separable",
+        objectness_head_convolutions: HeadConvolutionType = "separable",
+        box_head_convolutions: HeadConvolutionType = "regular",
+        classification_head_channel_factor: float = 1.0,
+        objectness_head_channel_factor: float = 1.0,
+        box_head_channel_factor: float = 0.25,
         image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
         enable_image_label_head: bool = False,
         image_label_head_feature_maps: list[ImageLabelHeadFeature] | None = None,
@@ -707,13 +718,18 @@ class HardcodedModel(nn.Module):
                     output_channels[0], output_channels[2], output_channels[16], num_prototype_masks
                 )
 
-            c4 = max(output_channels[16] // 4, num_prototype_masks)
+            segmentation_hidden_channels = resolve_head_hidden_channels(
+                detect_chs[0],
+                segmentation_head_channel_factor,
+                "segmentation head",
+            )
             # Build coefficient heads dynamically for 3 or 4 detection levels
             self.mask_coefficient_layer = nn.ModuleList(
-                nn.Sequential(
-                    Conv(ch, c4, 3),
-                    Conv(c4, c4, 3),
-                    nn.Conv3d(c4, num_prototype_masks, 1),
+                build_detection_head_layers(
+                    ch,
+                    segmentation_hidden_channels,
+                    num_prototype_masks,
+                    segmentation_head_convolutions,
                 )
                 for ch in detect_chs
             )
@@ -725,6 +741,12 @@ class HardcodedModel(nn.Module):
             separate_objectness_head=self.separate_objectness_head,
             bbox_parametrization=self.bbox_parametrization,
             center_offset_limit=self.bbox_center_offset_limit,
+            classification_head_convolutions=classification_head_convolutions,
+            objectness_head_convolutions=objectness_head_convolutions,
+            box_head_convolutions=box_head_convolutions,
+            classification_head_channel_factor=classification_head_channel_factor,
+            objectness_head_channel_factor=objectness_head_channel_factor,
+            box_head_channel_factor=box_head_channel_factor,
         )
         s = 256
         sample_output = self.forward(torch.zeros(1, input_channels, s, s, s))
@@ -854,8 +876,16 @@ def build_model_from_config(
         enable_output_masks=train_config.segmentation_output,
         num_prototype_masks=train_config.prototype_masks,
         prototype_layer=train_config.prototype_layer,
+        segmentation_head_convolutions=train_config.segmentation_head_convolutions,
+        segmentation_head_channel_factor=train_config.segmentation_head_channel_factor,
         separate_objectness_head=train_config.separate_objectness_head,
         include_stride4_output=train_config.include_stride4_output,
+        classification_head_convolutions=train_config.classification_head_convolutions,
+        objectness_head_convolutions=train_config.objectness_head_convolutions,
+        box_head_convolutions=train_config.box_head_convolutions,
+        classification_head_channel_factor=train_config.classification_head_channel_factor,
+        objectness_head_channel_factor=train_config.objectness_head_channel_factor,
+        box_head_channel_factor=train_config.box_head_channel_factor,
         image_label_tasks=resolved_image_label_tasks,
         enable_image_label_head=train_config.enable_image_label_head,
         image_label_head_feature_maps=train_config.image_label_head_feature_maps,

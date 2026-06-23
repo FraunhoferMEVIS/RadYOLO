@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, assert_never, cast, overload
+from typing import TYPE_CHECKING, Literal, assert_never, cast, overload
 
 import torch
 from torch import nn
@@ -498,6 +498,46 @@ class Concat(nn.Module):
         return torch.cat(x, self.d)
 
 
+def build_detection_head_layers(
+    in_channels: int,
+    hidden_channels: int,
+    out_channels: int,
+    convolution_type: Literal["regular", "separable"],
+) -> nn.Sequential:
+    if convolution_type == "regular":
+        return nn.Sequential(
+            Conv(in_channels, hidden_channels, 3),
+            Conv(hidden_channels, hidden_channels, 3),
+            nn.Conv3d(hidden_channels, out_channels, 1),
+        )
+    return nn.Sequential(
+        nn.Sequential(
+            DWConv(in_channels, in_channels, 3),
+            Conv(in_channels, hidden_channels, 1)
+        ),
+        nn.Sequential(
+            DWConv(hidden_channels, hidden_channels, 3),
+            Conv(hidden_channels, hidden_channels, 1),
+        ),
+        nn.Conv3d(hidden_channels, out_channels, 1),
+    )
+
+
+def resolve_head_hidden_channels(
+    input_channels: int,
+    factor: float,
+    head_name: str,
+) -> int:
+    hidden_channels = int(input_channels * factor)
+    if hidden_channels < 1:
+        msg = (
+            f"{head_name} factor {factor} produces invalid hidden width "
+            f"{hidden_channels} for input channels {input_channels}."
+        )
+        raise ValueError(msg)
+    return hidden_channels
+
+
 class Detect(nn.Module):
     export = False
     max_det = 300
@@ -514,6 +554,12 @@ class Detect(nn.Module):
         separate_objectness_head: bool = False,
         bbox_parametrization: BoxParametrization = "ltrb",
         center_offset_limit: float = 1.2,
+        classification_head_convolutions: Literal["regular", "separable"] = "separable",
+        objectness_head_convolutions: Literal["regular", "separable"] = "separable",
+        box_head_convolutions: Literal["regular", "separable"] = "regular",
+        classification_head_channel_factor: float = 1.0,
+        objectness_head_channel_factor: float = 1.0,
+        box_head_channel_factor: float = 0.25,
     ) -> None:
         super().__init__()
         self.nc = num_classes  # number of classes
@@ -533,32 +579,50 @@ class Detect(nn.Module):
             num_classes + 1 if self.separate_objectness_head else num_classes
         ) + self.reg_channels  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
-        c2, c3 = (
-            max((16, ch[0] // 4, self.reg_channels)),
-            max(ch[0], min(self.nc, 100)),
-        )  # channels
+        if not ch:
+            msg = "Detect requires at least one input channel specification"
+            raise ValueError(msg)
+
+        box_hidden_channels = resolve_head_hidden_channels(
+            ch[0],
+            box_head_channel_factor,
+            "box head",
+        )
+        classification_hidden_channels = resolve_head_hidden_channels(
+            ch[0],
+            classification_head_channel_factor,
+            "classification head",
+        )
         self.cv_boxes = nn.ModuleList(
-            nn.Sequential(
-                Conv(x, c2, 3),
-                Conv(c2, c2, 3),
-                nn.Conv3d(c2, self.reg_channels, 1),
+            build_detection_head_layers(
+                x,
+                box_hidden_channels,
+                self.reg_channels,
+                box_head_convolutions,
             )
             for x in ch
         )
         self.cv_classes = nn.ModuleList(
-            nn.Sequential(
-                nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
-                nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
-                nn.Conv3d(c3, self.nc, 1),
+            build_detection_head_layers(
+                x,
+                classification_hidden_channels,
+                self.nc,
+                classification_head_convolutions,
             )
             for x in ch
         )
         if self.separate_objectness_head:
+            objectness_hidden_channels = resolve_head_hidden_channels(
+                ch[0],
+                objectness_head_channel_factor,
+                "objectness head",
+            )
             self.cv_obj = nn.ModuleList(
-                nn.Sequential(
-                    nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
-                    nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
-                    nn.Conv3d(c3, 1, 1),
+                build_detection_head_layers(
+                    x,
+                    objectness_hidden_channels,
+                    1,
+                    objectness_head_convolutions,
                 )
                 for x in ch
             )

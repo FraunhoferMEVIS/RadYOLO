@@ -31,6 +31,7 @@ LOGGER = logging.getLogger(__name__)
 DEPRECATED_CONFIG_KEYS = {"deterministic", "num_classes", "nms_time_limit", "verbose"}
 PrototypeLayer = Literal["higher_resolution", "full_resolution", "full_resolution_v2", "half_resolution", "half_resolution_v2"]
 ImageLabelHeadFeature = Literal["o10", "o16", "o19", "o22"]
+HeadConvolutionType = Literal["regular", "separable"]
 
 
 @dataclass(frozen=True)
@@ -95,11 +96,19 @@ class DefaultConfig(BaseModel):
     segmentation_output: bool = True  # add segmentation output to model
     prototype_masks: int = 8  # number of prototype masks for segmentation output
     prototype_layer: PrototypeLayer = "higher_resolution"
+    segmentation_head_convolutions: HeadConvolutionType = "regular"
+    segmentation_head_channel_factor: float = Field(0.25, gt=0.0)
 
     # Detection Head Options
     # if True, add a separate objectness output and use CCE loss for class logits
     separate_objectness_head: bool = False
     include_stride4_output: bool = False  # if True, add a detection head on stride 4 level
+    classification_head_convolutions: HeadConvolutionType = "separable"
+    objectness_head_convolutions: HeadConvolutionType = "separable"
+    box_head_convolutions: HeadConvolutionType = "regular"
+    classification_head_channel_factor: float = Field(1.0, gt=0.0)
+    objectness_head_channel_factor: float = Field(1.0, gt=0.0)
+    box_head_channel_factor: float = Field(0.25, gt=0.0)
 
     # Global image-label head
     enable_image_label_head: bool = False
