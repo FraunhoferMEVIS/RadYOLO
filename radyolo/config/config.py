@@ -197,6 +197,7 @@ class DefaultConfig(BaseModel):
     class_loss_gain: float = 0.5  # classification / objectness loss gain
     class_separate_loss_gain: float = 0.5  # class loss gain for separate softmax classification
     mask_loss_gain: float = 1.0  # mask loss gain
+    mask_loss_on_only_one_grid_cell: bool = False  # if True, use one random grid cell per GT mask
     box_loss_gain: float = 7.5  # box loss gain (based on complete IoU (CIoU) loss)
     dfl_loss_gain: float = 1.5  # DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
     dfl_reg_max: int = Field(16, ge=1)  # DFL histogram size; use 1 for direct box edge regression without DFL

@@ -510,6 +510,7 @@ class DetectionSegmentationLoss:  # noqa: N801
         dfl_reg_max: int,
         bbox_center_offset_limit: float,
         mask_loss_gain: float,
+        mask_loss_on_only_one_grid_cell: bool,
         class_separate_loss_gain: float,
         detect_layer: Detect,
         device: torch.device,
@@ -538,6 +539,7 @@ class DetectionSegmentationLoss:  # noqa: N801
         self.class_separate_loss_gain = class_separate_loss_gain
         self.dfl_gain = dfl
         self.mask_loss_gain = mask_loss_gain
+        self.mask_loss_on_only_one_grid_cell = mask_loss_on_only_one_grid_cell
         self.stride: torch.Tensor = m.stride  # model strides
         self.num_classes: int = m.nc  # number of classes
         self.separate_objectness_head: bool = separate_objectness_head
@@ -805,6 +807,17 @@ class DetectionSegmentationLoss:  # noqa: N801
                             if not grid_cell_indices.any():
                                 self._epoch_warning_stats.without_assigned_grid_cells += 1
                                 continue
+                            if (
+                                self.mask_loss_on_only_one_grid_cell
+                                and grid_cell_indices.numel() > 1
+                            ):
+                                random_cell_index = torch.randint(
+                                    low=0,
+                                    high=int(grid_cell_indices.numel()),
+                                    size=(1,),
+                                    device=grid_cell_indices.device,
+                                )
+                                grid_cell_indices = grid_cell_indices[random_cell_index]
                             mask_coefficients_i = mask_coefficients[batch_index, grid_cell_indices]
                             pred_masks_logits = torch.einsum(
                                 "...n,nhwd->...hwd", mask_coefficients_i, prototype_masks_batch
@@ -910,6 +923,7 @@ def build_detection_loss_from_config(
         dfl_reg_max=train_config.dfl_reg_max,
         bbox_center_offset_limit=train_config.bbox_center_offset_limit,
         mask_loss_gain=train_config.mask_loss_gain,
+        mask_loss_on_only_one_grid_cell=train_config.mask_loss_on_only_one_grid_cell,
         class_separate_loss_gain=train_config.class_separate_loss_gain,
         detect_layer=unwrapped_model.l23,
         device=device,

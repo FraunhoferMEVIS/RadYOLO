@@ -377,6 +377,39 @@ def test_detection_loss_skips_zero_gain_image_label_losses(tmp_path: Path) -> No
     assert "img_cox" not in loss_fn.loss_names
 
 
+def test_detection_loss_propagates_single_grid_cell_mask_option(tmp_path: Path) -> None:
+    dataset_path = _write_image_label_dataset(tmp_path / "dataset")
+    default_config_path = _write_train_config(tmp_path / "train_default.yaml", dataset_path)
+    default_config = get_cfg(default_config_path, {})
+    default_model = build_model_from_config(default_config)
+    default_loss_fn = build_detection_loss_from_config(
+        default_config,
+        default_model,
+        torch.device("cpu"),
+    )
+    default_detection_loss = (
+        default_loss_fn.detection_loss if hasattr(default_loss_fn, "detection_loss") else default_loss_fn
+    )
+    assert default_detection_loss.mask_loss_on_only_one_grid_cell is False
+
+    enabled_config_path = _write_train_config(
+        tmp_path / "train_enabled.yaml",
+        dataset_path,
+        overrides={"mask_loss_on_only_one_grid_cell": True},
+    )
+    enabled_config = get_cfg(enabled_config_path, {})
+    enabled_model = build_model_from_config(enabled_config)
+    enabled_loss_fn = build_detection_loss_from_config(
+        enabled_config,
+        enabled_model,
+        torch.device("cpu"),
+    )
+    enabled_detection_loss = (
+        enabled_loss_fn.detection_loss if hasattr(enabled_loss_fn, "detection_loss") else enabled_loss_fn
+    )
+    assert enabled_detection_loss.mask_loss_on_only_one_grid_cell is True
+
+
 def test_detection_loss_keeps_mask_branch_graph_connected_without_masks(
     minimal_train_config: Path,
 ) -> None:
