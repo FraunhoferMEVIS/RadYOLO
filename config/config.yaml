@@ -42,23 +42,23 @@ enable_image_label_head: False                  # (bool) enable the global image
 image_label_head_feature_maps: ["o10", "o16", "o19", "o22"] # (list[literal]) selectable inputs from [o10, o16, o19, o22]
 image_label_head_projection_channels: 128      # (int) shared projection width for each selected feature map via 1x1x1 convolutions
 image_label_head_mlp_hidden_layers: 1          # (int) number of hidden layers in the shared MLP trunk
-image_label_head_mlp_hidden_channels: 256      # (int) width of each hidden MLP layer
-image_label_head_dropout: 0.1                  # (float) dropout applied after each hidden MLP layer
+image_label_head_mlp_hidden_channels: 320      # (int) width of each hidden MLP layer
+image_label_head_dropout: 0.4                  # (float) dropout applied after each hidden MLP layer
 image_label_multiclass_cce_gain: 1.0           # (float) gain for multiclass cross-entropy image-label loss; ignored when 0
 image_label_multiclass_cce_class_weights: {}   # (dict[str, list[float]]) optional per-task class weights keyed by dataset.yaml image_label_tasks name
 image_label_survival_num_bins: 32              # (int) number of monotone survival thresholds per survival task
-image_label_survival_mtlr_gain: 1.0            # (float) gain for masked multi-task logistic survival loss; ignored when 0
-image_label_survival_cox_gain: 1.0             # (float) gain for Cox partial likelihood on the derived survival risk; ignored when 0
+image_label_survival_mtlr_gain: 0.1            # (float) gain for masked multi-task logistic survival loss; ignored when 0
+image_label_survival_cox_gain: 0.4             # (float) gain for Cox partial likelihood on the derived survival risk; ignored when 0
 enable_tabular_image_label_fusion: False       # (bool) fuse tabular inputs into image-wise prediction head using a transformer encoder
-tabular_transformer_variant: "v1"             # (literal) choose tabular encoder variant, choices=[v1, v2]; v1 preserves historical behavior
-tabular_transformer_d_model: 64                # (int) transformer token width for tabular feature encoding
-tabular_transformer_num_heads: 4               # (int) multi-head attention heads for tabular encoder
-tabular_transformer_num_layers: 2              # (int) transformer encoder depth for tabular inputs
-tabular_transformer_feedforward_channels: 256  # (int) feedforward width inside each tabular transformer block
-tabular_transformer_dropout: 0.1               # (float) dropout applied in tabular transformer encoder
+tabular_transformer_variant: "v2"              # (literal) choose tabular encoder variant, choices=[v1, v2]; v1 preserves historical behavior
+tabular_transformer_d_model: 72                # (int) transformer token width for tabular feature encoding
+tabular_transformer_num_heads: 8               # (int) multi-head attention heads for tabular encoder
+tabular_transformer_num_layers: 4              # (int) transformer encoder depth for tabular inputs
+tabular_transformer_feedforward_channels: 160  # (int) feedforward width inside each tabular transformer block
+tabular_transformer_dropout: 0.07              # (float) dropout applied in tabular transformer encoder
 tabular_transformer_v2_per_feature_value_projection: False  # (bool) for v2: use separate value projection per tabular feature instead of one shared linear layer
-tabular_transformer_v2_shared_mask_token: False  # (bool) for v2: use one shared mask token across features instead of per-feature mask tokens
-tabular_feature_mask_augmentation_prob: 0.1    # (float) train-only probability to randomly mask each observed tabular feature for robustness against missingness
+tabular_transformer_v2_shared_mask_token: True  # (bool) for v2: use one shared mask token across features instead of per-feature mask tokens
+tabular_feature_mask_augmentation_prob: 0.23    # (float) train-only probability to randomly mask each observed tabular feature for robustness against missingness
 
 # Hyperparameters
 epochs: 1000                      # (int) number of epochs to train for
