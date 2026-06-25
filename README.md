@@ -1,20 +1,14 @@
 # RadYOLO
 
-A library to train RadYOLO, a 3D YOLO11-based deep learning model for object detection, classification and segmentation in medical images.
+RadYOLO is a 3D YOLO11-based deep learning model for object detection, classification and segmentation in medical images. It is designed for high computational efficiency to process MRI or CT volumes within seconds both on GPU as well as CPU-only systems.
 
 ## Installation
 
-This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer) and provides a `pyproject.toml`. It can therefore be installed using any standards compliant package manager, e. g.
-
-`uv build .`
-
-`pip install .`
+This project uses [`uv` for package managing](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer) and provides a `pyproject.toml`. It can therefore be installed using any standards compliant package manager, e.g. run `uv build .` or `pip install .` within the checked out repository folder to install it.
 
 ## Usage
 
 After installation this project provides a cli `radyolo` with built-in help.
-
-Available commands are `train`, `test`, `predict`, `evaluate-predictions`, `analyze-dataset`, `propose-model-config`, `create-k-fold-split`, `create-train-val-test-split`, `preprocess-data`, `onnx-export` and `convert-to-nndetection`.
 
 For further details please refer to the respective `--help` invocation.
 
@@ -27,14 +21,6 @@ uv run -m radyolo train <path-to-config-yaml>
 ```
 
 where `<path-to-config-yaml>` points to the path of a configuration file for the desired training.
-
-### Test
-
-The `test` command can be used to run a trained on the `test` split of the data (and also the `train` and `val` splits):
-
-```
-uv run -m radyolo test <path-to-model-checkpoint> <path-to-dataset-folder>
-```
 
 ### Predict
 
@@ -51,7 +37,7 @@ Here the `input-image-folder` is a folder of NifTi files, where the predict comm
 The `evaluate-predictions` command computes detection metrics directly from `predict` output JSON files and a RadYOLO `labels/` folder:
 
 ```bash
-uv run -m radyolo evaluate-predictions ./output_predict D:/datasets/LUNA16/radyolo/labels
+uv run -m radyolo evaluate-predictions <prediction_folder> <reference_label_folder>
 ```
 
 Files are matched by case name, using the JSON filename stem and label filename stem. Metrics are computed only for cases present in both folders.
@@ -184,3 +170,7 @@ Coverage analysis:
 ```bash
 uv run --group dev pytest --html=pytest-report.html --self-contained-html --cov=radyolo --cov-report=term --cov-report=xml --cov-report=html
 ```
+
+# Disclaimer
+
+The software is not qualified for use as a medical product or as part thereof. Provided 'as is' without specific verification or validation.
