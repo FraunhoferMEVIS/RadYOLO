@@ -1026,20 +1026,3 @@ def plot_image_label_validation_summary(
     output_path = save_dir / IMAGE_LABEL_SUMMARY_FNAME
     figure.savefig(output_path, dpi=250)
     plt.close(figure)
-
-
-def output_to_target(
-    output: list[torch.Tensor], max_det: int = 300, axis: int = 2
-) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-    """Convert model output to plotting target format [batch_id, class_id, x, y, z, w, h, d conf].
-
-    Results are flattened to 2d for easier visualization.
-    """
-    idx = [i for i in range(6) if i % 3 != axis]
-    targets: list[torch.Tensor] = []
-    for i, o in enumerate(output):
-        box, conf, cls = o[:max_det, :8].cpu().split((6, 1, 1), 1)
-        j = torch.full((conf.shape[0], 1), i)
-        targets.append(torch.cat((j, cls, ops.xyxy2xywh(box[:, idx]), conf), 1))
-    targets_ = torch.cat(targets, 0).numpy()
-    return targets_[:, 0], targets_[:, 1], targets_[:, 2:-1], targets_[:, -1]

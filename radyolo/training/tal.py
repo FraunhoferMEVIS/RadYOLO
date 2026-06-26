@@ -340,7 +340,7 @@ class TaskAlignedAssigner(nn.Module):
 
     def iou_calculation(self, gt_bboxes: torch.Tensor, pd_bboxes: torch.Tensor) -> torch.Tensor:
         """IoU calculation for horizontal bounding boxes."""
-        return bbox_iou(gt_bboxes, pd_bboxes, xyzwhd=False, CIoU=True).squeeze(-1).clamp_(0)
+        return bbox_iou(gt_bboxes, pd_bboxes, CIoU=True).squeeze(-1).clamp_(0)
 
     def select_topk_candidates(
         self, metrics: torch.Tensor, largest: bool = True, topk_mask: torch.Tensor | None = None
