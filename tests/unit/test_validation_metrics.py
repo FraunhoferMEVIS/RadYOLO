@@ -435,3 +435,270 @@ def test_smoothed_mean_confidence_curve_matches_plot_line_definition() -> None:
     assert _smoothed_mean_confidence_curve(np.zeros((0, 5), dtype=np.float32), px) == pytest.approx(
         np.zeros_like(px)
     )
+
+
+def test_validator_update_dice_for_image_accumulates_perfect_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.init_metrics()
+
+    monkeypatch.setattr(
+        validator,
+        "_get_matches",
+        lambda *_args, **_kwargs: (np.array([0], dtype=int), np.array([0], dtype=int)),
+    )
+    monkeypatch.setattr(
+        "radyolo.validation.validate.ops.reconstruct_mask_probabilities",
+        lambda _coeff, _prototypes: torch.ones((2, 2, 2), dtype=torch.float32),
+    )
+
+    validator._update_dice_for_image(
+        predn=torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.9, 0.0]], dtype=torch.float32),
+        pred_with_coeffs=torch.tensor(
+            [[0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.9, 0.0, 1.0]],
+            dtype=torch.float32,
+        ),
+        gt_bboxes=torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0]], dtype=torch.float32),
+        gt_cls=torch.tensor([0], dtype=torch.float32),
+        prototypes=torch.ones((1, 2, 2, 2), dtype=torch.float32),
+        gt_masks_list=[torch.ones((2, 2, 2), dtype=torch.bool)],
+    )
+
+    assert validator.dice_count == 1
+    assert validator.dice_sum == pytest.approx(1.0)
+
+
+def test_validator_update_dice_for_image_skips_non_finite_probs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.init_metrics()
+
+    monkeypatch.setattr(
+        validator,
+        "_get_matches",
+        lambda *_args, **_kwargs: (np.array([0], dtype=int), np.array([0], dtype=int)),
+    )
+    monkeypatch.setattr(
+        "radyolo.validation.validate.ops.reconstruct_mask_probabilities",
+        lambda _coeff, _prototypes: torch.tensor(
+            [[[float("inf"), 0.0], [0.0, 0.0]], [[0.0, 0.0], [0.0, 0.0]]],
+            dtype=torch.float32,
+        ),
+    )
+
+    caplog.set_level("WARNING")
+    validator._update_dice_for_image(
+        predn=torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.9, 0.0]], dtype=torch.float32),
+        pred_with_coeffs=torch.tensor(
+            [[0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.9, 0.0, 1.0]],
+            dtype=torch.float32,
+        ),
+        gt_bboxes=torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0]], dtype=torch.float32),
+        gt_cls=torch.tensor([0], dtype=torch.float32),
+        prototypes=torch.ones((1, 2, 2, 2), dtype=torch.float32),
+        gt_masks_list=[torch.ones((2, 2, 2), dtype=torch.bool)],
+    )
+
+    assert validator.dice_count == 0
+    assert "non-finite values" in caplog.text
+
+
+def test_validator_get_dice_average_resets_non_finite_values(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.dice_sum = float("inf")
+    validator.dice_count = 1
+
+    caplog.set_level("WARNING")
+    assert validator._get_dice_average() == 0.0
+    assert "Encountered non-finite Dice aggregate" in caplog.text
+
+
+def test_validator_update_image_label_metrics_collects_available_targets(tmp_path: Path) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+    validator.image_label_task_specs = {
+        "stage": ImageLabelTaskSpec(type="multiclass", classes={0: "I", 1: "II"}),
+        "rfs": ImageLabelTaskSpec(
+            type="survival",
+            masking="relapse",
+            survival_bin_thresholds=(0.0, 1.0),
+        ),
+        "ignored": ImageLabelTaskSpec(
+            type="survival",
+            masking=None,
+            survival_bin_thresholds=(0.0, 1.0),
+        ),
+    }
+    validator.init_metrics()
+
+    batch = {
+        "image_labels": (
+            {"stage": 0, "rfs": 2.0, "relapse": True},
+            {"stage": None, "rfs": 5.0, "relapse": False},
+        )
+    }
+    image_label_outputs = {
+        "stage": torch.tensor([[2.0, 0.0], [0.0, 2.0]], dtype=torch.float32),
+        "rfs": torch.tensor([[0.2, -0.1], [0.1, 0.3]], dtype=torch.float32),
+        "ignored": torch.tensor([[0.2, -0.1], [0.1, 0.3]], dtype=torch.float32),
+    }
+
+    validator.update_image_label_metrics(batch=batch, image_label_outputs=image_label_outputs)
+
+    assert len(validator.image_label_multiclass_targets["stage"]) == 1
+    assert validator.image_label_multiclass_targets["stage"][0].tolist() == [0]
+    assert len(validator.image_label_survival_times["rfs"]) == 1
+    assert validator.image_label_survival_events["rfs"][0].tolist() == [True, False]
+    assert validator.image_label_survival_times.get("ignored", []) == []
+
+
+def test_validator_plot_validation_cases_sanitizes_case_name_and_filters_predictions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "confidence_threshold_plotting": 0.5,
+            "clip_boxes_to_image": True,
+            "validation_plot_projection": "mip",
+            "validation_plot_image_mode": "grayscale",
+            "validation_plot_difference_channels": False,
+            "plots": False,
+        },
+    )()
+    validator = Validator(dataloader=[], save_dir=tmp_path, config=config, names={0: "lesion"})
+
+    captured: dict[str, object] = {}
+
+    def _capture_plot_case(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("radyolo.validation.validate.plot_validation_case", _capture_plot_case)
+
+    batch = {
+        "batch_idx": torch.tensor([0], dtype=torch.int64),
+        "cls": torch.tensor([[0]], dtype=torch.float32),
+        "bboxes": torch.tensor([[0.5, 0.5, 0.5, 0.5, 0.5, 0.5]], dtype=torch.float32),
+        "img": torch.zeros((1, 1, 8, 8, 8), dtype=torch.float32),
+        "case_names": ["case: 01/scan"],
+    }
+    preds = [
+        torch.tensor(
+            [
+                [-2.0, -2.0, -2.0, 12.0, 12.0, 12.0, 0.9, 0.0],
+                [1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 0.2, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+    ]
+
+    validator.plot_validation_cases(batch=batch, preds=preds)
+
+    assert captured
+    output_name = Path(captured["fname"]).name
+    assert output_name == "case__01_scan.jpg"
+    assert captured["predicted_boxes"].shape[0] == 1
+
+
+def test_validator_print_results_with_plots_processes_plot_batches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = type(
+        "Config",
+        (object,),
+        {
+            "confidence_threshold_validation": 0.001,
+            "plots": True,
+        },
+    )()
+    validator = Validator(
+        dataloader=[],
+        save_dir=tmp_path,
+        config=config,
+        names={0: "lesion", 1: "node"},
+    )
+    validator.init_metrics()
+    validator.training = True
+    validator.seen = 1
+    validator.nt_per_class = np.array([1, 0], dtype=np.int64)
+    validator.nt_per_image = np.array([1, 0], dtype=np.int64)
+    validator.stats = {
+        "tp": [torch.zeros((1, 18), dtype=torch.bool)],
+        "fp": [torch.ones((1, 18), dtype=torch.bool)],
+        "tp_agnostic": [torch.zeros((1, 18), dtype=torch.bool)],
+        "fp_agnostic": [torch.ones((1, 18), dtype=torch.bool)],
+        "conf": [torch.tensor([0.1], dtype=torch.float32)],
+        "pred_cls": [torch.tensor([0.0], dtype=torch.float32)],
+        "target_cls": [torch.tensor([0.0], dtype=torch.float32)],
+        "target_img": [torch.tensor([0.0], dtype=torch.float32)],
+    }
+    validator.plot_batches = [
+        (
+            None,
+            torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0]], dtype=torch.float32),
+            torch.tensor([0.0], dtype=torch.float32),
+        )
+    ]
+
+    called: dict[str, bool] = {"plot_summary": False, "image_label_summary": False}
+
+    def _capture_summary(*, confusion_matrix: object) -> None:
+        called["plot_summary"] = True
+        assert confusion_matrix is not None
+
+    def _capture_image_label_summary(**_kwargs: object) -> None:
+        called["image_label_summary"] = True
+
+    monkeypatch.setattr(validator.metrics, "plot_summary", _capture_summary)
+    monkeypatch.setattr(
+        "radyolo.validation.validate.plot_image_label_validation_summary",
+        _capture_image_label_summary,
+    )
+
+    validator.print_results()
+
+    assert called["plot_summary"] is True
+    assert called["image_label_summary"] is True
