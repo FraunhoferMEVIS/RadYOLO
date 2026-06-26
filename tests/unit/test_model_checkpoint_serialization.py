@@ -250,6 +250,152 @@ def test_get_cfg_infers_num_classes_from_dataset_names(minimal_train_config: Pat
     assert config.num_classes == 1
 
 
+def test_get_cfg_infers_input_channels_from_dataset_normalization(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    dataset_yaml_path = synthetic_dataset / "dataset.yaml"
+    dataset_yaml = yaml.safe_load(dataset_yaml_path.read_text(encoding="utf-8"))
+    dataset_yaml["normalization"] = {"0": "MRPerChannel", "1": "CT"}
+    dataset_yaml_path.write_text(yaml.safe_dump(dataset_yaml, sort_keys=False), encoding="utf-8")
+
+    config_path = tmp_path / "inferred_input_channels.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model_scale: n",
+                f"data: {synthetic_dataset.as_posix()}",
+                "fold: 0",
+                "epochs: 2",
+                "nominal_batch_size: 1",
+                "warmup_epochs: 0.5",
+                "patience: 1",
+                "batch_size: 1",
+                "patch_size: {x: 32, y: 32, z: 64}",
+                "normalization: {type: 'none'}",
+                "device: cpu",
+                "workers: 0",
+                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: e2e",
+                "exist_ok: True",
+                "optimizer: Adam",
+                "seed: 0",
+                "resume: False",
+                "amp: False",
+                "use_cudnn_benchmark: False",
+                "val: True",
+                "plots: False",
+                "augment: False",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = get_cfg(config_path, {})
+
+    assert config.input_channels == 2
+
+
+def test_get_cfg_warns_when_input_channels_is_set_in_config(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dataset_yaml_path = synthetic_dataset / "dataset.yaml"
+    dataset_yaml = yaml.safe_load(dataset_yaml_path.read_text(encoding="utf-8"))
+    dataset_yaml["normalization"] = {"0": "MRPerChannel", "1": "CT"}
+    dataset_yaml_path.write_text(yaml.safe_dump(dataset_yaml, sort_keys=False), encoding="utf-8")
+
+    config_path = tmp_path / "deprecated_input_channels.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "input_channels: 1",
+                "model_scale: n",
+                f"data: {synthetic_dataset.as_posix()}",
+                "fold: 0",
+                "epochs: 2",
+                "nominal_batch_size: 1",
+                "warmup_epochs: 0.5",
+                "patience: 1",
+                "batch_size: 1",
+                "patch_size: {x: 32, y: 32, z: 64}",
+                "normalization: {type: 'none'}",
+                "device: cpu",
+                "workers: 0",
+                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: e2e",
+                "exist_ok: True",
+                "optimizer: Adam",
+                "seed: 0",
+                "resume: False",
+                "amp: False",
+                "use_cudnn_benchmark: False",
+                "val: True",
+                "plots: False",
+                "augment: False",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        config = get_cfg(config_path, {})
+
+    assert config.input_channels == 1
+    assert "Config field 'input_channels' is deprecated" in caplog.text
+
+
+def test_get_cfg_warns_and_uses_legacy_input_channels_when_dataset_lacks_normalization(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dataset_yaml_path = synthetic_dataset / "dataset.yaml"
+    dataset_yaml = yaml.safe_load(dataset_yaml_path.read_text(encoding="utf-8"))
+    dataset_yaml.pop("normalization", None)
+    dataset_yaml_path.write_text(yaml.safe_dump(dataset_yaml, sort_keys=False), encoding="utf-8")
+
+    config_path = tmp_path / "legacy_input_channels_missing_dataset_normalization.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "input_channels: 3",
+                "model_scale: n",
+                f"data: {synthetic_dataset.as_posix()}",
+                "fold: 0",
+                "epochs: 2",
+                "nominal_batch_size: 1",
+                "warmup_epochs: 0.5",
+                "patience: 1",
+                "batch_size: 1",
+                "patch_size: {x: 32, y: 32, z: 64}",
+                "normalization: {type: 'none'}",
+                "device: cpu",
+                "workers: 0",
+                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: e2e",
+                "exist_ok: True",
+                "optimizer: Adam",
+                "seed: 0",
+                "resume: False",
+                "amp: False",
+                "use_cudnn_benchmark: False",
+                "val: True",
+                "plots: False",
+                "augment: False",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        config = get_cfg(config_path, {})
+
+    assert config.input_channels == 3
+    assert "dataset.yaml does not define a per-channel normalization mapping" in caplog.text
+
+
 def test_get_cfg_warns_when_num_classes_is_set_in_config(
     synthetic_dataset: Path,
     tmp_path: Path,

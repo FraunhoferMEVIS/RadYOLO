@@ -28,7 +28,13 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DEPRECATED_CONFIG_KEYS = {"deterministic", "num_classes", "nms_time_limit", "verbose"}
+DEPRECATED_CONFIG_KEYS = {
+    "deterministic",
+    "input_channels",
+    "num_classes",
+    "nms_time_limit",
+    "verbose",
+}
 PrototypeLayer = Literal[
     "higher_resolution",
     "full_resolution",
@@ -658,6 +664,22 @@ def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
     return len(dataset_cfg.names)
 
 
+def _input_channels_from_dataset(yaml_config: dict[str, Any]) -> int | None:
+    dataset_root = yaml_config.get("data")
+    if dataset_root is None:
+        return None
+    dataset_yaml_path = Path(dataset_root) / "dataset.yaml"
+    with dataset_yaml_path.open() as f:
+        dataset_yaml = yaml.safe_load(f) or {}
+
+    normalization = dataset_yaml.get("normalization")
+    if isinstance(normalization, list):
+        return len(normalization) if normalization else None
+    if isinstance(normalization, dict) and "type" not in normalization:
+        return len(normalization) if normalization else None
+    return None
+
+
 def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:
     config_path = Path(config_path)
     with config_path.open() as f:
@@ -671,9 +693,24 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
     yaml_config.pop("verbose", None)
 
     yaml_config["num_classes"] = _num_classes_from_dataset(yaml_config)
+    inferred_input_channels = _input_channels_from_dataset(yaml_config)
+    if inferred_input_channels is not None and "input_channels" not in yaml_config:
+        yaml_config["input_channels"] = inferred_input_channels
     if "deterministic" in deprecated_config_keys:
         LOGGER.warning(
             "Config field 'deterministic' is deprecated and ignored."
+        )
+    if "input_channels" in deprecated_config_keys:
+        LOGGER.warning(
+            "Config field 'input_channels' is deprecated; "
+            "using configured value %d for backward compatibility instead of dataset.yaml "
+            "normalization inference.",
+            yaml_config["input_channels"],
+        )
+    if inferred_input_channels is None:
+        LOGGER.warning(
+            "dataset.yaml does not define a per-channel normalization mapping; "
+            "falling back to deprecated config field 'input_channels'."
         )
     if "num_classes" in deprecated_config_keys:
         LOGGER.warning(

@@ -17,7 +17,6 @@ resume: True              # (bool) resume training from last checkpoint
 seed: 0                   # (int) random seed for reproducibility
 
 # Model Parameters
-input_channels: 1 # number of input channels for model
 model_scale: s    # allowed values: (n, s, m, l, x)
 
 # Optional Segmentation Head
