@@ -499,12 +499,6 @@ def analyze_dataset(dataset_path: Path, workers: int, output_file: Path | None) 
     help="Scale of the RadYOLO model. Larger models are slower, but potentially more accurate.",
 )
 @click.option(
-    "--gpu-ram-limit-gb",
-    type=float,
-    default=11,
-    help="The GPU RAM that the patch sized should be optimized for.",
-)
-@click.option(
     "--output",
     type=click.Path(
         file_okay=True, dir_okay=False, writable=True, resolve_path=True, path_type=Path
@@ -521,16 +515,14 @@ def analyze_dataset(dataset_path: Path, workers: int, output_file: Path | None) 
 def propose_model_config(
     dataset_path: Path,
     model_scale: str,
-    gpu_ram_limit_gb: float,
     output: Path | None,
     workers: int,
 ) -> int:
-    """Propose a training config for DATASET_PATH for a target model scale and GPU RAM limit."""
+    """Propose a training config for DATASET_PATH for a target model scale."""
     try:
         result = propose_model_config_fn(
             dataset_path=dataset_path,
             model_scale=model_scale.lower(),
-            gpu_ram_limit_gb=gpu_ram_limit_gb,
             output_path=output,
             workers=workers,
         )

@@ -25,6 +25,7 @@ _DEFAULT_REFERENCE_CONFIG = (
 )
 _PATCH_STRIDE = 32
 _MIN_PATCH_SIZE = np.array([32, 32, 32], dtype=np.int64)
+_TARGET_PATCH_VOLUME = 256**3
 _CANONICAL_NORMALIZATION_TAGS: dict[str, NormalizationTag] = {
     "ct": "CT",
     "mrglobal": "MRGlobal",
@@ -102,39 +103,6 @@ def _align_down(values: np.ndarray, stride: int = _PATCH_STRIDE) -> np.ndarray:
 def _align_up(values: np.ndarray, stride: int = _PATCH_STRIDE) -> np.ndarray:
     aligned = np.ceil(values.astype(np.float64) / stride).astype(np.int64) * stride
     return np.maximum(aligned, _MIN_PATCH_SIZE)
-
-
-def _axis_ratio_error(candidate_xyz: np.ndarray, reference_xyz: np.ndarray) -> float:
-    candidate = np.maximum(candidate_xyz.astype(np.float64), 1.0)
-    reference = np.maximum(reference_xyz.astype(np.float64), 1.0)
-    candidate_ratio = candidate / np.cbrt(np.prod(candidate))
-    reference_ratio = reference / np.cbrt(np.prod(reference))
-    return float(np.linalg.norm(np.log(candidate_ratio / reference_ratio)))
-
-
-def _candidate_rank(
-    candidate_xyz: np.ndarray,
-    *,
-    target_ratio_xyz: np.ndarray,
-    representative_object_xyz: np.ndarray,
-    preferred_lower_bound_xyz: np.ndarray,
-    estimated_memory_gb: float,
-) -> tuple[int, float, float, float, int, float]:
-    candidate = candidate_xyz.astype(np.float64)
-    axis_object_fit = candidate / representative_object_xyz
-    whole_object_fit = int(np.prod(np.floor(axis_object_fit + 1e-6)))
-    object_fit_margin = float(np.min(axis_object_fit))
-    shortfall = float(np.maximum(preferred_lower_bound_xyz - candidate, 0.0).sum())
-    ratio_error = _axis_ratio_error(candidate, target_ratio_xyz)
-    volume = int(np.prod(candidate_xyz.astype(np.int64)))
-    return (
-        whole_object_fit,
-        object_fit_margin,
-        -shortfall,
-        -ratio_error,
-        volume,
-        -estimated_memory_gb,
-    )
 
 
 def _flatten_tensors(value: object) -> list[torch.Tensor]:
@@ -719,19 +687,10 @@ def build_runtime_normalization_config(
     return runtime_entries[0] if len(runtime_entries) == 1 else runtime_entries
 
 
-def _preferred_patch_lower_bound(
-    representative_large_object_xyz: np.ndarray,
-    upper_bound_xyz: np.ndarray,
-) -> np.ndarray:
-    preferred = representative_large_object_xyz * 1.5
-    return np.minimum(_align_up(preferred), upper_bound_xyz)
-
-
-def propose_patch_size(  # noqa: PLR0913, PLR0912, PLR0915
+def propose_patch_size(  # noqa: PLR0913
     fingerprint: dict[str, Any],
     *,
     scale: ModelScale,
-    gpu_ram_limit_gb: float,
     batch_size: int,
     input_channels: int,
     num_classes: int,
@@ -748,9 +707,9 @@ def propose_patch_size(  # noqa: PLR0913, PLR0912, PLR0915
         msg = "Dataset fingerprint is missing median_resampled_imagesize."
         raise ValueError(msg)
 
-    upper_bound_xyz = _align_up(np.asarray(median_resampled, dtype=np.int64))
-    representative_large_object_xyz = np.asarray(fingerprint.get("box_size_p95_vox"), dtype=np.float64)
-    preferred_lower_bound = _preferred_patch_lower_bound(representative_large_object_xyz, upper_bound_xyz)
+    median_xyz = np.maximum(np.asarray(median_resampled, dtype=np.float64), 1.0)
+    scale_factor = float((_TARGET_PATCH_VOLUME / np.prod(median_xyz)) ** (1.0 / 3.0))
+    scaled_xyz = np.maximum(median_xyz * scale_factor, _MIN_PATCH_SIZE.astype(np.float64))
 
     estimator = ModelMemoryEstimator(
         _build_estimation_config(
@@ -777,109 +736,48 @@ def propose_patch_size(  # noqa: PLR0913, PLR0912, PLR0915
         memory_cache[candidate] = estimated_memory
         return estimated_memory
 
-    min_patch = tuple(int(value) for value in _MIN_PATCH_SIZE)
-    if estimate_candidate(min_patch) > gpu_ram_limit_gb:
-        fallback_memory = estimate_candidate(min_patch)
-        LOGGER.warning(
-            "GPU RAM limit %.2f GB is below the estimated requirement for the minimal %s patch at "
-            "batch size %d (estimated %.2f GB). Proposing the minimal stride-compatible patch "
-            "anyway.",
-            gpu_ram_limit_gb,
-            min_patch,
-            batch_size,
-            fallback_memory,
-        )
-        return PatchSize.from_xyz(min_patch), fallback_memory
+    down = _align_down(scaled_xyz)
+    up = _align_up(scaled_xyz)
 
-    def candidate_from_factor(factor: float) -> tuple[int, int, int]:
-        candidate = _align_up(
-            np.maximum(_MIN_PATCH_SIZE, upper_bound_xyz.astype(np.float64) * factor)
-        )
-        candidate = np.minimum(candidate, upper_bound_xyz)
-        return tuple(int(value) for value in candidate)
+    target_ratio = median_xyz / np.cbrt(np.prod(median_xyz))
 
-    def rank_candidate(
-        candidate: tuple[int, int, int], estimated_memory: float
-    ) -> tuple[int, float, float, float, int, float]:
-        return _candidate_rank(
-            np.asarray(candidate, dtype=np.int64),
-            target_ratio_xyz=upper_bound_xyz,
-            representative_object_xyz=representative_large_object_xyz,
-            preferred_lower_bound_xyz=preferred_lower_bound.astype(np.float64),
-            estimated_memory_gb=estimated_memory,
-        )
+    def candidate_score(candidate_xyz: np.ndarray) -> tuple[float, float, int]:
+        candidate = np.maximum(candidate_xyz.astype(np.float64), 1.0)
+        candidate_ratio = candidate / np.cbrt(np.prod(candidate))
+        ratio_error = float(np.linalg.norm(np.log(candidate_ratio / target_ratio)))
+        volume = int(np.prod(candidate_xyz.astype(np.int64)))
+        volume_error = abs(np.log(max(volume, 1) / _TARGET_PATCH_VOLUME))
+        return (volume_error, ratio_error, -volume)
 
-    high_candidate = tuple(int(value) for value in upper_bound_xyz)
-    if estimate_candidate(high_candidate) <= gpu_ram_limit_gb:
-        best_candidate = high_candidate
-    else:
-        low_factor = 0.0
-        high_factor = 1.0
-        best_candidate = min_patch
-        for _ in range(12):
-            mid_factor = (low_factor + high_factor) / 2.0
-            candidate = candidate_from_factor(mid_factor)
-            estimated_memory = estimate_candidate(candidate)
-            if estimated_memory <= gpu_ram_limit_gb:
-                best_candidate = candidate
-                low_factor = mid_factor
-            else:
-                high_factor = mid_factor
+    candidates = [
+        (x_candidate, y_candidate, z_candidate)
+        for x_candidate in (int(down[0]), int(up[0]))
+        for y_candidate in (int(down[1]), int(up[1]))
+        for z_candidate in (int(down[2]), int(up[2]))
+    ]
 
-    best_candidate_array = np.asarray(best_candidate, dtype=np.int64)
-    best_memory_gb = estimate_candidate(best_candidate)
-    best_rank = rank_candidate(best_candidate, best_memory_gb)
-    improved = True
-    while improved:
-        improved = False
-        next_candidate: tuple[int, int, int] | None = None
-        next_rank: tuple[int, float, float, float, int, float] | None = None
-        next_memory_gb = float("inf")
-        for axis in range(3):
-            if best_candidate_array[axis] + _PATCH_STRIDE > upper_bound_xyz[axis]:
-                continue
-            candidate_array = best_candidate_array.copy()
-            candidate_array[axis] += _PATCH_STRIDE
-            candidate = tuple(int(value) for value in candidate_array)
-            estimated_memory = estimate_candidate(candidate)
-            if estimated_memory > gpu_ram_limit_gb:
-                continue
-            candidate_rank = rank_candidate(candidate, estimated_memory)
-            if next_candidate is None or candidate_rank > next_rank:
-                next_candidate = candidate
-                next_rank = candidate_rank
-                next_memory_gb = estimated_memory
-
-        if next_candidate is not None and next_rank > best_rank:
-            best_candidate = next_candidate
-            best_candidate_array = np.asarray(best_candidate, dtype=np.int64)
-            best_memory_gb = next_memory_gb
-            best_rank = next_rank
-            improved = True
-
-    return PatchSize.from_xyz(best_candidate), best_memory_gb
+    unique_candidates = sorted(set(candidates))
+    best_candidate = min(
+        unique_candidates,
+        key=lambda candidate: candidate_score(np.asarray(candidate, dtype=np.int64)),
+    )
+    return PatchSize.from_xyz(best_candidate), estimate_candidate(best_candidate)
 
 
 def _default_output_path(
-    dataset_path: Path, model_scale: ModelScale, gpu_ram_limit_gb: float
+    dataset_path: Path, model_scale: ModelScale
 ) -> Path:
-    gpu_label = f"{gpu_ram_limit_gb:g}".replace(".", "_")
-    return dataset_path / f"proposed_model_config_{model_scale}_{gpu_label}gb.yaml"
+    return dataset_path / f"proposed_model_config_{model_scale}.yaml"
 
 
 def propose_model_config(
     dataset_path: Path,
     model_scale: ModelScale,
-    gpu_ram_limit_gb: float,
     *,
     output_path: Path | None = None,
     workers: int = 0,
     reference_config_path: Path = _DEFAULT_REFERENCE_CONFIG,
 ) -> ProposedModelConfigResult:
-    if gpu_ram_limit_gb <= 0:
-        msg = "gpu_ram_limit_gb must be greater than zero."
-        raise ValueError(msg)
-
     dataset_path = Path(dataset_path)
     dataset_yaml_path = dataset_path / "dataset.yaml"
     if not dataset_yaml_path.exists():
@@ -925,7 +823,6 @@ def propose_model_config(
     patch_size, estimated_memory = propose_patch_size(
         fingerprint,
         scale=model_scale,
-        gpu_ram_limit_gb=gpu_ram_limit_gb,
         batch_size=batch_size,
         input_channels=input_channels,
         num_classes=dataset_cfg.nc,
@@ -939,31 +836,6 @@ def propose_model_config(
         enable_image_label_head=enable_image_label_head,
         reference_config=reference_config,
     )
-    if estimated_memory > gpu_ram_limit_gb and batch_size > 1:
-        LOGGER.info(
-            "Reducing batch size from %d to 1 because the minimal stride-compatible patch is still "
-            "estimated at %.2f GB.",
-            batch_size,
-            estimated_memory,
-        )
-        batch_size = 1
-        patch_size, estimated_memory = propose_patch_size(
-            fingerprint,
-            scale=model_scale,
-            gpu_ram_limit_gb=gpu_ram_limit_gb,
-            batch_size=batch_size,
-            input_channels=input_channels,
-            num_classes=dataset_cfg.nc,
-            segmentation_output=has_masks,
-            include_stride4_output=bool(
-                reference_config.get("include_stride4_output", False)
-            ),
-            prototype_masks=int(reference_config.get("prototype_masks", 8)),
-            estimated_boxes_per_image=estimated_boxes_per_image,
-            data_path=dataset_path,
-            enable_image_label_head=enable_image_label_head,
-            reference_config=reference_config,
-        )
 
     proposed_config = dict(reference_config)
     proposed_config.update(
@@ -1001,9 +873,7 @@ def propose_model_config(
             0,
         ]
 
-    output_path = output_path or _default_output_path(
-        dataset_path, model_scale, gpu_ram_limit_gb
-    )
+    output_path = output_path or _default_output_path(dataset_path, model_scale)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     DefaultConfig.model_validate({**proposed_config, "num_classes": dataset_cfg.nc})
     with output_path.open("w", encoding="utf-8") as file:

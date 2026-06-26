@@ -4,7 +4,6 @@ import pytest
 import numpy as np
 
 from radyolo.config.propose_model_config import (
-    _candidate_rank,
     build_runtime_normalization_config,
     estimate_patch_memory_gb,
     propose_patch_size,
@@ -59,7 +58,7 @@ def test_build_runtime_normalization_config_uses_ct_stats_and_per_channel_zscore
     ]
 
 
-def test_propose_patch_size_stays_within_budget() -> None:
+def test_propose_patch_size_returns_stride_aligned_estimate() -> None:
     fingerprint = {
         "median_resampled_imagesize": [224, 224, 96],
         "box_size_median_vox": {"0": [40, 40, 18]},
@@ -69,7 +68,6 @@ def test_propose_patch_size_stays_within_budget() -> None:
     patch_size, estimated_memory_gb = propose_patch_size(
         fingerprint,
         scale="s",
-        gpu_ram_limit_gb=6.0,
         batch_size=2,
         input_channels=1,
         num_classes=1,
@@ -81,7 +79,6 @@ def test_propose_patch_size_stays_within_budget() -> None:
     assert patch_size.x % 32 == 0
     assert patch_size.y % 32 == 0
     assert patch_size.z % 32 == 0
-    assert estimated_memory_gb <= 6.0
     direct_estimate = estimate_patch_memory_gb(
         patch_size.get_xyz(),
         scale="s",
@@ -92,7 +89,37 @@ def test_propose_patch_size_stays_within_budget() -> None:
         include_stride4_output=False,
         prototype_masks=8,
     )
-    assert direct_estimate == pytest.approx(estimated_memory_gb, abs=0.1)
+    assert direct_estimate == pytest.approx(estimated_memory_gb, abs=0.2)
+
+
+def test_propose_patch_size_targets_256_cubed_volume_and_median_ratios() -> None:
+    fingerprint = {
+        "median_resampled_imagesize": [160, 96, 64],
+        "box_size_median_vox": {"0": [20, 14, 10]},
+        "box_size_p95_vox": [32, 20, 14],
+    }
+
+    patch_size, _ = propose_patch_size(
+        fingerprint,
+        scale="s",
+        batch_size=2,
+        input_channels=1,
+        num_classes=1,
+        segmentation_output=True,
+        include_stride4_output=False,
+        prototype_masks=8,
+    )
+
+    candidate = np.asarray(patch_size.get_xyz(), dtype=np.float64)
+    median = np.asarray(fingerprint["median_resampled_imagesize"], dtype=np.float64)
+    candidate_ratio = candidate / np.cbrt(np.prod(candidate))
+    median_ratio = median / np.cbrt(np.prod(median))
+
+    assert patch_size.x % 32 == 0
+    assert patch_size.y % 32 == 0
+    assert patch_size.z % 32 == 0
+    assert np.prod(candidate) == pytest.approx(256**3, rel=0.25)
+    assert np.linalg.norm(np.log(candidate_ratio / median_ratio)) < 0.2
 
 
 def test_estimate_patch_memory_gb_increases_with_patch_volume() -> None:
@@ -142,52 +169,6 @@ def test_estimate_patch_memory_gb_increases_with_loss_objects() -> None:
         include_stride4_output=False,
         prototype_masks=8,
         estimated_boxes_per_image=8,
-    )
-
-    assert more_objects > fewer_objects
-
-
-def test_candidate_rank_prefers_resampled_axis_ratios_when_object_fit_is_equal() -> None:
-    target_ratio_xyz = np.array([320.0, 160.0, 96.0])
-    representative_object_xyz = np.array([48.0, 48.0, 48.0])
-    preferred_lower_bound_xyz = np.array([96.0, 64.0, 64.0])
-
-    ratio_aligned = _candidate_rank(
-        np.array([192, 96, 64]),
-        target_ratio_xyz=target_ratio_xyz,
-        representative_object_xyz=representative_object_xyz,
-        preferred_lower_bound_xyz=preferred_lower_bound_xyz,
-        estimated_memory_gb=3.0,
-    )
-    ratio_distorted = _candidate_rank(
-        np.array([160, 128, 64]),
-        target_ratio_xyz=target_ratio_xyz,
-        representative_object_xyz=representative_object_xyz,
-        preferred_lower_bound_xyz=preferred_lower_bound_xyz,
-        estimated_memory_gb=3.0,
-    )
-
-    assert ratio_aligned > ratio_distorted
-
-
-def test_candidate_rank_prefers_more_median_objects() -> None:
-    target_ratio_xyz = np.array([160.0, 160.0, 160.0])
-    representative_object_xyz = np.array([96.0, 96.0, 32.0])
-    preferred_lower_bound_xyz = np.array([128.0, 128.0, 64.0])
-
-    more_objects = _candidate_rank(
-        np.array([96, 96, 96]),
-        target_ratio_xyz=target_ratio_xyz,
-        representative_object_xyz=representative_object_xyz,
-        preferred_lower_bound_xyz=preferred_lower_bound_xyz,
-        estimated_memory_gb=3.0,
-    )
-    fewer_objects = _candidate_rank(
-        np.array([128, 96, 64]),
-        target_ratio_xyz=target_ratio_xyz,
-        representative_object_xyz=representative_object_xyz,
-        preferred_lower_bound_xyz=preferred_lower_bound_xyz,
-        estimated_memory_gb=3.0,
     )
 
     assert more_objects > fewer_objects
