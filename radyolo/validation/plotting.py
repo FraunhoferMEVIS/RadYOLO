@@ -14,11 +14,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import seaborn as sns
 import torch
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageDraw, ImageFont
-import seaborn as sns
 from sklearn.metrics import confusion_matrix as sk_confusion_matrix
 from sklearn.metrics import roc_auc_score, roc_curve
 
@@ -61,6 +61,12 @@ IMAGE_LABEL_RESULTS_PLOT_COLUMNS = (
     "metrics/image_label_balanced_accuracy",
     "metrics/image_label_multiclass_roc_auc",
     "metrics/image_label_c_index",
+)
+
+IMAGE_LABEL_LOSS_COLUMNS = tuple(
+    column_name
+    for column_name in IMAGE_LABEL_RESULTS_PLOT_COLUMNS
+    if column_name.startswith(("train/", "val/"))
 )
 
 BASE_PLOT_HEX_COLORS = (
@@ -892,7 +898,7 @@ def _plot_results_grid(
                         label="Best epoch" if not best_epoch_legend_added else "_nolegend_",
                     )
                     best_epoch_legend_added = True
-                if "loss" in column_name:
+                if "loss" in column_name or column_name in IMAGE_LABEL_LOSS_COLUMNS:
                     clean = y[np.isfinite(y)]
                     if clean.size > 0:
                         y_min = np.min(clean) * 0.95
