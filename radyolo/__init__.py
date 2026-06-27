@@ -928,6 +928,22 @@ def convert_to_integer_encoded_masks(dataset_path: Path) -> int:
     ),
 )
 @click.option(
+    "--tabular-input-dir",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+    default=None,
+    help=(
+        "Optional folder containing per-case tabular JSON files (<case>.json) used as "
+        "additional model inputs for the global image-label head."
+    ),
+)
+@click.option(
     "--conf",
     default=0.1,
     type=float,
@@ -1053,6 +1069,7 @@ def predict(
     model_path: Path,
     input_dir: Path,
     output_dir: Path,
+    tabular_input_dir: Path | None,
     conf: float | None,
     nms_iou: float | None,
     device: str,
@@ -1077,6 +1094,7 @@ def predict(
                 model_path=model_path,
                 input_dir=input_dir,
                 output_dir=output_dir,
+                tabular_input_dir=tabular_input_dir,
                 confidence_threshold=conf,
                 nms_iou_threshold=nms_iou,
                 device=device,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from dataclasses import dataclass
 
 import nibabel as nib
@@ -22,6 +23,7 @@ from radyolo.inference.predict import (
     _write_prediction_result,
 )
 from radyolo.config.spatial import PatchSize, VoxelSize
+from radyolo.data.image_labels import ImageLabelTaskSpec
 from radyolo.models.layers import ModelOutput
 from radyolo.utils.ops import (
     box_image_to_world,
@@ -403,6 +405,75 @@ def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> 
     assert (tmp_path / "masks" / "case2_det0.nii.gz").exists()
     assert tuple(captured["proto_shape"]) == (2, 2, 2)
     assert captured["original_shape"] == (2, 2, 2)
+
+
+def test_write_prediction_result_saves_global_image_outputs(tmp_path) -> None:
+    write_task = predict_module._WriteTask(
+        case_name="case_global",
+        image_results=[],
+        image_label_results={
+            "tumor_grade": {
+                "predicted_class": 1,
+                "predicted_class_name": "high",
+                "probabilities": [0.2, 0.8],
+                "logits": [0.1, 2.1],
+            }
+        },
+        affine=np.eye(4, dtype=np.float32),
+        original_shape=(2, 2, 2),
+        prototype_masks=None,
+        mask_detections=[],
+    )
+
+    _write_prediction_result(tmp_path, write_task)
+
+    labels_image_path = tmp_path / "labels_image" / "case_global.json"
+    assert labels_image_path.exists()
+    payload = json.loads(labels_image_path.read_text(encoding="utf-8"))
+    assert payload["tumor_grade"]["predicted_class"] == 1
+
+
+def test_load_case_tabular_inputs_reads_optional_tabular_json(tmp_path) -> None:
+    tabular_dir = tmp_path / "inputs_tabular"
+    tabular_dir.mkdir()
+    (tabular_dir / "case_a.json").write_text(
+        json.dumps({"age": 61, "weight": None}),
+        encoding="utf-8",
+    )
+
+    values, observed_mask = predict_module._load_case_tabular_inputs(
+        tabular_dir,
+        "case_a",
+        ("age", "weight"),
+    )
+
+    assert values is not None and observed_mask is not None
+    assert values.shape == (1, 2)
+    assert observed_mask.shape == (1, 2)
+    assert values[0, 0].item() == pytest.approx(61.0)
+    assert observed_mask[0, 0].item() is True
+    assert observed_mask[0, 1].item() is False
+
+
+def test_serialize_image_label_outputs_adds_risk_and_scalar_bin_width_for_rfs() -> None:
+    serialized = predict_module._serialize_image_label_outputs(
+        {
+            "rfs": torch.tensor([[0.0, 1.0, -0.5]], dtype=torch.float32),
+        },
+        {
+            "rfs": ImageLabelTaskSpec(
+                type="survival",
+                survival_bin_thresholds=(0.0, 2.0, 5.0),
+            )
+        },
+    )
+
+    assert serialized is not None
+    rfs_payload = serialized["rfs"]
+    assert isinstance(rfs_payload, dict)
+    assert "risk" in rfs_payload
+    assert "bin_width" in rfs_payload
+    assert rfs_payload["bin_width"] == 2.0
 
 
 def test_predict_loaded_image_skips_masks_when_disabled(monkeypatch, tmp_path) -> None:

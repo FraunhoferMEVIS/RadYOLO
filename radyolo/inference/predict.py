@@ -4,6 +4,7 @@ import contextlib
 import itertools
 import json
 import logging
+import math
 import multiprocessing as mp
 import queue
 import traceback
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from radyolo.config.spatial import PatchSize
+    from radyolo.data.image_labels import ImageLabelTaskSpec
     from radyolo.models.layers import ModelOutput
     from radyolo.models.model import HardcodedModel
 
@@ -51,6 +53,7 @@ class _WriteTask:
     original_shape: tuple[int, int, int]
     prototype_masks: np.ndarray | None
     mask_detections: list[np.ndarray]
+    image_label_results: dict[str, object] | None = None
     merged_mask_probabilities: list[np.ndarray] = field(default_factory=list)
 
 
@@ -78,6 +81,7 @@ class PredictionConfig:
     nms_iou_threshold: float
     device: str
     clip_boxes_to_image: bool
+    tabular_input_dir: Path | None = None
     overwrite_patch_size: PatchSize | None = None
     overwrite_normalization: dict | list[dict] | None = None
     overwrite_voxel_size: VoxelSize | None = None
@@ -92,13 +96,163 @@ class PredictionConfig:
     save_masks: bool = True
 
 
-def _load_model(cfg: PredictionConfig) -> tuple[torch.nn.Module, DefaultConfig, dict[int, str]]:
+def _load_model(
+    cfg: PredictionConfig,
+) -> tuple[
+    torch.nn.Module,
+    DefaultConfig,
+    dict[int, str],
+    dict[str, ImageLabelTaskSpec],
+    tuple[str, ...],
+]:
     loaded_model = load_checkpoint_model(cfg.model_path, device_override=cfg.device)
     train_config = loaded_model.train_config
     num_classes = train_config.num_classes
     names = {i: f"class_{i}" for i in range(num_classes)}
+    image_label_task_specs = dict(getattr(loaded_model.model, "image_label_task_specs", {}))
+    tabular_feature_names = tuple(getattr(loaded_model.model, "tabular_feature_names", ()))
+    return loaded_model.model, train_config, names, image_label_task_specs, tabular_feature_names
 
-    return loaded_model.model, train_config, names
+
+def _load_case_tabular_inputs(
+    tabular_input_dir: Path | None,
+    case_name: str,
+    feature_names: tuple[str, ...],
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    if tabular_input_dir is None or not feature_names:
+        return None, None
+
+    num_features = len(feature_names)
+    values = torch.zeros((1, num_features), dtype=torch.float32)
+    observed_mask = torch.zeros((1, num_features), dtype=torch.bool)
+    tabular_path = tabular_input_dir / f"{case_name}.json"
+    if not tabular_path.exists():
+        return values, observed_mask
+
+    parsed = json.loads(tabular_path.read_text(encoding="utf-8"))
+    if not isinstance(parsed, dict):
+        msg = f"Tabular input file must contain a JSON object: {tabular_path}"
+        raise TypeError(msg)
+
+    for feature_index, feature_name in enumerate(feature_names):
+        raw_value = parsed.get(feature_name)
+        if raw_value is None:
+            continue
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+            msg = (
+                "Tabular feature values must be numeric scalars or null, but "
+                f"'{feature_name}' in {tabular_path} for case '{case_name}' has value "
+                f"{raw_value!r}."
+            )
+            raise TypeError(msg)
+        numeric_value = float(raw_value)
+        if not math.isfinite(numeric_value):
+            msg = (
+                "Tabular feature values must be finite, but "
+                f"'{feature_name}' in {tabular_path} for case '{case_name}' has value "
+                f"{raw_value!r}."
+            )
+            raise ValueError(msg)
+        values[0, feature_index] = numeric_value
+        observed_mask[0, feature_index] = True
+    return values, observed_mask
+
+
+def _run_model(
+    model: HardcodedModel,
+    image_batch: torch.Tensor,
+    tabular_values: torch.Tensor | None,
+    tabular_mask: torch.Tensor | None,
+) -> ModelOutput:
+    if tabular_values is None and tabular_mask is None:
+        return model(image_batch)
+    return model(
+        image_batch,
+        tabular_values=tabular_values,
+        tabular_mask=tabular_mask,
+    )
+
+
+def _survival_bin_widths(thresholds: torch.Tensor) -> torch.Tensor:
+    if thresholds.numel() == 1:
+        return torch.ones_like(thresholds)
+    trailing_width = thresholds[-1] - thresholds[-2]
+    if trailing_width <= 0:
+        trailing_width = torch.tensor(1.0, dtype=thresholds.dtype, device=thresholds.device)
+    return torch.diff(thresholds, append=thresholds[-1:] + trailing_width)
+
+
+def _serialize_image_label_outputs(
+    image_label_outputs: dict[str, torch.Tensor] | None,
+    image_label_task_specs: dict[str, ImageLabelTaskSpec],
+) -> dict[str, object] | None:
+    if image_label_outputs is None:
+        return None
+
+    serialized: dict[str, object] = {}
+    for task_name, task_logits in image_label_outputs.items():
+        logits = task_logits.detach().to(device="cpu", dtype=torch.float32)
+        if logits.ndim == 2:
+            if logits.shape[0] != 1:
+                msg = (
+                    "Prediction pipeline expects batch size 1 for image-label outputs, "
+                    f"got shape {tuple(logits.shape)} for task '{task_name}'."
+                )
+                raise ValueError(msg)
+            logits = logits[0]
+        if logits.ndim != 1:
+            msg = (
+                "Image-label output tensor must be one-dimensional after squeezing batch "
+                f"dimension, got shape {tuple(logits.shape)} for task '{task_name}'."
+            )
+            raise ValueError(msg)
+
+        task_spec = image_label_task_specs.get(task_name)
+        if task_spec is None:
+            serialized[task_name] = {
+                "logits": [round(float(value), 6) for value in logits.tolist()],
+            }
+            continue
+
+        if task_spec.type == "multiclass":
+            probabilities = torch.softmax(logits, dim=0)
+            predicted_class = int(torch.argmax(probabilities).item())
+            class_names = task_spec.classes or {}
+            serialized[task_name] = {
+                "predicted_class": predicted_class,
+                "predicted_class_name": class_names.get(predicted_class, str(predicted_class)),
+                "probabilities": [
+                    round(float(value), 6) for value in probabilities.tolist()
+                ],
+                "logits": [round(float(value), 6) for value in logits.tolist()],
+            }
+            continue
+
+        if task_spec.type == "survival":
+            probabilities = torch.sigmoid(logits)
+            task_payload: dict[str, object] = {
+                "probabilities": [
+                    round(float(value), 6) for value in probabilities.tolist()
+                ],
+                "logits": [round(float(value), 6) for value in logits.tolist()],
+            }
+            if task_name == "rfs" and task_spec.survival_bin_thresholds is not None:
+                thresholds = torch.tensor(
+                    task_spec.survival_bin_thresholds,
+                    dtype=torch.float32,
+                )
+                if thresholds.numel() == probabilities.numel():
+                    bin_widths = _survival_bin_widths(thresholds)
+                    risk = -float((probabilities * bin_widths).sum().item())
+                    task_payload["bin_width"] = round(float(bin_widths[0].item()), 6)
+                    task_payload["risk"] = round(risk, 6)
+            serialized[task_name] = task_payload
+            continue
+
+        msg = f"Unsupported image-label task type '{task_spec.type}' for task '{task_name}'."
+        raise ValueError(msg)
+
+    return serialized or None
 
 
 def _iter_nifti(input_dir: Path) -> Iterable[Path]:
@@ -527,7 +681,10 @@ def _predict_whole_image(
     model: HardcodedModel,
     train_config: DefaultConfig,
     names: dict[int, str],
+    image_label_task_specs: dict[str, ImageLabelTaskSpec],
     prediction_config: PredictionConfig,
+    tabular_values: torch.Tensor | None,
+    tabular_mask: torch.Tensor | None,
 ) -> _WriteTask:
     img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
         *reversed(range(loaded_image.image.ndim))
@@ -555,12 +712,21 @@ def _predict_whole_image(
         torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     )
     with torch.no_grad(), autocast_ctx:
-        model_output: ModelOutput = model(img_tensor.unsqueeze(0))
+        model_output: ModelOutput = _run_model(
+            model,
+            img_tensor.unsqueeze(0),
+            tabular_values,
+            tabular_mask,
+        )
     detections, proto_masks = _postprocess_single(
         model_output,
         train_config,
         prediction_config,
         len(names),
+    )
+    image_label_results = _serialize_image_label_outputs(
+        model_output.image_label_outputs,
+        image_label_task_specs,
     )
     prototype_masks: np.ndarray | None = None
     mask_detections: list[np.ndarray] = []
@@ -590,6 +756,7 @@ def _predict_whole_image(
     return _WriteTask(
         case_name=loaded_image.case_name,
         image_results=image_results,
+        image_label_results=image_label_results,
         affine=loaded_image.affine,
         original_shape=original_shape,
         prototype_masks=prototype_masks,
@@ -756,8 +923,12 @@ def _predict_loaded_image(
     model: HardcodedModel,
     train_config: DefaultConfig,
     names: dict[int, str],
+    image_label_task_specs: dict[str, ImageLabelTaskSpec] | None = None,
     prediction_config: PredictionConfig,
+    tabular_values: torch.Tensor | None = None,
+    tabular_mask: torch.Tensor | None = None,
 ) -> _WriteTask:
+    resolved_image_label_task_specs = dict(image_label_task_specs or {})
     if train_config.training_mode == "patchwise":
         return _predict_patchwise_image(
             loaded_image,
@@ -771,7 +942,10 @@ def _predict_loaded_image(
         model=model,
         train_config=train_config,
         names=names,
+        image_label_task_specs=resolved_image_label_task_specs,
         prediction_config=prediction_config,
+        tabular_values=tabular_values,
+        tabular_mask=tabular_mask,
     )
 
 
@@ -803,6 +977,12 @@ def _write_prediction_result(output_dir: Path, write_task: _WriteTask) -> None:
     out_json = output_dir / f"{write_task.case_name}.json"
     with out_json.open("w", encoding="utf-8") as jf:
         json.dump(write_task.image_results, jf, indent=2)
+    if write_task.image_label_results is not None:
+        labels_output_dir = output_dir / "labels_image"
+        labels_output_dir.mkdir(parents=True, exist_ok=True)
+        labels_json = labels_output_dir / f"{write_task.case_name}.json"
+        with labels_json.open("w", encoding="utf-8") as jf:
+            json.dump(write_task.image_label_results, jf, indent=2, sort_keys=True)
 
 
 def _fail_worker(
@@ -857,7 +1037,19 @@ def _inference_worker(
 ) -> None:
     current_case: str | None = None
     try:
-        model, train_config, names = _load_model(prediction_cfg)
+        model, train_config, names, image_label_task_specs, tabular_feature_names = _load_model(
+            prediction_cfg
+        )
+        if prediction_cfg.tabular_input_dir is not None and not tabular_feature_names:
+            LOGGER.warning(
+                "Ignoring --tabular-input-dir because the loaded checkpoint does not declare "
+                "tabular feature names."
+            )
+        if prediction_cfg.tabular_input_dir is not None and train_config.training_mode == "patchwise":
+            LOGGER.warning(
+                "Ignoring --tabular-input-dir for patchwise inference. Tabular inputs are only "
+                "used for whole-image inference."
+            )
         _validate_loaded_model_prediction_config(train_config, prediction_cfg)
         finished_loaders = 0
         while finished_loaders < prediction_cfg.num_load_workers:
@@ -866,13 +1058,24 @@ def _inference_worker(
                 finished_loaders += 1
                 continue
             current_case = loaded_image.case_name
+            tabular_values: torch.Tensor | None = None
+            tabular_mask: torch.Tensor | None = None
+            if train_config.training_mode != "patchwise":
+                tabular_values, tabular_mask = _load_case_tabular_inputs(
+                    prediction_cfg.tabular_input_dir,
+                    loaded_image.case_name,
+                    tabular_feature_names,
+                )
             write_queue.put(
                 _predict_loaded_image(
-                loaded_image,
-                model=model,
-                train_config=train_config,
-                names=names,
-                prediction_config=prediction_cfg,
+                    loaded_image,
+                    model=model,
+                    train_config=train_config,
+                    names=names,
+                    image_label_task_specs=image_label_task_specs,
+                    prediction_config=prediction_cfg,
+                    tabular_values=tabular_values,
+                    tabular_mask=tabular_mask,
                 )
             )
             current_case = None
