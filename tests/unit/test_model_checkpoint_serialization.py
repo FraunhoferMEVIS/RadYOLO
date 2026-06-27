@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import pickle
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -189,8 +190,11 @@ def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing
     tmp_path: Path,
 ) -> None:
     config = get_cfg(minimal_train_config, {})
+    checkpoint_dataset = tmp_path / "missing_cluster_dataset"
+    checkpoint_dataset.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(config.data / "dataset.yaml", checkpoint_dataset / "dataset.yaml")
     checkpoint_config = config.model_copy(
-        update={"data": Path("/Projects/deep_learning/input/missing_cluster_dataset")},
+        update={"data": checkpoint_dataset},
         deep=True,
     )
     run_root = tmp_path / "runs"
@@ -212,6 +216,7 @@ def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing
         train_config=checkpoint_config,
         train_metrics={"metrics/fitness": 0.25},
     )
+    shutil.rmtree(checkpoint_dataset)
 
     resume_config_path = tmp_path / "resume_train_local_dataset.yaml"
     with minimal_train_config.open(encoding="utf-8") as file:
