@@ -3,18 +3,23 @@ from __future__ import annotations
 import datetime
 import pickle
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import torch
 import yaml
 
-from radyolo.config.config import DefaultConfig, get_cfg, load_model_checkpoint, save_model_checkpoint
+from radyolo.config.config import (
+    DefaultConfig,
+    get_cfg,
+    load_model_checkpoint,
+    save_model_checkpoint,
+)
 from radyolo.config.spatial import PatchSize, VoxelSize
-from radyolo.models.model import build_model_from_config
+from radyolo.models.model import build_model_from_config, load_checkpoint_model
 from radyolo.training.train import Trainer
 from radyolo.utils.util import ModelEMA
+
 
 def test_load_model_checkpoint_rejects_legacy_numpy_metadata(
     minimal_train_config: Path,
@@ -236,6 +241,88 @@ def test_default_config_uses_epoch_based_ema_tau_default(minimal_train_config: P
     config = get_cfg(minimal_train_config, {})
 
     assert config.ema_tau == 400.0
+
+
+def test_load_checkpoint_model_uses_saved_metadata_when_dataset_yaml_omits_image_tasks(
+    synthetic_dataset: Path,
+    tmp_path: Path,
+) -> None:
+    dataset_yaml_path = synthetic_dataset / "dataset.yaml"
+    original_dataset_yaml = yaml.safe_load(dataset_yaml_path.read_text(encoding="utf-8"))
+    dataset_yaml_with_image_tasks = {
+        **original_dataset_yaml,
+        "image_label_tasks": {
+            "tumor_site": {
+                "type": "multiclass",
+                "classes": {0: "other", 1: "oropharynx", 2: "larynx"},
+            }
+        },
+    }
+    dataset_yaml_path.write_text(
+        yaml.safe_dump(dataset_yaml_with_image_tasks, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    config_path = tmp_path / "image_label_head_train.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "input_channels: 1",
+                "model_scale: n",
+                f"data: {synthetic_dataset.as_posix()}",
+                "fold: 0",
+                "epochs: 1",
+                "nominal_batch_size: 1",
+                "warmup_epochs: 0.0",
+                "patience: 1",
+                "batch_size: 1",
+                "patch_size: {x: 32, y: 32, z: 64}",
+                "normalization: {type: 'none'}",
+                "device: cpu",
+                "workers: 0",
+                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: image_label_checkpoint_load",
+                "exist_ok: True",
+                "optimizer: Adam",
+                "seed: 0",
+                "resume: False",
+                "amp: False",
+                "use_cudnn_benchmark: False",
+                "val: False",
+                "plots: False",
+                "enable_image_label_head: True",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = get_cfg(config_path, {})
+    model = build_model_from_config(config)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scaler = torch.GradScaler("cpu", enabled=False)
+    checkpoint_path = tmp_path / "image_label_head_checkpoint.pt"
+    save_model_checkpoint(
+        paths=[checkpoint_path],
+        epoch=1,
+        best_fitness=0.0,
+        model=model,
+        ema_updates=0,
+        optimizer=optimizer,
+        scaler=scaler,
+        train_config=config,
+        train_metrics={"metrics/fitness": 0.0},
+    )
+    saved_checkpoint = load_model_checkpoint(checkpoint_path)
+    assert "tumor_site" in saved_checkpoint["model_metadata"]["image_label_tasks"]
+
+    dataset_yaml_path.write_text(
+        yaml.safe_dump(original_dataset_yaml, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    loaded = load_checkpoint_model(checkpoint_path, device_override="cpu")
+    assert "tumor_site" in loaded.model.image_label_task_specs
+    assert len(loaded.model.image_label_task_specs["tumor_site"].classes or {}) == 3
 
 
 def test_get_cfg_infers_num_classes_from_dataset_names(minimal_train_config: Path) -> None:

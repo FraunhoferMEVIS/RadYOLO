@@ -563,7 +563,22 @@ class DatasetConfig(BaseModel):
         raise ValueError(msg)
 
 
+class ImageLabelTaskSpecCheckpoint(TypedDict):
+    type: str
+    classes: dict[int, str] | None
+    unit: str | None
+    masking: str | None
+    survival_bin_thresholds: tuple[float, ...] | None
+
+
+class ModelMetadataCheckpoint(TypedDict):
+    image_label_tasks: dict[str, ImageLabelTaskSpecCheckpoint]
+    tabular_feature_names: tuple[str, ...]
+    dataset_yaml: dict[str, Any]
+
+
 class ModelCheckpoint(TypedDict):
+
     epoch: int
     best_fitness: float
     model_state_dict: dict
@@ -573,6 +588,28 @@ class ModelCheckpoint(TypedDict):
     train_config: DefaultConfig
     train_metrics: dict
     date: datetime.datetime
+    model_metadata: ModelMetadataCheckpoint
+
+
+def _load_dataset_yaml_for_checkpoint(dataset_path: Path) -> dict[str, Any]:
+    dataset_yaml_path = dataset_path / "dataset.yaml"
+    with dataset_yaml_path.open(encoding="utf-8") as file:
+        return yaml.safe_load(file) or {}
+
+
+def _serialize_image_label_task_specs_for_checkpoint(
+    model: HardcodedModel,
+) -> dict[str, ImageLabelTaskSpecCheckpoint]:
+    serialized: dict[str, ImageLabelTaskSpecCheckpoint] = {}
+    for task_name, task_spec in model.image_label_task_specs.items():
+        serialized[task_name] = ImageLabelTaskSpecCheckpoint(
+            type=task_spec.type,
+            classes=task_spec.classes,
+            unit=task_spec.unit,
+            masking=task_spec.masking,
+            survival_bin_thresholds=task_spec.survival_bin_thresholds,
+        )
+    return serialized
 
 
 def _sanitize_checkpoint_value(value: Any) -> Any:
@@ -605,6 +642,11 @@ def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
         train_config=DefaultConfig.model_validate_json(checkpoint["train_config"]),
         train_metrics=checkpoint["train_metrics"],
         date=datetime.datetime.fromisoformat(checkpoint["date"]),
+        model_metadata=ModelMetadataCheckpoint(
+            image_label_tasks=checkpoint["model_metadata"]["image_label_tasks"],
+            tabular_feature_names=tuple(checkpoint["model_metadata"]["tabular_feature_names"]),
+            dataset_yaml=checkpoint["model_metadata"]["dataset_yaml"],
+        ),
     )
 
 
@@ -619,6 +661,7 @@ def save_model_checkpoint(  # noqa: PLR0913
     train_config: DefaultConfig,
     train_metrics: dict[str, float],
 ) -> None:
+    dataset_yaml = _load_dataset_yaml_for_checkpoint(Path(train_config.data))
     checkpoint = ModelCheckpoint(
         epoch=epoch,
         best_fitness=best_fitness,
@@ -629,6 +672,11 @@ def save_model_checkpoint(  # noqa: PLR0913
         train_config=train_config.model_dump_json(),
         train_metrics=train_metrics,
         date=datetime.datetime.now(tz=datetime.UTC).isoformat(),
+        model_metadata=ModelMetadataCheckpoint(
+            image_label_tasks=_serialize_image_label_task_specs_for_checkpoint(model),
+            tabular_feature_names=tuple(model.tabular_feature_names),
+            dataset_yaml=dataset_yaml,
+        ),
     )
     for path in paths:
         torch.save(_sanitize_checkpoint_value(checkpoint), path)

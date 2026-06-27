@@ -415,6 +415,26 @@ def _resolve_tabular_feature_names(train_config: DefaultConfig) -> tuple[str, ..
     return feature_names
 
 
+def _load_image_label_tasks_from_checkpoint_metadata(
+    checkpoint: ModelCheckpoint,
+) -> dict[str, ImageLabelTaskSpec]:
+    checkpoint_tasks = checkpoint["model_metadata"]["image_label_tasks"]
+    loaded_tasks: dict[str, ImageLabelTaskSpec] = {}
+    for task_name, task_spec in checkpoint_tasks.items():
+        loaded_tasks[task_name] = ImageLabelTaskSpec(
+            type=task_spec["type"],
+            classes=task_spec["classes"],
+            unit=task_spec["unit"],
+            masking=task_spec["masking"],
+            survival_bin_thresholds=(
+                tuple(float(value) for value in task_spec["survival_bin_thresholds"])
+                if task_spec["survival_bin_thresholds"] is not None
+                else None
+            ),
+        )
+    return loaded_tasks
+
+
 class HardcodedModel(nn.Module):
     MODEL_SCALES: ClassVar[dict[str, tuple[float, float, int]]] = {
         "n": (0.50, 0.25, 256),
@@ -877,9 +897,14 @@ def build_model_from_config(
     num_classes: int | None = None,
     state_dict: dict | None = None,
     image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
+    tabular_feature_names: tuple[str, ...] | None = None,
 ) -> HardcodedModel:
     resolved_image_label_tasks = _resolve_image_label_tasks(train_config, image_label_tasks)
-    resolved_tabular_feature_names = _resolve_tabular_feature_names(train_config)
+    resolved_tabular_feature_names = (
+        tabular_feature_names
+        if tabular_feature_names is not None
+        else _resolve_tabular_feature_names(train_config)
+    )
     model = HardcodedModel(
         input_channels=train_config.input_channels,
         num_classes=num_classes or train_config.num_classes,
@@ -933,9 +958,12 @@ def load_checkpoint_model(
     checkpoint = load_model_checkpoint(checkpoint_path)
     train_config = checkpoint["train_config"]
     device = select_device(device_override or getattr(train_config, "device", ""))
+    model_metadata = checkpoint["model_metadata"]
     model = build_model_from_config(
         train_config,
         state_dict=checkpoint["model_state_dict"],
+        image_label_tasks=_load_image_label_tasks_from_checkpoint_metadata(checkpoint),
+        tabular_feature_names=tuple(model_metadata["tabular_feature_names"]),
     )
     model.eval().to(device)
     model.device = device  # type: ignore[attr-defined]

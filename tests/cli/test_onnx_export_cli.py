@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 from radyolo import main
 from radyolo.config.config import load_model_checkpoint
-from radyolo.models.model import build_model_from_config
+from radyolo.models.model import load_checkpoint_model
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,12 +30,8 @@ def _run_torch_and_onnx_inference(
     onnx_path: Path,
     input_tensor: torch.Tensor,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
-    checkpoint = load_model_checkpoint(model_path)
-    train_config = checkpoint["train_config"]
-    model = build_model_from_config(
-        train_config,
-        state_dict=checkpoint["model_state_dict"],
-    )
+    loaded_model = load_checkpoint_model(model_path)
+    model = loaded_model.model
     model.eval()
 
     with torch.inference_mode():
