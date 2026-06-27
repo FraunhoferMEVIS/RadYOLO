@@ -351,7 +351,7 @@ def _evaluate(
 
 
 def parse_args() -> argparse.Namespace:
-    default_config_path = Path(__file__).resolve().parent / "config" / "config.yaml"
+    default_config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
     config_data = _load_yaml_config(default_config_path)
 
     default_seed = _coerce_int(config_data.get("seed"), 7)
