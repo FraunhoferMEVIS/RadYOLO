@@ -75,9 +75,9 @@ def bbox_iou(
         v = (
             (4 / math.pi**2)
             * (
-                ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
-                + ((w2 / d2).atan() - (w1 / d1).atan()).pow(2)
-                + ((h2 / d2).atan() - (h1 / d1).atan()).pow(2)
+                ((w2 / (h2 + eps)).atan() - (w1 / (h1 + eps)).atan()).pow(2)
+                + ((w2 / (d2 + eps)).atan() - (w1 / (d1 + eps)).atan()).pow(2)
+                + ((h2 / (d2 + eps)).atan() - (h1 / (d1 + eps)).atan()).pow(2)
             )
             / 3
         )
