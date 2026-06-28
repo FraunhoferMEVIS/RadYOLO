@@ -73,14 +73,14 @@ def bbox_iou(
             + (b2_z1 + b2_z2 - b1_z1 - b1_z2).pow(2)
         ) / 4
         v = (
-            (2 / math.pi)
+            (4 / math.pi**2)
             * (
-                ((w2 / h2).atan() - (w1 / h1).atan()).abs()
-                + ((w2 / d2).atan() - (w1 / d1).atan()).abs()
-                + ((h2 / d2).atan() - (h1 / d1).atan()).abs()
+                ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
+                + ((w2 / d2).atan() - (w1 / d1).atan()).pow(2)
+                + ((h2 / d2).atan() - (h1 / d1).atan()).pow(2)
             )
             / 3
-        ).pow(2)
+        )
         with torch.no_grad():
             alpha = v / (v - iou + (1 + eps))
         return iou - (rho2 / c2 + v * alpha)
