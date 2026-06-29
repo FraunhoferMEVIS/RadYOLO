@@ -32,8 +32,8 @@ from radyolo.data.image_labels import (
     load_case_image_labels,
     load_image_label_task_specs,
 )
-from radyolo.data.tabular import load_case_tabular_inputs, load_tabular_feature_names
 from radyolo.data.preprocessing import preprocess_image, resample_mask
+from radyolo.data.tabular import load_case_tabular_inputs, load_tabular_feature_names
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 if TYPE_CHECKING:
