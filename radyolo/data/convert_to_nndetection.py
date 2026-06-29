@@ -113,7 +113,14 @@ def _labels_for_case(
     if not json_file.exists() and not txt_file.exists():
         return []
 
-    entries = load_case_object_labels(labels_dir, case_id)
+    try:
+        entries = load_case_object_labels(labels_dir, case_id)
+    except ValueError as exc:
+        # Keep the historical _labels_for_case contract used by tests and callers.
+        if txt_file.exists() and not json_file.exists():
+            msg = f"Invalid label line in {txt_file}"
+            raise ValueError(msg) from exc
+        raise
     return [
         (entry["class_"], *entry["box_relative_xyzwhd"])
         for entry in entries
