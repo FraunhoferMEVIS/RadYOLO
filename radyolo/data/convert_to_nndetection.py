@@ -21,6 +21,7 @@ from nibabel.filebasedimages import ImageFileError
 from tqdm.auto import tqdm
 
 from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME
+from radyolo.data.object_labels import load_case_object_labels
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -107,24 +108,16 @@ def _copy_image_to_nndet(image_path: Path, out_images_dir: Path, case_id: str) -
 def _labels_for_case(
     labels_dir: Path, case_id: str
 ) -> list[tuple[int, float, float, float, float, float, float]]:
-    label_file = labels_dir / f"{case_id}.txt"
-    if not label_file.exists():
+    json_file = labels_dir / f"{case_id}.json"
+    txt_file = labels_dir / f"{case_id}.txt"
+    if not json_file.exists() and not txt_file.exists():
         return []
-    lines: list[str] = label_file.read_text(encoding="utf-8").strip().splitlines()
-    tuples: list[tuple[int, float, float, float, float, float, float]] = []
-    required_label_parts = 7
-    for ln in lines:
-        if not ln.strip():
-            continue
-        parts = ln.split()
-        if len(parts) != required_label_parts:
-            msg = f"Invalid label line in {label_file}: '{ln}'"
-            raise ValueError(msg)
-        c, xc, yc, zc, sx, sy, sz = parts
-        tuples.append(
-            (int(float(c)), float(xc), float(yc), float(zc), float(sx), float(sy), float(sz))
-        )
-    return tuples
+
+    entries = load_case_object_labels(labels_dir, case_id)
+    return [
+        (entry["class_"], *entry["box_relative_xyzwhd"])
+        for entry in entries
+    ]
 
 
 def _try_load_masks(masks_dir: Path, case_id: str) -> np.ndarray | None:

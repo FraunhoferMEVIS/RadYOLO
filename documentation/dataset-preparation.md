@@ -10,9 +10,9 @@
         <image_3_filename>.nii.gz
         ...
     labels
-        <image_1_filename>.txt
-        <image_2_filename>.txt
-        <image_3_filename>.txt
+      <image_1_filename>.json
+      <image_2_filename>.json
+      <image_3_filename>.json
         ...
     masks [Optional]
         <image_1_filename>.nii.gz
@@ -25,16 +25,38 @@
 
 ## Label file format
 
-Each `.txt` file contains one object per line using relative coordinates:
+The preferred object label format is JSON with one file per case in `labels/`.
+Each file contains a list of objects, analogous to the prediction format.
 
-`class x_center y_center z_center x_extent y_extent z_extent`
+Example `labels/<case>.json`:
 
-Example:
+```json
+[
+  {
+    "class": 3,
+    "box_relative_xyzwhd": [0.4, 0.3, 0.8, 0.1, 0.2, 0.1]
+  },
+  {
+    "class": 0,
+    "box_relative_xyzwhd": [0.8, 0.6, 0.7, 0.1, 0.1, 0.3]
+  }
+]
+```
 
-```text
-3 0.4 0.3 0.8 0.1 0.2 0.1
-0 0.9 0.6 0.7 0.1 0.1 0.3
-1 0.5 0.5 0.6 0.2 0.4 0.1
+Where:
+
+- `class` is the integer class id.
+- `box_relative_xyzwhd` is `[x_center, y_center, z_center, x_extent, y_extent, z_extent]`,
+  normalized to the image size.
+
+Backward compatibility:
+
+- Legacy `labels/<case>.txt` files are still supported but deprecated and produce a warning.
+
+To migrate legacy labels in place:
+
+```bash
+uv run -m radyolo create-json-labels-from-txt <path-to-dataset>/labels
 ```
 
 ## Optional masks

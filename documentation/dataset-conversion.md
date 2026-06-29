@@ -55,7 +55,7 @@ single-channel mask per case (`.nii.gz`) with integer class IDs.
 Behavior per case:
 
 - Reads case IDs from `images/` (`.nii` and `.nii.gz` supported)
-- Uses labels from `labels/<case>.txt`
+- Uses labels from `labels/<case>.json` (falls back to deprecated `labels/<case>.txt`)
 - If masks in `masks/<case>.nii.gz` are present and compatible, uses them
 - Otherwise falls back to box-based rasterization from label boxes
 - If a case has no labels, writes an all-zero mask

@@ -20,6 +20,7 @@ from radyolo.data.convert_to_integer_encoded_masks import (
 from radyolo.data.convert_to_nndetection import convert_dataset_to_nndetection
 from radyolo.data.convert_to_nnunet import convert_dataset_to_nnunet
 from radyolo.data.data_splits import k_fold_data_splits, train_val_test_data_split
+from radyolo.data.object_labels import create_json_labels_from_txt
 from radyolo.data.preprocess_data import preprocess_dataset as preprocess_dataset_fn
 from radyolo.export.onnx_export import build_export_metadata, export_model
 from radyolo.inference.merge_prediction_masks import (
@@ -886,6 +887,31 @@ def convert_to_integer_encoded_masks(dataset_path: Path) -> int:
         LOGGER.info("Created %s", output_dir)
     except Exception as e:
         LOGGER.exception("Failed to convert dataset", exc_info=e)
+        return 1
+    else:
+        return 0
+
+
+@main.command("create-json-labels-from-txt")
+@click.argument(
+    "labels_dir",
+    metavar="LABELS-DIR",
+    type=click.Path(
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+)
+def create_json_labels_from_txt_command(labels_dir: Path) -> int:
+    """Create .json object label files from all .txt labels in LABELS-DIR."""
+    try:
+        created_paths = create_json_labels_from_txt(labels_dir)
+        LOGGER.info("Created %d JSON label files in %s", len(created_paths), labels_dir)
+    except Exception as e:
+        LOGGER.exception("Failed to create JSON labels from TXT", exc_info=e)
         return 1
     else:
         return 0

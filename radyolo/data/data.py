@@ -32,6 +32,7 @@ from radyolo.data.image_labels import (
     load_case_image_labels,
     load_image_label_task_specs,
 )
+from radyolo.data.object_labels import load_case_object_labels
 from radyolo.data.preprocessing import preprocess_image, resample_mask
 from radyolo.data.tabular import load_case_tabular_inputs, load_tabular_feature_names
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
@@ -663,17 +664,17 @@ def _load_image_array(
 
 
 def _load_labels(src_path: Path, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
-    label_path = src_path / "labels" / f"{case_name}.txt"
-    with label_path.open("r") as file:
-        lines = file.read().strip().splitlines()
-    if lines:
-        string_labels = [line.split() for line in lines if len(line)]
-        if any(len(label) not in (0, 7) for label in string_labels):
-            msg = f"Labels in wrong fomat in file {label_path}"
-            raise ValueError(msg)
-        labels = np.array(string_labels, dtype=np.float32)
-    else:
+    entries = load_case_object_labels(src_path / "labels", case_name)
+    if not entries:
         labels = np.zeros((0, 7), dtype=np.float32)
+    else:
+        labels = np.array(
+            [
+                [entry["class_"], *entry["box_relative_xyzwhd"]]
+                for entry in entries
+            ],
+            dtype=np.float32,
+        )
     return torch.from_numpy(labels[:, 0:1]), torch.from_numpy(labels[:, 1:])
 
 
