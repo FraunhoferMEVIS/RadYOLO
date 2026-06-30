@@ -731,7 +731,7 @@ def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
     return len(dataset_cfg.names)
 
 
-def _input_channels_from_dataset(dataset_yaml: dict[str, Any]) -> int | None:
+def input_channels_from_dataset(dataset_yaml: dict[str, Any]) -> int | None:
     """Infer number of input channels from dataset.yaml."""
     normalization = dataset_yaml.get("normalization")
     if isinstance(normalization, list):
@@ -756,7 +756,7 @@ def get_training_config(config_path: str | Path, overrides: dict[str, Any] | Non
 
     yaml_config["num_classes"] = _num_classes_from_dataset(yaml_config)
     dataset_yaml = _load_dataset_yaml_for_checkpoint(Path(yaml_config["data"]))
-    inferred_input_channels = _input_channels_from_dataset(dataset_yaml)
+    inferred_input_channels = input_channels_from_dataset(dataset_yaml)
     if inferred_input_channels is not None and "input_channels" not in yaml_config:
         yaml_config["input_channels"] = inferred_input_channels
     if "deterministic" in deprecated_config_keys:

@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
+import yaml
 from tqdm.auto import tqdm
 
+from radyolo.config.config import input_channels_from_dataset
 from radyolo.data.convert_to_nndetection import (
     _labels_for_case,
     _load_dataset_names,
@@ -51,22 +53,6 @@ def _write_label_file(
     )
     label_img.set_data_dtype(np.uint16)
     nib.save(label_img, label_path)
-
-
-def _infer_channel_count(dataset_dir: Path, case_ids: Iterable[str]) -> int:
-    image_dir = dataset_dir / "images"
-    for case_id in case_ids:
-        image_path = image_dir / f"{case_id}.nii.gz"
-        if not image_path.exists():
-            continue
-        image = nib.load(image_path)
-        image_data = np.asanyarray(image.dataobj)
-        if image_data.ndim != 4:
-            return 1
-        if image_data.shape[0] <= 5 and image_data.shape[0] < image_data.shape[-1]:
-            return int(image_data.shape[0])
-        return int(image_data.shape[-1])
-    return 1
 
 
 def _build_label_map(
@@ -144,6 +130,10 @@ def convert_dataset_to_nnunet(
         dataset_name = _sanitize_name(dataset_dir.name)
     dataset_name = _sanitize_name(dataset_name)
     out_dataset_dir = out_root / f"Dataset{dataset_id:03d}_{dataset_name}"
+
+    dataset_yaml_path = dataset_dir / "dataset.yaml"
+    with dataset_yaml_path.open("r", encoding="utf-8") as file_handle:
+        dataset_yaml = yaml.safe_load(file_handle) or {}
 
     images_tr_dir = out_dataset_dir / "imagesTr"
     labels_tr_dir = out_dataset_dir / "labelsTr"
@@ -239,7 +229,7 @@ def convert_dataset_to_nnunet(
     channel_count = (
         max(observed_channel_counts)
         if observed_channel_counts
-        else _infer_channel_count(dataset_dir, [*train_cases, *splits.test])
+        else (input_channels_from_dataset(dataset_yaml) or 1)
     )
     if len(observed_channel_counts) > 1:
         LOGGER.warning(

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import yaml
 
-from radyolo.config.config import DatasetConfig, DefaultConfig, _input_channels_from_dataset
+from radyolo.config.config import DatasetConfig, DefaultConfig, input_channels_from_dataset
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 
@@ -267,7 +267,7 @@ def propose_model_config(
     fingerprint = _load_json(fingerprint_path)
     reference_config = _load_yaml(reference_config_path)
 
-    input_channels = _input_channels_from_dataset(dataset_yaml) or 1
+    input_channels = input_channels_from_dataset(dataset_yaml) or 1
     normalization_tags = resolve_dataset_normalization_tags(dataset_yaml, input_channels)
     runtime_normalization = build_runtime_normalization_config(normalization_tags, fingerprint)
     enable_image_label_head = bool(dataset_yaml.get("image_label_tasks")) and bool(
