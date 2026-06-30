@@ -37,6 +37,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _ensure_dir(path: Path) -> None:
+    """Create a directory tree if it does not exist."""
     path.mkdir(parents=True, exist_ok=True)
 
 
@@ -46,6 +47,7 @@ def _write_label_file(
     labelmap: np.ndarray,
     ref_nii: nib.Nifti1Image,
 ) -> None:
+    """Write a uint16 nnU-Net label file preserving spatial metadata from a reference image."""
     _ensure_dir(out_labels_dir)
     label_path = out_labels_dir / f"{case_id}.nii.gz"
     label_img = nib.Nifti1Image(
@@ -56,24 +58,12 @@ def _write_label_file(
 
 
 def _build_label_map(
-    dataset_names: dict[int, str] | None,
-    dataset_dir: Path,
-    train_cases: Iterable[str],
+    dataset_names: dict[int, str],
 ) -> dict[str, int]:
+    """Build nnU-Net labels mapping with background at 0 and class ids shifted by +1."""
     labels: dict[str, int] = {"background": 0}
-    if dataset_names:
-        for class_id, class_name in sorted(dataset_names.items()):
-            labels[str(class_name)] = int(class_id) + 1
-        return labels
-
-    class_ids: set[int] = set()
-    label_dir = dataset_dir / "labels"
-    for case_id in train_cases:
-        for class_id, *_ in _labels_for_case(label_dir, case_id):
-            class_ids.add(int(class_id))
-
-    for class_id in sorted(class_ids):
-        labels[f"class_{class_id}"] = class_id + 1
+    for class_id, class_name in sorted(dataset_names.items()):
+        labels[str(class_name)] = int(class_id) + 1
     return labels
 
 
@@ -84,6 +74,7 @@ def _write_split_file(
     output_split_file_name: str,
     include_val_in_train: bool,
 ) -> None:
+    """Export sanitized split definitions for nnU-Net, optionally dropping validation from train."""
     with (dataset_dir / input_split_file_name).open("r", encoding="utf-8") as file_handle:
         all_splits = json.load(file_handle)
     if not isinstance(all_splits, list):
@@ -123,7 +114,12 @@ def convert_dataset_to_nnunet(
     split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
     export_split_file_name: str = "splits_final.json",
 ) -> Path:
-    """Convert a RadYOLO dataset to nnU-Net raw dataset format."""
+    """Convert a RadYOLO dataset to nnU-Net raw dataset format.
+
+    Converts train and test cases in parallel, writes per-channel image files and semantic
+    labelmaps, emits `dataset.json` and optional id mapping CSV, and mirrors split metadata
+    into an nnU-Net compatible JSON split file.
+    """
     dataset_dir = dataset_dir.resolve()
     out_root = out_root.resolve()
     if dataset_name is None:
@@ -144,6 +140,9 @@ def convert_dataset_to_nnunet(
     _ensure_dir(labels_tr_dir)
 
     dataset_names = _load_dataset_names(dataset_dir / "dataset.yaml")
+    if not dataset_names:
+        msg = "dataset.yaml must define class names in `names`, `class_names`, or `classes`."
+        raise ValueError(msg)
     splits = _read_splits(dataset_dir, fold=fold, split_file_name=split_file_name)
 
     train_cases: list[str] = list(splits.train)
@@ -247,7 +246,7 @@ def convert_dataset_to_nnunet(
     }
     dataset_json = {
         "channel_names": channel_names,
-        "labels": _build_label_map(dataset_names, dataset_dir, train_cases),
+        "labels": _build_label_map(dataset_names),
         "numTraining": processed_train,
         "file_ending": ".nii.gz",
     }
@@ -302,6 +301,12 @@ def _convert_one_case(
     out_image_dir_str: str,
     out_label_dir_str: str,
 ) -> tuple[bool, str, str, list[str], str, str, int]:
+    """Convert one case into nnU-Net images and labelmap.
+
+    Handles single- and multi-channel NIfTI layouts, writes channels as `_XXXX` suffix files,
+    builds semantic labels from masks when present (else from boxes), and returns bookkeeping
+    metadata used by the parent process.
+    """
     dataset_dir = Path(dataset_dir_str)
     out_image_dir = Path(out_image_dir_str)
     out_label_dir = Path(out_label_dir_str)
