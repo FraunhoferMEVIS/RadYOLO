@@ -39,6 +39,8 @@ type NormalizationSpec = NormalizationConfig | list[NormalizationConfig]
 
 @dataclass(frozen=True)
 class PreprocessCaseConfig:
+    """Immutable preprocessing settings passed to each case conversion."""
+
     target_image_size: PatchSize | None
     target_voxel_size: VoxelSize | None
     normalization: NormalizationSpec
@@ -46,6 +48,7 @@ class PreprocessCaseConfig:
 
 
 def _iter_cases(images_dir: Path) -> list[tuple[str, Path]]:
+    """Return sorted case ids and image paths from an images directory."""
     return [
         (path.name[:-7], path)
         for path in sorted(images_dir.glob("*.nii.gz"))
@@ -54,11 +57,13 @@ def _iter_cases(images_dir: Path) -> list[tuple[str, Path]]:
 
 
 def _copy_file_if_exists(src: Path, dst: Path) -> None:
+    """Copy a file if it exists."""
     if src.exists():
         shutil.copy2(src, dst)
 
 
 def _copy_tree_if_exists(src: Path, dst: Path) -> None:
+    """Copy a directory tree if it exists."""
     if src.exists():
         shutil.copytree(src, dst, dirs_exist_ok=True)
 
@@ -66,6 +71,7 @@ def _copy_tree_if_exists(src: Path, dst: Path) -> None:
 def _load_nifti_tensor(
     nifti_path: Path, *, squeeze: bool = False
 ) -> tuple[torch.Tensor, VoxelSize]:
+    """Load a NIfTI image as a tensor in zyx order plus voxel size."""
     nifti_image = nib.loadsave.load(nifti_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI image type for case at {nifti_path}"
@@ -81,6 +87,7 @@ def _load_nifti_tensor(
 
 
 def _tensor_to_saved_numpy(image: torch.Tensor, original_ndim: int) -> np.ndarray:
+    """Convert an internal tensor back to contiguous numpy storage layout."""
     image_to_store = image.squeeze(0) if original_ndim == 3 and image.shape[0] == 1 else image
     return np.ascontiguousarray(
         image_to_store.permute(*reversed(range(image_to_store.ndim))).cpu().numpy()
@@ -88,6 +95,7 @@ def _tensor_to_saved_numpy(image: torch.Tensor, original_ndim: int) -> np.ndarra
 
 
 def _remove_path_if_exists(path: Path) -> None:
+    """Remove a file or directory path if present."""
     if path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
@@ -95,15 +103,18 @@ def _remove_path_if_exists(path: Path) -> None:
 
 
 def _remove_case_outputs(out_dir: Path, case_id: str, suffixes: tuple[str, ...]) -> None:
+    """Delete any existing output artifacts for a case and suffix set."""
     for suffix in suffixes:
         _remove_path_if_exists(out_dir / f"{case_id}{suffix}")
 
 
 def _estimate_array_nbytes(shape: tuple[int, ...], itemsize: int) -> int:
+    """Estimate array memory usage in bytes for a shape and itemsize."""
     return int(np.prod(shape, dtype=np.int64)) * itemsize
 
 
 def _previous_power_of_two(value: int) -> int:
+    """Return the greatest power of two less than or equal to value."""
     if value <= 1:
         return 1
     return 1 << ((value - 1).bit_length() - 1)
@@ -115,6 +126,7 @@ def _compute_block_shape(
     l1_cache_size_per_core_in_bytes: int = DEFAULT_L1_CACHE_SIZE_PER_CORE_IN_BYTES,
     safety_factor: float = DEFAULT_CACHE_SAFETY_FACTOR,
 ) -> tuple[int, ...]:
+    """Choose a block shape sized to fit within the target L1 cache budget."""
     if any(dim <= 0 for dim in image_shape):
         msg = f"Array shape must contain only positive integers, got {image_shape}."
         raise ValueError(msg)
@@ -150,6 +162,7 @@ def _compute_chunk_shape(
     l3_cache_size_per_core_in_bytes: int = DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES,
     safety_factor: float = DEFAULT_CACHE_SAFETY_FACTOR,
 ) -> tuple[int, ...]:
+    """Grow chunk shape from block shape within the target L3 cache budget."""
     itemsize = np.dtype(dtype).itemsize
     target_nbytes = max(1, int(l3_cache_size_per_core_in_bytes * safety_factor))
     chunk_shape = list(block_shape)
@@ -183,6 +196,7 @@ def _compute_storage_shapes(
     l3_cache_size_per_core_in_bytes: int = DEFAULT_L3_CACHE_SIZE_PER_CORE_IN_BYTES,
     safety_factor: float = DEFAULT_CACHE_SAFETY_FACTOR,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Compute Blosc2 block and chunk shapes for a given array shape and dtype."""
     block_shape = _compute_block_shape(
         image_shape,
         dtype,
@@ -205,6 +219,7 @@ def _save_preprocessed_blosc2_array(
     *,
     use_full_image_chunk: bool,
 ) -> None:
+    """Persist a numpy array as a compressed Blosc2 ndarray on disk."""
     array_shape = tuple(int(dim) for dim in array.shape)
     array_dtype = np.dtype(array.dtype)
 
@@ -235,6 +250,7 @@ def _save_preprocessed_image(
     *,
     use_full_image_chunk: bool,
 ) -> None:
+    """Write one preprocessed image case to the output images directory."""
     _remove_case_outputs(out_images_dir, case_id, (".npy", ".b2nd"))
 
     _save_preprocessed_blosc2_array(
@@ -251,6 +267,7 @@ def _save_preprocessed_mask(
     *,
     use_full_image_chunk: bool,
 ) -> None:
+    """Write one preprocessed mask case to the output masks directory."""
     _remove_case_outputs(out_masks_dir, case_id, (".npz", ".b2nd"))
 
     _save_preprocessed_blosc2_array(
@@ -261,6 +278,7 @@ def _save_preprocessed_mask(
 
 
 def _has_preprocessed_image_outputs(out_images_dir: Path) -> bool:
+    """Return whether preprocessed image files already exist in a directory."""
     return any(out_images_dir.glob("*.npy")) or any(out_images_dir.glob("*.b2nd"))
 
 
@@ -268,6 +286,7 @@ def _validate_image_output_options(
     target_image_size: PatchSize | None,
     target_voxel_size: VoxelSize | None,
 ) -> None:
+    """Ensure mutually exclusive image-size and voxel-size options."""
     if target_image_size is not None and target_voxel_size is not None:
         msg = "Only one of target_image_size or target_voxel_size can be specified."
         raise ValueError(msg)
@@ -278,6 +297,7 @@ def _validate_existing_outputs(
     out_masks_dir: Path | None,
     overwrite: bool,
 ) -> None:
+    """Validate output directories against overwrite behavior."""
     if (
         out_images_dir.exists()
         and _has_preprocessed_image_outputs(out_images_dir)
@@ -309,6 +329,7 @@ def _convert_case_to_blosc2(
     out_masks_dir: Path | None,
     config: PreprocessCaseConfig,
 ) -> None:
+    """Preprocess one case and store image and optional mask as Blosc2 arrays."""
     image_tensor, voxel_size = _load_nifti_tensor(image_path)
     original_ndim = image_tensor.ndim
     image_tensor, _, resized_shape = preprocess_image(
@@ -357,6 +378,7 @@ def _preprocess_cases_serially(
     out_masks_dir: Path | None,
     case_config: PreprocessCaseConfig,
 ) -> None:
+    """Preprocess all cases sequentially with progress reporting."""
     progress_bar = tqdm(total=len(cases), desc="Preprocessing", unit="case", smoothing=0.05)
     try:
         for case_id, image_path in cases:
@@ -385,6 +407,7 @@ def _preprocess_cases_in_process_pool(
     case_config: PreprocessCaseConfig,
     max_workers: int,
 ) -> None:
+    """Preprocess all cases in a process pool with per-case error wrapping."""
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
@@ -422,6 +445,7 @@ def _preprocess_cases(
     case_config: PreprocessCaseConfig,
     max_workers: int,
 ) -> None:
+    """Dispatch preprocessing serially or in parallel with pool fallback."""
     if max_workers <= 1:
         _preprocess_cases_serially(
             cases,
