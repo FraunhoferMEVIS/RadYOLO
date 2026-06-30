@@ -8,7 +8,7 @@ import math
 import multiprocessing as mp
 import queue
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -20,6 +20,17 @@ from tqdm_loggable.auto import tqdm
 from radyolo.config.config import DefaultConfig, DetectionPostprocessConfig
 from radyolo.config.spatial import VoxelSize
 from radyolo.data.preprocessing import preprocess_image
+from radyolo.inference.predict_utils import (
+    LoadedImageTask,
+    WriteTask,
+    build_prediction_entries,
+    reconstruct_and_save_mask,
+    save_merged_mask_probability,
+    to_numpy_float32_contiguous,
+)
+from radyolo.inference.predict_utils import (
+    relative_box as predict_utils_relative_box,
+)
 from radyolo.models.model import load_checkpoint_model
 from radyolo.utils import ops
 
@@ -35,26 +46,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 _SENTINEL = None
-
-
-@dataclass(slots=True)
-class _LoadedImageTask:
-    case_name: str
-    affine: np.ndarray
-    image: np.ndarray
-    voxel_size_xyz: tuple[float, float, float] | None = None
-
-
-@dataclass(slots=True)
-class _WriteTask:
-    case_name: str
-    image_results: list[dict[str, object]]
-    affine: np.ndarray
-    original_shape: tuple[int, int, int]
-    prototype_masks: np.ndarray | None
-    mask_detections: list[np.ndarray]
-    image_label_results: dict[str, object] | None = None
-    merged_mask_probabilities: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -94,6 +85,11 @@ class PredictionConfig:
     split_fold: int = 0
     split_group: str = "test"
     save_masks: bool = True
+    tta_flipping: bool = False
+    ensemble_model_paths: tuple[Path, ...] = ()
+    ensembling_iou: float = 0.5
+    ensembling_confidence_threshold: float = 0.1
+    ensembling_class_agnostic: bool = False
 
 
 def _load_model(
@@ -317,7 +313,7 @@ def _resolve_patch_size(
     )
 
 
-def _resolve_input_voxel_size(loaded_image: _LoadedImageTask) -> VoxelSize | None:
+def _resolve_input_voxel_size(loaded_image: LoadedImageTask) -> VoxelSize | None:
     if loaded_image.voxel_size_xyz is None:
         return None
     return VoxelSize.from_xyz(loaded_image.voxel_size_xyz)
@@ -531,42 +527,6 @@ def _reconstruct_patch_mask_to_image(
     return full_mask
 
 
-def _to_numpy_float32_contiguous(tensor: torch.Tensor | np.ndarray) -> np.ndarray:
-    if isinstance(tensor, np.ndarray):
-        return np.ascontiguousarray(tensor, dtype=np.float32)
-    return tensor.detach().to(device="cpu", dtype=torch.float32).contiguous().numpy()
-
-
-def _to_torch_float32_contiguous(array: torch.Tensor | np.ndarray) -> torch.Tensor:
-    if isinstance(array, torch.Tensor):
-        return array.detach().to(device="cpu", dtype=torch.float32).contiguous()
-    return torch.from_numpy(np.ascontiguousarray(array)).to(dtype=torch.float32)
-
-
-def _save_merged_mask_probability(
-    mask_probability: torch.Tensor | np.ndarray,
-    original_shape: tuple[int, int, int],
-    mask_affine: np.ndarray,
-    mask_dir: Path,
-    det_index: int,
-    case_name: str,
-) -> str:
-    mask_probability_tensor = _to_torch_float32_contiguous(mask_probability)
-    mask_up = F.interpolate(
-        mask_probability_tensor.unsqueeze(0).unsqueeze(0),
-        size=original_shape,
-        mode="trilinear",
-        align_corners=False,
-    )[0, 0].permute(2, 1, 0)
-    mask_bin = (mask_up >= 0.5).cpu().numpy().astype("uint8")
-    mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
-    mask_dir.mkdir(exist_ok=True)
-    mask_filename = f"{case_name}_det{det_index}.nii.gz"
-    mask_path = mask_dir / mask_filename
-    nib.save(mask_img, str(mask_path))
-    return mask_filename
-
-
 def _postprocess_single(
     model_output: ModelOutput,
     train_config: DefaultConfig,
@@ -594,82 +554,11 @@ def _postprocess_single(
 def _relative_box(
     box_image_xyzxyz: torch.Tensor, original_shape: tuple[int, int, int]
 ) -> list[float]:
-    rel_box = box_image_xyzxyz.clone()
-    d, h, w = original_shape  # preprocess_image returns spatial shape in D, H, W (Z, Y, X)
-    rel_box[0] /= w
-    rel_box[1] /= h
-    rel_box[2] /= d
-    rel_box[3] /= w
-    rel_box[4] /= h
-    rel_box[5] /= d
-    return [round(float(x), 6) for x in rel_box.tolist()]
-
-
-def _reconstruct_and_save_mask(
-    det: torch.Tensor | np.ndarray,
-    proto: torch.Tensor | np.ndarray,
-    original_shape: tuple[int, int, int],
-    mask_affine: np.ndarray,
-    mask_dir: Path,
-    det_index: int,
-    case_name: str,
-) -> str | None:
-    det_tensor = _to_torch_float32_contiguous(det)
-    proto_tensor = _to_torch_float32_contiguous(proto)
-    nm = det_tensor.shape[0] - 8
-    if nm <= 0:
-        return None
-    coeff = det_tensor[8 : 8 + nm]
-    mask_prob = ops.reconstruct_mask_probabilities(coeff, proto_tensor)
-    mask_prob_r = mask_prob.unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
-    mask_up = F.interpolate(
-        mask_prob_r, size=original_shape, mode="trilinear", align_corners=False
-    )[0, 0].permute(2, 1, 0)  # (W, H, D)
-    mask_bin = (mask_up >= 0.5).cpu().numpy().astype("uint8")
-    mask_img = nib.Nifti1Image(mask_bin, affine=mask_affine)
-    mask_dir.mkdir(exist_ok=True)
-    mask_filename = f"{case_name}_det{det_index}.nii.gz"
-    mask_path = mask_dir / mask_filename
-    nib.save(mask_img, str(mask_path))
-    return mask_filename
-
-
-def _build_prediction_entries(
-    detections: torch.Tensor,
-    *,
-    case_name: str,
-    affine: np.ndarray,
-    original_shape: tuple[int, int, int],
-    names: dict[int, str],
-    include_masks: bool,
-) -> tuple[list[dict[str, object]], list[np.ndarray]]:
-    image_results: list[dict[str, object]] = []
-    mask_detections: list[np.ndarray] = []
-    for det_i, det in enumerate(detections):
-        box_image_xyzxyz = det[:6]
-        try:
-            box_world_xyzxyz = ops.box_image_to_world(
-                box_image_xyzxyz, np.asarray(affine, dtype=np.float32)
-            )
-        except (RuntimeError, ValueError, TypeError):  # pragma: no cover
-            box_world_xyzxyz = box_image_xyzxyz
-        entry: dict[str, object] = {
-            "class": int(det[7].item()),
-            "class_name": names.get(int(det[7].item()), str(int(det[7].item()))),
-            "confidence": round(float(det[6].item()), 6),
-            "box_image_xyzxyz": [round(float(x), 2) for x in box_image_xyzxyz.tolist()],
-            "box_world_xyzxyz": [round(float(x), 2) for x in box_world_xyzxyz.tolist()],
-            "box_relative_xyzxyz": _relative_box(box_image_xyzxyz, original_shape),
-        }
-        if include_masks:
-            entry["mask_path"] = f"{case_name}_det{det_i}.nii.gz"
-            mask_detections.append(_to_numpy_float32_contiguous(det))
-        image_results.append(entry)
-    return image_results, mask_detections
+    return predict_utils_relative_box(box_image_xyzxyz, original_shape)
 
 
 def _predict_whole_image(
-    loaded_image: _LoadedImageTask,
+    loaded_image: LoadedImageTask,
     *,
     model: HardcodedModel,
     train_config: DefaultConfig,
@@ -678,7 +567,7 @@ def _predict_whole_image(
     prediction_config: PredictionConfig,
     tabular_values: torch.Tensor | None,
     tabular_mask: torch.Tensor | None,
-) -> _WriteTask:
+) -> WriteTask:
     img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
         *reversed(range(loaded_image.image.ndim))
     )
@@ -730,7 +619,7 @@ def _predict_whole_image(
             ratio_pad=None,
             clip=prediction_config.clip_boxes_to_image,
         )
-        image_results, mask_detections = _build_prediction_entries(
+        image_results, mask_detections = build_prediction_entries(
             detections,
             case_name=loaded_image.case_name,
             affine=loaded_image.affine,
@@ -743,8 +632,8 @@ def _predict_whole_image(
             ),
         )
         if prediction_config.save_masks and mask_detections and proto_masks is not None:
-            prototype_masks = _to_numpy_float32_contiguous(proto_masks[0])
-    return _WriteTask(
+            prototype_masks = to_numpy_float32_contiguous(proto_masks[0])
+    return WriteTask(
         case_name=loaded_image.case_name,
         image_results=image_results,
         image_label_results=image_label_results,
@@ -756,13 +645,13 @@ def _predict_whole_image(
 
 
 def _predict_patchwise_image(
-    loaded_image: _LoadedImageTask,
+    loaded_image: LoadedImageTask,
     *,
     model: HardcodedModel,
     train_config: DefaultConfig,
     names: dict[int, str],
     prediction_config: PredictionConfig,
-) -> _WriteTask:
+) -> WriteTask:
     img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
         *reversed(range(loaded_image.image.ndim))
     )
@@ -852,7 +741,7 @@ def _predict_patchwise_image(
         max_det=train_config.max_det,
     )
     if merged_prediction_tensor.numel() == 0:
-        return _WriteTask(
+        return WriteTask(
             case_name=loaded_image.case_name,
             image_results=[],
             affine=loaded_image.affine,
@@ -879,7 +768,7 @@ def _predict_patchwise_image(
                 candidate.patch_origin_xyz,
             )
             if full_mask is not None:
-                selected_masks.append(_to_numpy_float32_contiguous(full_mask))
+                selected_masks.append(to_numpy_float32_contiguous(full_mask))
     ops.scale_boxes(
         inference_shape,
         merged_prediction_tensor[:, :6],
@@ -887,7 +776,7 @@ def _predict_patchwise_image(
         ratio_pad=None,
         clip=prediction_config.clip_boxes_to_image,
     )
-    image_results, _mask_detections = _build_prediction_entries(
+    image_results, _mask_detections = build_prediction_entries(
         merged_prediction_tensor,
         case_name=loaded_image.case_name,
         affine=loaded_image.affine,
@@ -895,7 +784,7 @@ def _predict_patchwise_image(
         names=names,
         include_masks=prediction_config.save_masks and bool(selected_masks),
     )
-    return _WriteTask(
+    return WriteTask(
         case_name=loaded_image.case_name,
         image_results=image_results,
         affine=loaded_image.affine,
@@ -907,7 +796,7 @@ def _predict_patchwise_image(
 
 
 def _predict_loaded_image(
-    loaded_image: _LoadedImageTask,
+    loaded_image: LoadedImageTask,
     *,
     model: HardcodedModel,
     train_config: DefaultConfig,
@@ -916,7 +805,7 @@ def _predict_loaded_image(
     prediction_config: PredictionConfig,
     tabular_values: torch.Tensor | None = None,
     tabular_mask: torch.Tensor | None = None,
-) -> _WriteTask:
+) -> WriteTask:
     resolved_image_label_task_specs = dict(image_label_task_specs or {})
     if train_config.training_mode == "patchwise":
         return _predict_patchwise_image(
@@ -938,12 +827,12 @@ def _predict_loaded_image(
     )
 
 
-def _write_prediction_result(output_dir: Path, write_task: _WriteTask) -> None:
+def _write_prediction_result(output_dir: Path, write_task: WriteTask) -> None:
     if write_task.prototype_masks is not None or write_task.merged_mask_probabilities:
         mask_affine = np.asarray(write_task.affine, dtype=np.float32)
     if write_task.prototype_masks is not None:
         for det_i, det_tensor in enumerate(write_task.mask_detections):
-            _reconstruct_and_save_mask(
+            reconstruct_and_save_mask(
                 det_tensor,
                 write_task.prototype_masks,
                 write_task.original_shape,
@@ -954,7 +843,7 @@ def _write_prediction_result(output_dir: Path, write_task: _WriteTask) -> None:
             )
     if write_task.merged_mask_probabilities:
         for det_i, mask_probability in enumerate(write_task.merged_mask_probabilities):
-            _save_merged_mask_probability(
+            save_merged_mask_probability(
                 mask_probability,
                 write_task.original_shape,
                 mask_affine,
@@ -972,6 +861,57 @@ def _write_prediction_result(output_dir: Path, write_task: _WriteTask) -> None:
         labels_json = labels_output_dir / f"{write_task.case_name}.json"
         with labels_json.open("w", encoding="utf-8") as jf:
             json.dump(write_task.image_label_results, jf, indent=2, sort_keys=True)
+
+
+def _run_ensemble_tta_inference_worker(
+    prediction_cfg: PredictionConfig,
+    inference_queue: mp.queues.Queue[LoadedImageTask | None],
+    write_queue: mp.queues.Queue[WriteTask | None],
+) -> None:
+    from radyolo.inference.predict_ensemble_tta import (  # noqa: PLC0415
+        _load_ensemble_models,
+        predict_loaded_image_ensemble_tta,
+    )
+
+    loaded_models = _load_ensemble_models(prediction_cfg)
+    reference_model = loaded_models[0]
+    train_config = reference_model.train_config
+    tabular_feature_names = reference_model.tabular_feature_names
+    if prediction_cfg.tabular_input_dir is not None and not tabular_feature_names:
+        LOGGER.warning(
+            "Ignoring --tabular-input-dir because the loaded checkpoint does not declare "
+            "tabular feature names."
+        )
+    if prediction_cfg.tabular_input_dir is not None and train_config.training_mode == "patchwise":
+        LOGGER.warning(
+            "Ignoring --tabular-input-dir for patchwise inference. Tabular inputs are only "
+            "used for whole-image inference."
+        )
+    finished_loaders = 0
+    while finished_loaders < prediction_cfg.num_load_workers:
+        loaded_image = inference_queue.get()
+        if loaded_image is _SENTINEL:
+            finished_loaders += 1
+            continue
+        tabular_values: torch.Tensor | None = None
+        tabular_mask: torch.Tensor | None = None
+        if train_config.training_mode != "patchwise":
+            tabular_values, tabular_mask = _load_case_tabular_inputs(
+                prediction_cfg.tabular_input_dir,
+                loaded_image.case_name,
+                tabular_feature_names,
+            )
+        write_queue.put(
+            predict_loaded_image_ensemble_tta(
+                loaded_image,
+                loaded_models=loaded_models,
+                prediction_config=prediction_cfg,
+                tabular_values=tabular_values,
+                tabular_mask=tabular_mask,
+            )
+        )
+    for _ in range(prediction_cfg.num_write_workers):
+        write_queue.put(_SENTINEL)
 
 
 def _fail_worker(
@@ -992,7 +932,7 @@ def _fail_worker(
 
 def _loader_worker(
     load_queue: mp.queues.Queue[Path | None],
-    inference_queue: mp.queues.Queue[_LoadedImageTask | None],
+    inference_queue: mp.queues.Queue[LoadedImageTask | None],
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> None:
     current_case: str | None = None
@@ -1006,7 +946,7 @@ def _loader_worker(
             nifti_img = nib.load(str(img_path))
             img_np = np.asarray(nifti_img.dataobj, dtype=np.float32)
             inference_queue.put(
-                _LoadedImageTask(
+                LoadedImageTask(
                     case_name=current_case,
                     affine=np.asarray(nifti_img.affine, dtype=np.float32),
                     image=np.ascontiguousarray(img_np),
@@ -1020,12 +960,16 @@ def _loader_worker(
 
 def _inference_worker(
     prediction_cfg: PredictionConfig,
-    inference_queue: mp.queues.Queue[_LoadedImageTask | None],
-    write_queue: mp.queues.Queue[_WriteTask | None],
+    inference_queue: mp.queues.Queue[LoadedImageTask | None],
+    write_queue: mp.queues.Queue[WriteTask | None],
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> None:
     current_case: str | None = None
     try:
+        if prediction_cfg.tta_flipping or prediction_cfg.ensemble_model_paths:
+            _run_ensemble_tta_inference_worker(prediction_cfg, inference_queue, write_queue)
+            return
+
         model, train_config, names, image_label_task_specs, tabular_feature_names = _load_model(
             prediction_cfg
         )
@@ -1080,7 +1024,7 @@ def _inference_worker(
 
 def _writer_worker(
     output_dir: Path,
-    write_queue: mp.queues.Queue[_WriteTask | None],
+    write_queue: mp.queues.Queue[WriteTask | None],
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> None:
     current_case: str | None = None
@@ -1152,6 +1096,12 @@ def _validate_prediction_config(prediction_cfg: PredictionConfig) -> None:
         raise ValueError(msg)
     if prediction_cfg.split_group not in {"train", "val", "test"}:
         msg = "split_group must be one of 'train', 'val' or 'test'."
+        raise ValueError(msg)
+    if not 0.0 <= prediction_cfg.ensembling_iou <= 1.0:
+        msg = "ensembling_iou must be in the range [0, 1]."
+        raise ValueError(msg)
+    if not 0.0 <= prediction_cfg.ensembling_confidence_threshold <= 1.0:
+        msg = "ensembling_confidence_threshold must be in the range [0, 1]."
         raise ValueError(msg)
 
 
@@ -1233,10 +1183,10 @@ def _run_prediction_pipeline(prediction_cfg: PredictionConfig, files: list[Path]
 
     ctx = mp.get_context("spawn")
     load_queue: mp.queues.Queue[Path | None] = ctx.Queue()
-    inference_queue: mp.queues.Queue[_LoadedImageTask | None] = ctx.Queue(
+    inference_queue: mp.queues.Queue[LoadedImageTask | None] = ctx.Queue(
         maxsize=max(prediction_cfg.num_load_workers, 2)
     )
-    write_queue: mp.queues.Queue[_WriteTask | None] = ctx.Queue(
+    write_queue: mp.queues.Queue[WriteTask | None] = ctx.Queue(
         maxsize=max(prediction_cfg.num_write_workers, 2)
     )
     error_queue: mp.queues.Queue[_WorkerFailure] = ctx.Queue()

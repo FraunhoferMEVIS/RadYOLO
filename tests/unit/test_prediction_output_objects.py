@@ -12,13 +12,13 @@ import torch
 from radyolo.inference import predict as predict_module
 from radyolo.inference.predict import (
     PredictionConfig,
-    _LoadedImageTask,
+    LoadedImageTask,
     _apply_patch_border_weight,
     _get_patch_starts,
     _merge_patch_detections,
     _predict_loaded_image,
     _predict_patchwise_image,
-    _reconstruct_and_save_mask,
+    reconstruct_and_save_mask,
     _relative_box,
     _write_prediction_result,
 )
@@ -240,7 +240,7 @@ def test_reconstruct_and_save_mask_writes_thresholded_nifti_mask(tmp_path, monke
         lambda coeff, proto_masks: expected_mask,
     )
 
-    mask_filename = _reconstruct_and_save_mask(
+    mask_filename = reconstruct_and_save_mask(
         det,
         proto,
         original_shape=(2, 2, 2),
@@ -291,7 +291,7 @@ class _DummyModel:
 def test_predict_loaded_image_uses_prediction_overrides(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
     image_np = np.zeros((4, 5, 6), dtype=np.float32)
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case1",
         affine=np.eye(4, dtype=np.float32),
         image=image_np,
@@ -360,7 +360,7 @@ def test_predict_loaded_image_uses_prediction_overrides(monkeypatch, tmp_path) -
 
 def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> None:
     proto = torch.ones((2, 2, 2), dtype=torch.float32)
-    write_task = predict_module._WriteTask(
+    write_task = predict_module.WriteTask(
         case_name="case2",
         image_results=[{"class": 0, "mask_path": "case2_det0.nii.gz"}],
         affine=np.eye(4, dtype=np.float32),
@@ -408,7 +408,7 @@ def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> 
 
 
 def test_write_prediction_result_saves_global_image_outputs(tmp_path) -> None:
-    write_task = predict_module._WriteTask(
+    write_task = predict_module.WriteTask(
         case_name="case_global",
         image_results=[],
         image_label_results={
@@ -477,7 +477,7 @@ def test_serialize_image_label_outputs_adds_risk_and_scalar_bin_width_for_rfs() 
 
 
 def test_predict_loaded_image_skips_masks_when_disabled(monkeypatch, tmp_path) -> None:
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_no_masks",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),
@@ -534,7 +534,7 @@ def test_predict_patchwise_image_skips_mask_reconstruction_when_disabled(
     monkeypatch,
     tmp_path,
 ) -> None:
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_patch_no_masks",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),
@@ -599,7 +599,7 @@ def test_predict_patchwise_image_reconstructs_masks_only_for_kept_detections(
     monkeypatch,
     tmp_path,
 ) -> None:
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_patch_kept_masks",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),
@@ -728,7 +728,7 @@ def test_merge_patch_detections_applies_image_level_nms() -> None:
 
 def test_predict_loaded_image_uses_patchwise_voxel_resampling(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_patch",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),
@@ -738,7 +738,7 @@ def test_predict_loaded_image_uses_patchwise_voxel_resampling(monkeypatch, tmp_p
     def fake_patchwise_predict(*args, **kwargs):
         captured["loaded_image"] = kwargs["loaded_image"] if "loaded_image" in kwargs else args[0]
         captured["prediction_config"] = kwargs["prediction_config"]
-        return predict_module._WriteTask(
+        return predict_module.WriteTask(
             case_name="case_patch",
             image_results=[],
             affine=np.eye(4, dtype=np.float32),
@@ -773,7 +773,7 @@ def test_predict_loaded_image_uses_patchwise_voxel_resampling(monkeypatch, tmp_p
 
 def test_predict_loaded_image_uses_checkpoint_voxel_size_by_default(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_voxel_default",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),
@@ -832,7 +832,7 @@ def test_predict_patchwise_image_moves_image_before_preprocessing_when_enabled(
     tmp_path,
 ) -> None:
     events: list[str] = []
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_gpu_preprocess",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),
@@ -918,7 +918,7 @@ def test_predict_patchwise_image_moves_image_before_preprocessing_when_enabled(
 
 def test_predict_patchwise_image_moves_only_patches_when_disabled(monkeypatch, tmp_path) -> None:
     events: list[str] = []
-    loaded_image = _LoadedImageTask(
+    loaded_image = LoadedImageTask(
         case_name="case_gpu_model",
         affine=np.eye(4, dtype=np.float32),
         image=np.zeros((4, 5, 6), dtype=np.float32),

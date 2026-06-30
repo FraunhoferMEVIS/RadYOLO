@@ -58,6 +58,11 @@ def test_predict_cli_passes_clip_override(monkeypatch, tmp_path: Path) -> None:
     assert captured["config"].split_file is None
     assert captured["config"].split_fold == 0
     assert captured["config"].split_group == "test"
+    assert captured["config"].tta_flipping is False
+    assert captured["config"].ensemble_model_paths == ()
+    assert captured["config"].ensembling_iou == 0.5
+    assert captured["config"].ensembling_confidence_threshold == 0.1
+    assert captured["config"].ensembling_class_agnostic is False
 
 
 def test_predict_cli_uses_current_defaults(
@@ -98,6 +103,57 @@ def test_predict_cli_uses_current_defaults(
     assert captured["config"].split_file is None
     assert captured["config"].split_fold == 0
     assert captured["config"].split_group == "test"
+    assert captured["config"].tta_flipping is False
+    assert captured["config"].ensemble_model_paths == ()
+    assert captured["config"].ensembling_iou == 0.5
+    assert captured["config"].ensembling_confidence_threshold == 0.1
+    assert captured["config"].ensembling_class_agnostic is False
+
+
+def test_predict_cli_passes_tta_and_ensemble_options(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    model_path = tmp_path / "model.pt"
+    model_path.write_bytes(b"checkpoint")
+    ensemble_model_path = tmp_path / "model_2.pt"
+    ensemble_model_path.write_bytes(b"checkpoint")
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    captured: dict[str, PredictionConfig] = {}
+
+    def fake_run_prediction(config: PredictionConfig) -> int:
+        captured["config"] = config
+        return 0
+
+    monkeypatch.setattr("radyolo.run_prediction", fake_run_prediction)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "predict",
+            str(model_path),
+            str(input_dir),
+            str(output_dir),
+            "--tta-flipping",
+            "--ensemble-model-path",
+            str(ensemble_model_path),
+            "--ensembling-iou",
+            "0.65",
+            "--ensembling-conf",
+            "0.25",
+            "--ensembling-class-agnostic",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["config"].tta_flipping is True
+    assert captured["config"].ensemble_model_paths == (ensemble_model_path,)
+    assert captured["config"].ensembling_iou == 0.65
+    assert captured["config"].ensembling_confidence_threshold == 0.25
+    assert captured["config"].ensembling_class_agnostic is True
 
 
 def test_predict_cli_passes_tabular_input_dir(

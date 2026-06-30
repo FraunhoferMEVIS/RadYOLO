@@ -1087,6 +1087,46 @@ def create_json_labels_from_txt_command(labels_dir: Path) -> int:
     help="Export segmentation masks when the model outputs mask coefficients.",
 )
 @click.option(
+    "--tta-flipping/--no-tta-flipping",
+    default=False,
+    show_default=True,
+    help="Run flip-based test-time augmentation over all spatial axis combinations.",
+)
+@click.option(
+    "--ensemble-model-path",
+    "ensemble_model_paths",
+    multiple=True,
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        path_type=Path,
+    ),
+    help="Additional checkpoint path to include in a model ensemble. Can be repeated.",
+)
+@click.option(
+    "--ensembling-iou",
+    default=0.5,
+    type=float,
+    show_default=True,
+    help="Minimum IoU for matching detections during TTA/model ensembling.",
+)
+@click.option(
+    "--ensembling-conf",
+    default=0.1,
+    type=float,
+    show_default=True,
+    help="Minimum confidence for keeping aggregated detections after TTA/model ensembling.",
+)
+@click.option(
+    "--ensembling-class-agnostic/--no-ensembling-class-agnostic",
+    default=False,
+    show_default=True,
+    help="Match ensemble detections across classes instead of only within the same class.",
+)
+@click.option(
     "--split-file",
     type=click.Path(
         exists=True,
@@ -1134,6 +1174,11 @@ def predict(
     num_load_workers: int,
     num_write_workers: int,
     save_masks: bool,
+    tta_flipping: bool,
+    ensemble_model_paths: tuple[Path, ...],
+    ensembling_iou: float,
+    ensembling_conf: float,
+    ensembling_class_agnostic: bool,
     split_file: Path | None,
     split_fold: int,
     split_group: str,
@@ -1167,6 +1212,11 @@ def predict(
                 num_load_workers=num_load_workers,
                 num_write_workers=num_write_workers,
                 save_masks=save_masks,
+                tta_flipping=tta_flipping,
+                ensemble_model_paths=ensemble_model_paths,
+                ensembling_iou=ensembling_iou,
+                ensembling_confidence_threshold=ensembling_conf,
+                ensembling_class_agnostic=ensembling_class_agnostic,
                 split_file=split_file,
                 split_fold=split_fold,
                 split_group=split_group.lower(),
