@@ -505,6 +505,16 @@ def analyze_dataset(dataset_path: Path, workers: int, output_file: Path | None) 
     help="Optional output path for the proposed training config YAML.",
 )
 @click.option(
+    "--training-mode",
+    type=click.Choice(["automatic", "wholeimage", "patchwise"], case_sensitive=False),
+    default="automatic",
+    show_default=True,
+    help=(
+        "Choose the training scheme explicitly or let propose-model-config decide "
+        "from the proposed patch size."
+    ),
+)
+@click.option(
     "--workers",
     default=0,
     show_default=True,
@@ -514,13 +524,16 @@ def propose_model_config(
     dataset_path: Path,
     model_scale: str,
     output: Path | None,
+    training_mode: str,
     workers: int,
 ) -> int:
     """Propose a training config for DATASET_PATH for a target model scale."""
+    normalized_training_mode = training_mode.lower()
     try:
         result = propose_model_config_fn(
             dataset_path=dataset_path,
             model_scale=model_scale.lower(),
+            training_mode=normalized_training_mode,
             output_path=output,
             workers=workers,
         )
@@ -530,6 +543,22 @@ def propose_model_config(
         )
         if result.analysis_ran:
             LOGGER.info("Dataset fingerprint written to %s", result.fingerprint_path)
+        if normalized_training_mode == "wholeimage":
+            LOGGER.info("Selected training mode: wholeimage (requested explicitly).")
+        elif normalized_training_mode == "patchwise":
+            LOGGER.info(
+                "Selected training mode: patchwise (requested explicitly)."
+            )
+        elif result.training_mode == "wholeimage":
+            LOGGER.info(
+                "Selected training mode: wholeimage because the median image fits into "
+                "the proposed patch size."
+            )
+        else:
+            LOGGER.info(
+                "Selected training mode: patchwise because the median image exceeds the "
+                "proposed patch size."
+            )
     except Exception as e:
         LOGGER.exception("Failed to propose model config", exc_info=e)
         return 1

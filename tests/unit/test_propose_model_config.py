@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 import numpy as np
+import yaml
 
 from radyolo.config.propose_model_config import (
     build_runtime_normalization_config,
+    propose_model_config as propose_model_config_fn,
     propose_patch_size,
     resolve_dataset_normalization_tags,
 )
@@ -93,3 +97,69 @@ def test_propose_patch_size_preserves_ratios_when_median_cap_does_not_bind() -> 
     assert np.all(candidate <= median_cap)
     assert np.prod(candidate) == pytest.approx(256**3, rel=0.25)
     assert np.linalg.norm(np.log(candidate_ratio / median_ratio)) < 0.2
+
+
+def test_propose_model_config_automatic_selects_patchwise_and_sets_voxel_size(
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "dataset"
+    dataset_path.mkdir()
+    (dataset_path / "dataset.yaml").write_text(
+        "nc: 1\nnames: {0: lesion}\nnormalization: {0: CT}\n",
+        encoding="utf-8",
+    )
+    (dataset_path / "dataset_fingerprint.json").write_text(
+        json.dumps(
+            {
+                "median_resampled_imagesize": [512, 320, 192],
+                "median_voxel_size_mm": [1.5, 1.0, 2.0],
+                "foreground_channel_stats": [
+                    {"mean": 10.0, "std": 2.5, "p00_5": -100.0, "p99_5": 200.0}
+                ],
+                "n_images_with_masks": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = propose_model_config_fn(dataset_path=dataset_path, model_scale="s")
+
+    with result.output_path.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    assert result.training_mode == "patchwise"
+    assert config["training_mode"] == "patchwise"
+    assert config["voxel_size"] == {"x": 1.5, "y": 1.0, "z": 2.0}
+
+
+def test_propose_model_config_explicit_wholeimage_leaves_voxel_size_null(tmp_path) -> None:
+    dataset_path = tmp_path / "dataset"
+    dataset_path.mkdir()
+    (dataset_path / "dataset.yaml").write_text(
+        "nc: 1\nnames: {0: lesion}\nnormalization: {0: CT}\n",
+        encoding="utf-8",
+    )
+    (dataset_path / "dataset_fingerprint.json").write_text(
+        json.dumps(
+            {
+                "median_resampled_imagesize": [512, 320, 192],
+                "median_voxel_size_mm": [1.5, 1.0, 2.0],
+                "foreground_channel_stats": [
+                    {"mean": 10.0, "std": 2.5, "p00_5": -100.0, "p99_5": 200.0}
+                ],
+                "n_images_with_masks": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = propose_model_config_fn(
+        dataset_path=dataset_path,
+        model_scale="s",
+        training_mode="wholeimage",
+    )
+
+    with result.output_path.open(encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    assert result.training_mode == "wholeimage"
+    assert config["training_mode"] == "wholeimage"
+    assert config["voxel_size"] is None

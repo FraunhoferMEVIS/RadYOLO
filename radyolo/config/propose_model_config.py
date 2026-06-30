@@ -11,13 +11,15 @@ import torch
 import yaml
 
 from radyolo.config.config import DatasetConfig, DefaultConfig
-from radyolo.config.spatial import PatchSize
+from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 
 LOGGER = logging.getLogger(__name__)
 
 ModelScale = Literal["n", "s", "m", "l", "x"]
 NormalizationTag = Literal["CT", "MRGlobal", "MRPerChannel"]
+TrainingModeSelection = Literal["automatic", "wholeimage", "patchwise"]
+ResolvedTrainingMode = Literal["wholeimage", "patchwise"]
 
 _DEFAULT_REFERENCE_CONFIG = Path(__file__).resolve().parents[2] / "config" / "config.yaml"
 _PATCH_STRIDE = 32
@@ -38,6 +40,7 @@ class ProposedModelConfigResult:
     output_path: Path
     fingerprint_path: Path
     analysis_ran: bool
+    training_mode: ResolvedTrainingMode
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -206,43 +209,39 @@ def propose_patch_size(
     fingerprint: dict[str, Any],
 ) -> PatchSize:
     """Propose a stride-aligned patch size capped by the median resampled image size."""
-    median_resampled = fingerprint.get("median_resampled_imagesize")
-    if not isinstance(median_resampled, list) or len(median_resampled) != 3:
-        msg = "Dataset fingerprint is missing median_resampled_imagesize."
-        raise ValueError(msg)
-
-    median_xyz = np.maximum(np.asarray(median_resampled, dtype=np.float64), 1.0)
+    median_xyz = np.maximum(
+        np.asarray(fingerprint["median_resampled_imagesize"], dtype=np.float64),
+        1.0,
+    )
     median_cap = _align_up(median_xyz)
     scale_factor = float((_TARGET_PATCH_VOLUME / np.prod(median_xyz)) ** (1.0 / 3.0))
     scaled_xyz = np.maximum(median_xyz * scale_factor, _MIN_PATCH_SIZE.astype(np.float64))
-
-    down = _align_down(scaled_xyz)
-    up = _align_up(scaled_xyz)
-
-    target_ratio = median_xyz / np.cbrt(np.prod(median_xyz))
-
-    def candidate_score(candidate_xyz: np.ndarray) -> tuple[float, float, int]:
-        candidate = np.maximum(candidate_xyz.astype(np.float64), 1.0)
-        candidate_ratio = candidate / np.cbrt(np.prod(candidate))
-        ratio_error = float(np.linalg.norm(np.log(candidate_ratio / target_ratio)))
-        volume = int(np.prod(candidate_xyz.astype(np.int64)))
-        volume_error = abs(np.log(max(volume, 1) / _TARGET_PATCH_VOLUME))
-        return (volume_error, ratio_error, -volume)
-
-    candidates = [
-        (x_candidate, y_candidate, z_candidate)
-        for x_candidate in (int(down[0]), int(up[0]))
-        for y_candidate in (int(down[1]), int(up[1]))
-        for z_candidate in (int(down[2]), int(up[2]))
-    ]
-
-    unique_candidates = sorted(set(candidates))
-    best_candidate = min(
-        unique_candidates,
-        key=lambda candidate: candidate_score(np.asarray(candidate, dtype=np.int64)),
-    )
-    capped_candidate = np.minimum(np.asarray(best_candidate, dtype=np.int64), median_cap)
+    aligned_patch = _align_up(scaled_xyz)
+    capped_candidate = np.minimum(aligned_patch, median_cap)
     return PatchSize.from_xyz(capped_candidate)
+
+
+def _resolve_training_mode(
+    selection: TrainingModeSelection,
+    patch_size: PatchSize,
+    fingerprint: dict[str, Any],
+) -> tuple[ResolvedTrainingMode, VoxelSize | None]:
+    patch_xyz = np.asarray(patch_size.get_xyz(), dtype=np.float64)
+
+    if selection == "wholeimage":
+        return ("wholeimage", None)
+
+    voxel_size = VoxelSize.from_xyz(fingerprint["median_voxel_size_mm"])
+    if selection == "patchwise":
+        return ("patchwise", voxel_size)
+
+    median_image_size = PatchSize.from_xyz(
+        np.ceil(fingerprint["median_resampled_imagesize"]).astype(np.int64)
+    )
+    median_xyz = np.asarray(median_image_size.get_xyz(), dtype=np.float64)
+    if np.all(patch_xyz >= median_xyz):
+        return ("wholeimage", None)
+    return ("patchwise", voxel_size)
 
 
 def _default_output_path(dataset_path: Path, model_scale: ModelScale) -> Path:
@@ -253,6 +252,7 @@ def propose_model_config(
     dataset_path: Path,
     model_scale: ModelScale,
     *,
+    training_mode: TrainingModeSelection = "automatic",
     output_path: Path | None = None,
     workers: int = 0,
     reference_config_path: Path = _DEFAULT_REFERENCE_CONFIG,
@@ -295,6 +295,11 @@ def propose_model_config(
     patch_size = propose_patch_size(
         fingerprint,
     )
+    resolved_training_mode, proposed_voxel_size = _resolve_training_mode(
+        training_mode,
+        patch_size,
+        fingerprint,
+    )
 
     proposed_config = dict(reference_config)
     proposed_config.update(
@@ -303,11 +308,9 @@ def propose_model_config(
             "model_scale": model_scale,
             "data": dataset_path.as_posix(),
             "batch_size": batch_size,
-            "patch_size": {
-                "x": patch_size.x,
-                "y": patch_size.y,
-                "z": patch_size.z,
-            },
+            "training_mode": resolved_training_mode,
+            "patch_size": patch_size.model_dump(),
+            "voxel_size": None if proposed_voxel_size is None else proposed_voxel_size.model_dump(),
             "normalization": runtime_normalization,
             "segmentation_output": has_masks,
             "enable_image_label_head": enable_image_label_head,
@@ -336,4 +339,5 @@ def propose_model_config(
         output_path=output_path,
         fingerprint_path=fingerprint_path,
         analysis_ran=analysis_ran,
+        training_mode=resolved_training_mode,
     )
