@@ -16,6 +16,8 @@ def _validate_triplet(value: Sequence[Any], *, label: str) -> tuple[Any, Any, An
 
 
 class PatchSize(BaseModel):
+    """Holds x, y, z components of patch size."""
+
     model_config = ConfigDict(frozen=True)
 
     x: int = Field(gt=0)
@@ -40,6 +42,8 @@ class PatchSize(BaseModel):
 
 
 class VoxelSize(BaseModel):
+    """Holds x, y, z components of voxel size."""
+
     model_config = ConfigDict(frozen=True)
 
     x: float = Field(gt=0)
