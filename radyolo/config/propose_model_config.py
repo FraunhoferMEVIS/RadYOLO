@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import yaml
 
-from radyolo.config.config import DatasetConfig, DefaultConfig
+from radyolo.config.config import DatasetConfig, DefaultConfig, _input_channels_from_dataset
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 
@@ -61,11 +61,6 @@ def _load_json(path: Path) -> dict[str, Any]:
     return loaded
 
 
-def _align_down(values: np.ndarray, stride: int = _PATCH_STRIDE) -> np.ndarray:
-    aligned = np.floor_divide(values.astype(np.int64), stride) * stride
-    return np.maximum(aligned, _MIN_PATCH_SIZE)
-
-
 def _align_up(values: np.ndarray, stride: int = _PATCH_STRIDE) -> np.ndarray:
     aligned = np.ceil(values.astype(np.float64) / stride).astype(np.int64) * stride
     return np.maximum(aligned, _MIN_PATCH_SIZE)
@@ -87,21 +82,6 @@ def _flatten_tensors(value: object) -> list[torch.Tensor]:
     if hasattr(value, "__dict__"):
         return _flatten_tensors(vars(value))
     return []
-
-
-def _extract_channel_count(dataset_yaml: dict[str, Any], fingerprint: dict[str, Any]) -> int:
-    counts = []
-    normalization = dataset_yaml.get("normalization")
-    if (isinstance(normalization, dict) and "type" not in normalization) or isinstance(
-        normalization, list
-    ):
-        counts.append(len(normalization))
-
-    foreground_stats = fingerprint.get("foreground_channel_stats")
-    if isinstance(foreground_stats, list):
-        counts.append(len(foreground_stats))
-
-    return max(counts or [1])
 
 
 def _canonicalize_normalization_tag(value: str) -> NormalizationTag:
@@ -275,7 +255,7 @@ def propose_model_config(
     fingerprint = _load_json(fingerprint_path)
     reference_config = _load_yaml(reference_config_path)
 
-    input_channels = _extract_channel_count(dataset_yaml, fingerprint)
+    input_channels = _input_channels_from_dataset(dataset_yaml) or 1
     normalization_tags = resolve_dataset_normalization_tags(dataset_yaml, input_channels)
     runtime_normalization = build_runtime_normalization_config(normalization_tags, fingerprint)
     enable_image_label_head = bool(dataset_yaml.get("image_label_tasks")) and bool(
