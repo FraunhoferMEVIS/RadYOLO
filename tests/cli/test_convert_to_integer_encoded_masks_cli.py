@@ -7,7 +7,9 @@ from click.testing import CliRunner
 from radyolo import main
 
 
-def test_convert_to_integer_encoded_masks_cli_invokes_converter(monkeypatch, tmp_path: Path) -> None:
+def test_convert_to_integer_encoded_masks_cli_invokes_converter(
+    monkeypatch, tmp_path: Path
+) -> None:
     dataset_dir = tmp_path / "dataset"
     dataset_dir.mkdir()
     captured: dict[str, object] = {}

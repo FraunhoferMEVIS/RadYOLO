@@ -130,4 +130,3 @@ def convert_dataset_to_integer_encoded_masks(dataset_dir: Path) -> Path:
             pbar.update(1)
 
     return output_dir
-

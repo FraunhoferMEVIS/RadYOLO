@@ -17,9 +17,7 @@ class EarlyStopping:
         """
         self.best_fitness: float = 0.0
         self.best_epoch: int = 0
-        self.patience: int | float = patience or float(
-            "inf"
-        )
+        self.patience: int | float = patience or float("inf")
 
     def __call__(self, epoch: int, fitness: float) -> bool:
         """Check whether to stop training.

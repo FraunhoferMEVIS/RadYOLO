@@ -187,7 +187,6 @@ def convert_dataset_to_nnunet(
     mapping_rows: list[dict[str, str]] = []
     observed_channel_counts: set[int] = set()
     if total_cases > 0:
-
         pbar = tqdm(total=total_cases, desc="Converting", unit="case", smoothing=0.05)
         executor = ProcessPoolExecutor(max_workers=max_workers)
         try:

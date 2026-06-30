@@ -20,9 +20,7 @@ LOGGER = logging.getLogger(__name__)
 ModelScale = Literal["n", "s", "m", "l", "x"]
 NormalizationTag = Literal["CT", "MRGlobal", "MRPerChannel"]
 
-_DEFAULT_REFERENCE_CONFIG = (
-    Path(__file__).resolve().parents[2] / "config" / "config.yaml"
-)
+_DEFAULT_REFERENCE_CONFIG = Path(__file__).resolve().parents[2] / "config" / "config.yaml"
 _PATCH_STRIDE = 32
 _MIN_PATCH_SIZE = np.array([32, 32, 32], dtype=np.int64)
 _TARGET_PATCH_VOLUME = 256**3
@@ -179,9 +177,7 @@ def _build_estimation_config(  # noqa: PLR0913
 
 
 class ModelMemoryEstimator:
-    def __init__(
-        self, train_config: DefaultConfig, estimated_boxes_per_image: int = 1
-    ) -> None:
+    def __init__(self, train_config: DefaultConfig, estimated_boxes_per_image: int = 1) -> None:
         self.train_config = train_config
         self.estimated_boxes_per_image = max(1, estimated_boxes_per_image)
         model = build_model_from_config(train_config).eval().to("meta")
@@ -189,8 +185,7 @@ class ModelMemoryEstimator:
         self.model = model
         self._feature_map_elements_cache: dict[tuple[int, int, int, int], int] = {}
         self.parameter_bytes = sum(
-            parameter.numel() * parameter.element_size()
-            for parameter in self.model.parameters()
+            parameter.numel() * parameter.element_size() for parameter in self.model.parameters()
         )
         self.buffer_bytes = sum(
             buffer.numel() * buffer.element_size() for buffer in self.model.buffers()
@@ -224,9 +219,7 @@ class ModelMemoryEstimator:
         }.get(optimizer_name, 2)
         return self.parameter_bytes * state_multiplier
 
-    def _collect_feature_map_elements(
-        self, patch_size_xyz: tuple[int, int, int]
-    ) -> int:
+    def _collect_feature_map_elements(self, patch_size_xyz: tuple[int, int, int]) -> int:
         batch_size = self.train_config.batch_size
         cache_key = (batch_size, *patch_size_xyz)
         cached = self._feature_map_elements_cache.get(cache_key)
@@ -281,9 +274,7 @@ class ModelMemoryEstimator:
         self._feature_map_elements_cache[cache_key] = feature_map_elements
         return feature_map_elements
 
-    def _estimate_augmentation_overhead_bytes(
-        self, patch_size_xyz: tuple[int, int, int]
-    ) -> int:
+    def _estimate_augmentation_overhead_bytes(self, patch_size_xyz: tuple[int, int, int]) -> int:
         patch_voxels = int(np.prod(np.asarray(patch_size_xyz, dtype=np.int64)))
         image_bytes = (
             self.train_config.batch_size
@@ -293,17 +284,10 @@ class ModelMemoryEstimator:
         )
         mask_bytes = 0
         if self.train_config.segmentation_output:
-            mask_bytes = (
-                self.train_config.batch_size
-                * patch_voxels
-                * self.activation_element_bytes
-            )
+            mask_bytes = self.train_config.batch_size * patch_voxels * self.activation_element_bytes
 
         spatial_overhead = 0
-        if (
-            self.train_config.zoom_augmentation_device == "gpu"
-            and self.train_config.prob_zoom > 0
-        ):
+        if self.train_config.zoom_augmentation_device == "gpu" and self.train_config.prob_zoom > 0:
             spatial_overhead = max(spatial_overhead, image_bytes + mask_bytes)
         if (
             self.train_config.rotation_augmentation_device == "gpu"
@@ -368,9 +352,7 @@ class ModelMemoryEstimator:
 
         return max(spatial_overhead, intensity_overhead)
 
-    def _estimate_loss_computation_bytes(
-        self, patch_size_xyz: tuple[int, int, int]
-    ) -> int:
+    def _estimate_loss_computation_bytes(self, patch_size_xyz: tuple[int, int, int]) -> int:
         x_size, y_size, z_size = patch_size_xyz
         dummy_input = torch.zeros(
             (
@@ -385,9 +367,7 @@ class ModelMemoryEstimator:
         with torch.no_grad():
             model_output = self.model(dummy_input)
 
-        raw_prediction_shapes = [
-            tuple(tensor.shape) for tensor in model_output.raw_predictions
-        ]
+        raw_prediction_shapes = [tuple(tensor.shape) for tensor in model_output.raw_predictions]
         total_anchors = int(
             sum(np.prod(shape[2:], dtype=np.int64) for shape in raw_prediction_shapes)
         )
@@ -424,13 +404,8 @@ class ModelMemoryEstimator:
         loss_bytes += batch_size * total_anchors * boolean_bytes
         loss_bytes += batch_size * total_anchors * 12 * activation_bytes
 
-        if (
-            self.train_config.segmentation_output
-            and model_output.prototype_masks is not None
-        ):
-            prototype_voxels = int(
-                np.prod(model_output.prototype_masks.shape[1:], dtype=np.int64)
-            )
+        if self.train_config.segmentation_output and model_output.prototype_masks is not None:
+            prototype_voxels = int(np.prod(model_output.prototype_masks.shape[1:], dtype=np.int64))
             per_mask_anchor_count = min(self.train_config.tal_topk, total_anchors)
             estimated_masks_per_batch = batch_size * max_gt_boxes
             if model_output.mask_coefficients is not None:
@@ -438,9 +413,7 @@ class ModelMemoryEstimator:
                     int(np.prod(model_output.mask_coefficients.shape, dtype=np.int64))
                     * activation_bytes
                 )
-            loss_bytes += (
-                estimated_masks_per_batch * prototype_voxels * activation_bytes
-            )
+            loss_bytes += estimated_masks_per_batch * prototype_voxels * activation_bytes
             loss_bytes += (
                 estimated_masks_per_batch
                 * per_mask_anchor_count
@@ -469,12 +442,8 @@ class ModelMemoryEstimator:
             optimizer_state_bytes=self.optimizer_state_bytes,
             ema_state_bytes=self.ema_state_bytes,
             input_patch_bytes=input_patch_bytes,
-            augmentation_overhead_bytes=self._estimate_augmentation_overhead_bytes(
-                patch_size_xyz
-            ),
-            loss_computation_bytes=self._estimate_loss_computation_bytes(
-                patch_size_xyz
-            ),
+            augmentation_overhead_bytes=self._estimate_augmentation_overhead_bytes(patch_size_xyz),
+            loss_computation_bytes=self._estimate_loss_computation_bytes(patch_size_xyz),
             buffer_bytes=self.buffer_bytes,
         )
 
@@ -544,9 +513,7 @@ def estimate_patch_memory_gb(  # noqa: PLR0913
     return memory_breakdown.total_gb
 
 
-def _extract_channel_count(
-    dataset_yaml: dict[str, Any], fingerprint: dict[str, Any]
-) -> int:
+def _extract_channel_count(dataset_yaml: dict[str, Any], fingerprint: dict[str, Any]) -> int:
     counts = []
     normalization = dataset_yaml.get("normalization")
     if (isinstance(normalization, dict) and "type" not in normalization) or isinstance(
@@ -601,10 +568,7 @@ def _parse_normalization_mapping(  # noqa: PLR0911
                 return None
             mapping[int(raw_key)] = _canonicalize_normalization_tag(raw_value)
         if mapping:
-            return {
-                channel: mapping.get(channel, "MRPerChannel")
-                for channel in range(n_channels)
-            }
+            return {channel: mapping.get(channel, "MRPerChannel") for channel in range(n_channels)}
         return None
 
     if isinstance(value, list):
@@ -650,9 +614,7 @@ def build_runtime_normalization_config(
         msg = "Dataset fingerprint does not contain per-channel intensity statistics."
         raise ValueError(msg)
 
-    ordered_tags = [
-        normalization_tags[channel] for channel in sorted(normalization_tags)
-    ]
+    ordered_tags = [normalization_tags[channel] for channel in sorted(normalization_tags)]
     if ordered_tags and all(tag == "MRGlobal" for tag in ordered_tags):
         return {"type": "zscore"}
 
@@ -673,12 +635,8 @@ def build_runtime_normalization_config(
                     "type": "ct",
                     "mean": float(channel_stats.get("mean", 0.0)),
                     "std": max(std, 1e-6),
-                    "clip_min": float(
-                        channel_stats.get("p00_5", channel_stats.get("min", 0.0))
-                    ),
-                    "clip_max": float(
-                        channel_stats.get("p99_5", channel_stats.get("max", 1.0))
-                    ),
+                    "clip_min": float(channel_stats.get("p00_5", channel_stats.get("min", 0.0))),
+                    "clip_max": float(channel_stats.get("p99_5", channel_stats.get("max", 1.0))),
                 }
             )
         else:
@@ -764,9 +722,7 @@ def propose_patch_size(  # noqa: PLR0913
     return PatchSize.from_xyz(best_candidate), estimate_candidate(best_candidate)
 
 
-def _default_output_path(
-    dataset_path: Path, model_scale: ModelScale
-) -> Path:
+def _default_output_path(dataset_path: Path, model_scale: ModelScale) -> Path:
     return dataset_path / f"proposed_model_config_{model_scale}.yaml"
 
 
@@ -788,9 +744,7 @@ def propose_model_config(
     analysis_ran = False
     if not fingerprint_path.exists():
         LOGGER.info("dataset_fingerprint.json missing. Running analyze-dataset first.")
-        fingerprint_path = analyze_dataset_fn(
-            dataset_path=dataset_path, workers=workers
-        )
+        fingerprint_path = analyze_dataset_fn(dataset_path=dataset_path, workers=workers)
         analysis_ran = True
 
     dataset_yaml = _load_yaml(dataset_yaml_path)
@@ -799,12 +753,8 @@ def propose_model_config(
     reference_config = _load_yaml(reference_config_path)
 
     input_channels = _extract_channel_count(dataset_yaml, fingerprint)
-    normalization_tags = resolve_dataset_normalization_tags(
-        dataset_yaml, input_channels
-    )
-    runtime_normalization = build_runtime_normalization_config(
-        normalization_tags, fingerprint
-    )
+    normalization_tags = resolve_dataset_normalization_tags(dataset_yaml, input_channels)
+    runtime_normalization = build_runtime_normalization_config(normalization_tags, fingerprint)
     enable_image_label_head = bool(dataset_yaml.get("image_label_tasks")) and bool(
         reference_config.get("enable_image_label_head", False)
     )
@@ -827,9 +777,7 @@ def propose_model_config(
         input_channels=input_channels,
         num_classes=dataset_cfg.nc,
         segmentation_output=has_masks,
-        include_stride4_output=bool(
-            reference_config.get("include_stride4_output", False)
-        ),
+        include_stride4_output=bool(reference_config.get("include_stride4_output", False)),
         prototype_masks=int(reference_config.get("prototype_masks", 8)),
         estimated_boxes_per_image=estimated_boxes_per_image,
         data_path=dataset_path,
@@ -854,20 +802,14 @@ def propose_model_config(
             "enable_image_label_head": enable_image_label_head,
             "enable_tabular_image_label_fusion": enable_tabular_image_label_fusion,
             "experiment_name": (
-                f"{dataset_path.name}_{model_scale}_{patch_size.x}"
-                f"x{patch_size.y}x{patch_size.z}"
+                f"{dataset_path.name}_{model_scale}_{patch_size.x}x{patch_size.y}x{patch_size.z}"
             ),
         }
     )
     proposed_config["channel_dropout_probabilities"] = [0.0] * input_channels
 
-    difference_channels = tuple(
-        proposed_config.get("validation_plot_difference_channels", [0, 0])
-    )
-    if (
-        len(difference_channels) != 2
-        or max(difference_channels, default=0) >= input_channels
-    ):
+    difference_channels = tuple(proposed_config.get("validation_plot_difference_channels", [0, 0]))
+    if len(difference_channels) != 2 or max(difference_channels, default=0) >= input_channels:
         proposed_config["validation_plot_difference_channels"] = [
             min(1, input_channels - 1),
             0,

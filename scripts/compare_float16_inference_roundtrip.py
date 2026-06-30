@@ -151,9 +151,7 @@ def _build_prediction_config(
         input_dir=args.image_path.parent,
         output_dir=Path.cwd(),
         confidence_threshold=(
-            args.conf
-            if args.conf is not None
-            else train_config.confidence_threshold_validation
+            args.conf if args.conf is not None else train_config.confidence_threshold_validation
         ),
         nms_iou_threshold=(
             args.nms_iou if args.nms_iou is not None else train_config.nms_iou_threshold
@@ -446,7 +444,10 @@ def main() -> int:
         prediction_stats = _compute_difference_stats(common_normal, common_roundtrip)
         print(_format_stats("prediction_difference_stats_first_8_columns", prediction_stats))
         class_mismatch_count = int(
-            (common_normal[:, 7].to(dtype=torch.int64) != common_roundtrip[:, 7].to(dtype=torch.int64))
+            (
+                common_normal[:, 7].to(dtype=torch.int64)
+                != common_roundtrip[:, 7].to(dtype=torch.int64)
+            )
             .sum()
             .item()
         )

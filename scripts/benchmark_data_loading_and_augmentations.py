@@ -650,19 +650,13 @@ def log_summary(results: list[BenchmarkResult]) -> None:
     )
     augmentation_order.extend(extra_augmentations)
 
-    result_lookup = {
-        (result.augmentation, result.size): result
-        for result in results
-    }
+    result_lookup = {(result.augmentation, result.size): result for result in results}
 
     headers = ["augmentation", *[f"{size}^3 [ms]" for size in sizes]]
     rows = [
         [
             augmentation,
-            *[
-                format_summary_cell(result_lookup.get((augmentation, size)))
-                for size in sizes
-            ],
+            *[format_summary_cell(result_lookup.get((augmentation, size))) for size in sizes],
         ]
         for augmentation in augmentation_order
     ]
@@ -673,10 +667,7 @@ def log_summary(results: list[BenchmarkResult]) -> None:
     ]
 
     def format_row(cells: list[str]) -> str:
-        return " | ".join(
-            cell.ljust(column_widths[index])
-            for index, cell in enumerate(cells)
-        )
+        return " | ".join(cell.ljust(column_widths[index]) for index, cell in enumerate(cells))
 
     separator = "-+-".join("-" * width for width in column_widths)
 

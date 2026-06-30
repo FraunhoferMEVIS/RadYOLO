@@ -121,10 +121,7 @@ def _labels_for_case(
             msg = f"Invalid label line in {txt_file}"
             raise ValueError(msg) from exc
         raise
-    return [
-        (entry["class_"], *entry["box_relative_xyzwhd"])
-        for entry in entries
-    ]
+    return [(entry["class_"], *entry["box_relative_xyzwhd"]) for entry in entries]
 
 
 def _try_load_masks(masks_dir: Path, case_id: str) -> np.ndarray | None:
@@ -389,7 +386,9 @@ def convert_dataset_to_nndetection(
             raise TypeError(msg)
         n_folds = len(all_splits)
         if n_folds < 5:
-            LOGGER.warning("Only %d folds found in %s; writing %d.", n_folds, split_file_name, n_folds)
+            LOGGER.warning(
+                "Only %d folds found in %s; writing %d.", n_folds, split_file_name, n_folds
+            )
         result_list: list[OrderedDict[str, np.ndarray]] = []
         for i, fold_entry in enumerate(all_splits[:5]):
             train_list = [_sanitize_name(cid) for cid in fold_entry.get("train", [])]
@@ -524,4 +523,3 @@ def _convert_one_case(
         return (False, split, img_path.name, [], cid, case_id)
     else:
         return (True, split, img_path.name, dst_names, cid, case_id)
-

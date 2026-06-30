@@ -195,9 +195,7 @@ def test_validator_reports_image_label_metrics(tmp_path: Path) -> None:
         )
     ]
     validator.image_label_survival_times["rfs"] = [np.array([1.0, 2.0, 3.0], dtype=np.float64)]
-    validator.image_label_survival_events["rfs"] = [
-        np.array([True, True, False], dtype=np.bool_)
-    ]
+    validator.image_label_survival_events["rfs"] = [np.array([True, True, False], dtype=np.bool_)]
     validator.image_label_survival_logits["rfs"] = [
         np.array(
             [
@@ -297,9 +295,7 @@ def test_validator_print_results_includes_image_label_metrics_in_main_summary(
         )
     ]
     validator.image_label_survival_times["rfs"] = [np.array([1.0, 2.0, 3.0], dtype=np.float64)]
-    validator.image_label_survival_events["rfs"] = [
-        np.array([True, True, False], dtype=np.bool_)
-    ]
+    validator.image_label_survival_events["rfs"] = [np.array([True, True, False], dtype=np.bool_)]
     validator.image_label_survival_logits["rfs"] = [
         np.array(
             [

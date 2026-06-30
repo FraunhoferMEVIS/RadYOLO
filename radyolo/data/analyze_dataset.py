@@ -134,9 +134,7 @@ def _summarize_image_labels(
         task_spec = task_specs.get(task_name)
         values = values_by_task.get(task_name, [])
         task_type = (
-            task_spec.type
-            if task_spec is not None
-            else _infer_image_label_task_type(values)
+            task_spec.type if task_spec is not None else _infer_image_label_task_type(values)
         )
         summary: dict[str, object] = {
             "type": task_type,

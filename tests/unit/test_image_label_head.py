@@ -269,7 +269,9 @@ def test_build_model_from_config_supports_v2_tabular_projection_and_mask_options
     assert output.image_label_outputs["stage"].shape == (2, 3)
 
 
-def test_config_rejects_tabular_fusion_without_dataset_tabular_feature_names(tmp_path: Path) -> None:
+def test_config_rejects_tabular_fusion_without_dataset_tabular_feature_names(
+    tmp_path: Path,
+) -> None:
     dataset_path = _write_image_label_dataset(tmp_path / "dataset")
     dataset_yaml_path = dataset_path / "dataset.yaml"
     dataset_yaml = yaml.safe_load(dataset_yaml_path.read_text(encoding="utf-8"))
@@ -388,7 +390,9 @@ def test_detection_loss_propagates_single_grid_cell_mask_option(tmp_path: Path) 
         torch.device("cpu"),
     )
     default_detection_loss = (
-        default_loss_fn.detection_loss if hasattr(default_loss_fn, "detection_loss") else default_loss_fn
+        default_loss_fn.detection_loss
+        if hasattr(default_loss_fn, "detection_loss")
+        else default_loss_fn
     )
     assert default_detection_loss.mask_loss_on_only_one_grid_cell is False
 
@@ -405,7 +409,9 @@ def test_detection_loss_propagates_single_grid_cell_mask_option(tmp_path: Path) 
         torch.device("cpu"),
     )
     enabled_detection_loss = (
-        enabled_loss_fn.detection_loss if hasattr(enabled_loss_fn, "detection_loss") else enabled_loss_fn
+        enabled_loss_fn.detection_loss
+        if hasattr(enabled_loss_fn, "detection_loss")
+        else enabled_loss_fn
     )
     assert enabled_detection_loss.mask_loss_on_only_one_grid_cell is True
 
@@ -492,6 +498,8 @@ def test_image_label_multiclass_loss_supports_class_weights() -> None:
     assert loss_fn.loss_names == ["img_cce"]
     assert torch.isclose(total_loss, expected)
     assert torch.isclose(loss_items[0], expected)
+
+
 def test_image_label_survival_losses_support_censoring_and_cox() -> None:
     loss_fn = ImageLabelSurvivalLoss(
         device=torch.device("cpu"),

@@ -32,7 +32,9 @@ def test_create_k_fold_split_cli(synthetic_dataset, tmp_path) -> None:
     assert splits_file.exists(), "data_splits.json not created"
 
 
-def test_create_k_fold_split_cli_supports_custom_split_file_name(synthetic_dataset, tmp_path) -> None:
+def test_create_k_fold_split_cli_supports_custom_split_file_name(
+    synthetic_dataset, tmp_path
+) -> None:
     dataset_path = tmp_path / "dataset_kfold_custom"
     shutil.copytree(synthetic_dataset, dataset_path)
     splits_file = dataset_path / "custom_splits.json"

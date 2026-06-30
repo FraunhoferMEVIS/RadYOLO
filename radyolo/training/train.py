@@ -745,7 +745,11 @@ class Trainer:
                                 np.interp(
                                     num_iterations,
                                     warmup_iteration_range,
-                                    [2, self.config.nominal_batch_size / self._get_effective_batch_size()],
+                                    [
+                                        2,
+                                        self.config.nominal_batch_size
+                                        / self._get_effective_batch_size(),
+                                    ],
                                 ).round()
                             ),
                         )
@@ -803,8 +807,7 @@ class Trainer:
                         debug_log_loss_computed(LOGGER, self.epoch + 1, i, loss)
 
                         skip_due_to_non_finite_loss = (
-                            not torch.isfinite(loss)
-                            or not torch.isfinite(self.loss_items).all()
+                            not torch.isfinite(loss) or not torch.isfinite(self.loss_items).all()
                         )
                         if skip_due_to_non_finite_loss:
                             self._log_non_finite_training_batch(
@@ -891,9 +894,7 @@ class Trainer:
                         ema=ema,
                         best_fitness=best_fitness,
                     )
-                    timing_values["timing/validation_s"] = (
-                        time.perf_counter() - validation_start
-                    )
+                    timing_values["timing/validation_s"] = time.perf_counter() - validation_start
 
                 self.save_metrics(
                     metrics={
@@ -1027,9 +1028,7 @@ class Trainer:
         loss_items: torch.Tensor,
     ) -> None:
         loss_value = (
-            loss.detach().float().cpu().item()
-            if loss.numel() == 1
-            else loss.detach().float().cpu()
+            loss.detach().float().cpu().item() if loss.numel() == 1 else loss.detach().float().cpu()
         )
         case_names = batch.get("case_names")
         if isinstance(case_names, (list, tuple)):
@@ -1243,9 +1242,9 @@ class Trainer:
         if self.ewa_fitness is None:
             self.ewa_fitness = current_fitness
         else:
-            self.ewa_fitness = self.ewa_alpha * float(self.ewa_fitness) + (
-                1.0 - self.ewa_alpha
-            ) * current_fitness
+            self.ewa_fitness = (
+                self.ewa_alpha * float(self.ewa_fitness) + (1.0 - self.ewa_alpha) * current_fitness
+            )
         metrics["metrics/fitness"] = float(self.ewa_fitness)
         fitness = float(self.ewa_fitness)
         if not best_fitness or best_fitness < fitness:
@@ -1316,4 +1315,3 @@ class Trainer:
         with self.csv_path.open("a", encoding="utf-8") as file:
             line = ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",")
             file.write(header + line + "\n")
-

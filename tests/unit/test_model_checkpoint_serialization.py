@@ -179,7 +179,9 @@ def test_save_model_copies_best_validation_artifacts(
 
     assert saved_paths == [[trainer.last_model_path, trainer.best_model_path]]
     assert (trainer.save_dir / "validation_summary_best.png").read_bytes() == b"summary"
-    assert (trainer.save_dir / "validation_image_labels_best.png").read_bytes() == b"image-label-summary"
+    assert (
+        trainer.save_dir / "validation_image_labels_best.png"
+    ).read_bytes() == b"image-label-summary"
     assert (trainer.save_dir / "validation_samples_best" / "sample.txt").read_text(
         encoding="utf-8"
     ) == "best sample"
@@ -235,7 +237,9 @@ def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing
 
 
 def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path) -> None:
-    config = get_training_config(minimal_train_config, {"voxel_size": {"x": 1.5, "y": 1.2, "z": 2.5}})
+    config = get_training_config(
+        minimal_train_config, {"voxel_size": {"x": 1.5, "y": 1.2, "z": 2.5}}
+    )
 
     assert config.voxel_size == VoxelSize(x=1.5, y=1.2, z=2.5)
     assert "voxel_size" in config.model_dump()
@@ -657,7 +661,9 @@ def test_validation_fitness_uses_image_label_metric_weights(minimal_train_config
     assert fitness == pytest.approx(0.54)
 
 
-def test_default_config_defaults_tal_topk_schedule_to_static_value(minimal_train_config: Path) -> None:
+def test_default_config_defaults_tal_topk_schedule_to_static_value(
+    minimal_train_config: Path,
+) -> None:
     config = get_training_config(minimal_train_config, {})
 
     assert config.tal_topk_final == config.tal_topk

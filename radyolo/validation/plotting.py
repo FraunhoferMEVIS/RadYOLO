@@ -836,7 +836,9 @@ def _plot_survival_axis(
 ) -> None:
     if logits.size == 0 or survival_times.size == 0 or event_indicators.size == 0:
         ax.set_title(f"{title_prefix} Survival Metric")
-        ax.text(0.5, 0.5, "No survival metric data", ha="center", va="center", transform=ax.transAxes)
+        ax.text(
+            0.5, 0.5, "No survival metric data", ha="center", va="center", transform=ax.transAxes
+        )
         ax.set_xlabel(unit or "Time")
         ax.set_ylabel("Probability")
         ax.set_ylim(0, 1)
@@ -884,7 +886,6 @@ def _plot_survival_axis(
 
     risk_scores = -(probabilities * _survival_bin_widths(thresholds)).sum(axis=1)
     c_index = float(concordance_index_censored(event_indicators, survival_times, risk_scores)[0])
-
 
     x_label = "Time"
     if unit:

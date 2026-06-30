@@ -84,12 +84,7 @@ def _build_folds(
             val = sorted(chunks[i])
 
         train = sorted(
-            [
-                c
-                for j, chunk in enumerate(chunks)
-                if j not in excluded_chunk_indices
-                for c in chunk
-            ]
+            [c for j, chunk in enumerate(chunks) if j not in excluded_chunk_indices for c in chunk]
         )
         folds.append({"train": train, "val": val, "test": test})
     return folds
@@ -138,8 +133,7 @@ def _allocate_split_group_counts(
 
     if remaining_groups:
         remainders = [
-            (exact - math.floor(exact), -index)
-            for index, exact in enumerate(exact_counts)
+            (exact - math.floor(exact), -index) for index, exact in enumerate(exact_counts)
         ]
         for _, negative_index in sorted(remainders, reverse=True)[:remaining_groups]:
             counts[-negative_index] += 1
@@ -272,9 +266,7 @@ def train_val_test_data_split(  # noqa: PLR0913
                 "train": _flatten_case_groups(
                     [case_groups[group_id] for group_id in train_group_ids]
                 ),
-                "val": _flatten_case_groups(
-                    [case_groups[group_id] for group_id in val_group_ids]
-                ),
+                "val": _flatten_case_groups([case_groups[group_id] for group_id in val_group_ids]),
                 "test": _flatten_case_groups(
                     [case_groups[group_id] for group_id in test_group_ids]
                 ),

@@ -141,6 +141,7 @@ def _has_spatial_augmentations_on_device(
         )
     )
 
+
 def _get_other_augmentation_placement(
     placement: Literal["cpu", "gpu"],
 ) -> Literal["cpu", "gpu"]:
@@ -225,6 +226,7 @@ def _should_center_crop_after_augmentations(
         config,
         _get_other_augmentation_placement(placement),
     )
+
 
 def _apply_configured_augmentations_to_sample(
     image: torch.Tensor,
@@ -669,10 +671,7 @@ def _load_labels(src_path: Path, case_name: str) -> tuple[torch.Tensor, torch.Te
         labels = np.zeros((0, 7), dtype=np.float32)
     else:
         labels = np.array(
-            [
-                [entry["class_"], *entry["box_relative_xyzwhd"]]
-                for entry in entries
-            ],
+            [[entry["class_"], *entry["box_relative_xyzwhd"]] for entry in entries],
             dtype=np.float32,
         )
     return torch.from_numpy(labels[:, 0:1]), torch.from_numpy(labels[:, 1:])
@@ -701,10 +700,7 @@ def _compute_foreground_oversample_count(
 
 def _validate_foreground_oversampling(foreground_oversampling: float) -> None:
     if not 0.0 <= foreground_oversampling < 1.0:
-        msg = (
-            "foreground_oversampling must be in the range [0, 1), "
-            f"got {foreground_oversampling}."
-        )
+        msg = f"foreground_oversampling must be in the range [0, 1), got {foreground_oversampling}."
         raise ValueError(msg)
 
 
@@ -789,7 +785,7 @@ class BackgroundUndersamplingSampler(Sampler[int]):
         total_size = num_samples * self.num_replicas
         if len(indices) < total_size:
             indices.extend(indices[: total_size - len(indices)])
-        rank_indices = indices[self.rank:total_size:self.num_replicas]
+        rank_indices = indices[self.rank : total_size : self.num_replicas]
         return iter(rank_indices)
 
     def __len__(self) -> int:
@@ -937,8 +933,7 @@ def _augment_sample(
         sample["ratio_pad"] = (
             ratio,
             tuple(
-                int(axis_pad) - crop
-                for axis_pad, crop in zip(pad, crop_origin_xyz, strict=True)
+                int(axis_pad) - crop for axis_pad, crop in zip(pad, crop_origin_xyz, strict=True)
             ),
         )
     return sample
@@ -1311,9 +1306,8 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.foreground_oversampling = foreground_oversampling
         self.background_undersampling = background_undersampling
         self.min_box_crop_fraction = min_box_crop_fraction
-        self.split_file_name = (
-            split_file_name
-            or (config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME)
+        self.split_file_name = split_file_name or (
+            config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME
         )
         self.cases, self.image_format = _load_case_index(
             self.src_path,
@@ -1522,9 +1516,8 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self.foreground_oversampling = foreground_oversampling
         self.background_undersampling = background_undersampling
         self.min_box_crop_fraction = min_box_crop_fraction
-        self.split_file_name = (
-            split_file_name
-            or (config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME)
+        self.split_file_name = split_file_name or (
+            config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME
         )
         self.extraction_patch_size = (
             _get_patchwise_training_extraction_size(self.patch_size)

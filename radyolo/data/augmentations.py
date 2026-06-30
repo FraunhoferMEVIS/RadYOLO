@@ -241,8 +241,7 @@ def random_zoom(
             ) + torch.min(image_cropped)
         elif out_zoom_padding == "constant":
             canvas = (
-                torch.zeros(channels, d, h, w, device=image_cropped.device)
-                + padding_fill_value
+                torch.zeros(channels, d, h, w, device=image_cropped.device) + padding_fill_value
             )
         else:
             msg = f"Unknown out zoom padding mode {out_zoom_padding}"
@@ -1001,4 +1000,3 @@ def gin_augmentation(
     )
     with torch.no_grad():
         return gin_model.forward(image)
-

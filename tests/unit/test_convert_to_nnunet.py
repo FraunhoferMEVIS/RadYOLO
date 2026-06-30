@@ -48,7 +48,9 @@ def test_convert_dataset_to_nnunet_writes_empty_mask_for_unlabeled_case(tmp_path
     assert np.count_nonzero(label_data) == 0
 
 
-def test_convert_dataset_to_nnunet_writes_test_masks_to_labels_ts(synthetic_dataset, tmp_path) -> None:
+def test_convert_dataset_to_nnunet_writes_test_masks_to_labels_ts(
+    synthetic_dataset, tmp_path
+) -> None:
     out_dir = convert_dataset_to_nnunet(dataset_dir=synthetic_dataset, out_root=tmp_path, workers=0)
 
     test_label_path = out_dir / "labelsTs" / "case5.nii.gz"

@@ -552,7 +552,9 @@ def test_predict_patchwise_image_skips_mask_reconstruction_when_disabled(
                 prototype_masks=torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
             )
 
-    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)]
+    )
     monkeypatch.setattr(
         predict_module,
         "_postprocess_single",
@@ -615,7 +617,9 @@ def test_predict_patchwise_image_reconstructs_masks_only_for_kept_detections(
                 prototype_masks=torch.ones((1, 2, 2, 2, 2), dtype=torch.float32),
             )
 
-    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)]
+    )
     monkeypatch.setattr(
         predict_module,
         "_postprocess_single",
@@ -875,10 +879,14 @@ def test_predict_patchwise_image_moves_image_before_preprocessing_when_enabled(
         return torch.zeros((1, 12, 11, 10), dtype=torch.float32)
 
     monkeypatch.setattr(torch.Tensor, "to", fake_tensor_to)
-    monkeypatch.setattr(predict_module.torch, "autocast", lambda *_args, **_kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(
+        predict_module.torch, "autocast", lambda *_args, **_kwargs: contextlib.nullcontext()
+    )
     monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
     monkeypatch.setattr(predict_module, "_extract_tensor_patch", fake_extract_tensor_patch)
-    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)]
+    )
     monkeypatch.setattr(
         predict_module,
         "_postprocess_single",
@@ -957,10 +965,14 @@ def test_predict_patchwise_image_moves_only_patches_when_disabled(monkeypatch, t
         return torch.zeros((1, 12, 11, 10), dtype=torch.float32)
 
     monkeypatch.setattr(torch.Tensor, "to", fake_tensor_to)
-    monkeypatch.setattr(predict_module.torch, "autocast", lambda *_args, **_kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(
+        predict_module.torch, "autocast", lambda *_args, **_kwargs: contextlib.nullcontext()
+    )
     monkeypatch.setattr(predict_module, "preprocess_image", fake_preprocess_image)
     monkeypatch.setattr(predict_module, "_extract_tensor_patch", fake_extract_tensor_patch)
-    monkeypatch.setattr(predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)])
+    monkeypatch.setattr(
+        predict_module, "_iter_patch_origins", lambda *_args, **_kwargs: [(0, 0, 0)]
+    )
     monkeypatch.setattr(
         predict_module,
         "_postprocess_single",

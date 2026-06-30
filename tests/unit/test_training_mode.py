@@ -43,7 +43,9 @@ def test_trainer_uses_patchwise_dataset_for_training_and_validation(
     tmp_path: Path,
 ) -> None:
     dataset_root = tmp_path / "patchwise_background_sampling_dataset"
-    shutil.copytree(Path(yaml.safe_load(minimal_train_config.read_text(encoding="utf-8"))["data"]), dataset_root)
+    shutil.copytree(
+        Path(yaml.safe_load(minimal_train_config.read_text(encoding="utf-8"))["data"]), dataset_root
+    )
     for case_name in ("case2", "case3"):
         (dataset_root / "labels" / f"{case_name}.txt").write_text("", encoding="utf-8")
 
@@ -86,7 +88,9 @@ def test_trainer_keeps_wholeimage_validation_without_patch_oversampling(
     tmp_path: Path,
 ) -> None:
     dataset_root = tmp_path / "wholeimage_background_sampling_dataset"
-    shutil.copytree(Path(yaml.safe_load(minimal_train_config.read_text(encoding="utf-8"))["data"]), dataset_root)
+    shutil.copytree(
+        Path(yaml.safe_load(minimal_train_config.read_text(encoding="utf-8"))["data"]), dataset_root
+    )
     for case_name in ("case2", "case3"):
         (dataset_root / "labels" / f"{case_name}.txt").write_text("", encoding="utf-8")
 

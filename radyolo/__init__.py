@@ -62,10 +62,7 @@ def _parse_metadata_overwrite_option(
     overrides: dict[str, object] = {}
     for entry in value:
         if "=" not in entry:
-            msg = (
-                "Metadata overwrite entries must have the format KEY=VALUE, "
-                f"but got '{entry}'."
-            )
+            msg = f"Metadata overwrite entries must have the format KEY=VALUE, but got '{entry}'."
             raise click.BadParameter(msg)
         key, raw_value = entry.split("=", 1)
         key = key.strip()

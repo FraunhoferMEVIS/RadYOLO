@@ -193,9 +193,7 @@ def apply_enlarge(
     labels_abs_xyzwhd = abs_xyzxyz_to_abs_xyzwhd(labels_abs_xyzxyz)
     labels_abs_xyzwhd_out = ensure_non_zero_box_extents(labels_abs_xyzwhd)
     labels_abs_xyzxyz_out = abs_xyzwhd_to_abs_xyzxyz(labels_abs_xyzwhd_out)
-    masks_out = (
-        masks if masks is not None else torch.zeros(0, *masks.shape[1:], dtype=masks.dtype)
-    )
+    masks_out = masks if masks is not None else torch.zeros(0, *masks.shape[1:], dtype=masks.dtype)
     return image, labels_abs_xyzxyz_out, masks_out
 
 
@@ -241,7 +239,9 @@ def build_grid_for_augmentation(
             lab_v = base_labels_abs_xyzxyz.clone()
         elif aug_name == "enlarge_bounding_boxes":
             img_v, lab_v, mask_v = apply_enlarge(
-                base_img.clone(), base_labels_abs_xyzxyz.clone(), base_masks.clone(),
+                base_img.clone(),
+                base_labels_abs_xyzxyz.clone(),
+                base_masks.clone(),
             )
         elif aug_name == "random_rotation":
             wide_angle_probability = 0.5

@@ -51,9 +51,7 @@ def _patch_torchinfo_for_model_output(model_output_type: type[Any]) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Load a RadYOLO checkpoint and print a torchinfo summary for the model."
-        )
+        description=("Load a RadYOLO checkpoint and print a torchinfo summary for the model.")
     )
     parser.add_argument("checkpoint_path", type=Path, help="Path to a .pt checkpoint file.")
     parser.add_argument(
@@ -77,8 +75,7 @@ def _parse_args() -> argparse.Namespace:
         metavar=("Z", "Y", "X"),
         default=None,
         help=(
-            "Override input spatial shape as z y x. "
-            "By default, the checkpoint patch size is used."
+            "Override input spatial shape as z y x. By default, the checkpoint patch size is used."
         ),
     )
     parser.add_argument(

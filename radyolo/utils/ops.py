@@ -209,11 +209,9 @@ def scale_boxes(
         return clip_boxes(boxes, img0_shape)
     return boxes
 
+
 def nms(
-    boxes: torch.Tensor,
-    scores: torch.Tensor,
-    iou_threshold: float,
-    max_detections: int
+    boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float, max_detections: int
 ) -> torch.Tensor:
     sorted_indices = torch.argsort(-scores)
     keep = []

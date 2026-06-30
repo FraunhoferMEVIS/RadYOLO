@@ -192,13 +192,9 @@ def _serialize_ratio_pad(
     }
 
 
-def _build_dataset(
-    cfg: DefaultConfig, args: argparse.Namespace
-) -> DatasetExportType:
+def _build_dataset(cfg: DefaultConfig, args: argparse.Namespace) -> DatasetExportType:
     dataset_class = (
-        PatchWiseDataset
-        if _resolve_dataset_type(cfg, args) == "patchwise"
-        else WholeImageDataset
+        PatchWiseDataset if _resolve_dataset_type(cfg, args) == "patchwise" else WholeImageDataset
     )
     return dataset_class(
         src_path=args.data_root,
@@ -390,9 +386,7 @@ def main() -> int:
             total_written=total_written,
         )
 
-    LOGGER.info(
-        "Finished writing %d augmented samples to %s", total_written, args.output_dir
-    )
+    LOGGER.info("Finished writing %d augmented samples to %s", total_written, args.output_dir)
     return 0
 
 

@@ -171,9 +171,9 @@ def _get_effective_template_config(template_config: dict[str, Any]) -> dict[str,
     default_config_model = _get_default_config_model()
     validation_payload = copy.deepcopy(template_config)
     validation_payload["num_classes"] = max(1, int(validation_payload.get("num_classes", 1)))
-    effective_template_config = default_config_model.model_validate(
-        validation_payload
-    ).model_dump(mode="python")
+    effective_template_config = default_config_model.model_validate(validation_payload).model_dump(
+        mode="python"
+    )
     effective_template_config.pop("num_classes", None)
     return effective_template_config
 
@@ -285,10 +285,7 @@ def _validate_initial_point_value(value: object, spec: object) -> str | None:
         return _validate_discrete_initial_point_value(value, spec)
 
     if distribution_type == "one_minus_loguniform":
-        return (
-            "distribution uses tune.sample_from and cannot be seeded via "
-            "points_to_evaluate"
-        )
+        return "distribution uses tune.sample_from and cannot be seeded via points_to_evaluate"
 
     if not _is_numeric_search_value(value):
         return f"template default {value!r} must be numeric for {distribution_type}"
@@ -742,10 +739,7 @@ def _as_positive_patch_size(value: Any, *, field_name: str) -> dict[str, int]:
         expected_axes = ("x", "y", "z")
         missing_axes = [axis for axis in expected_axes if axis not in value]
         if missing_axes:
-            msg = (
-                f"'{field_name}' must define axes x, y, z; "
-                f"missing {', '.join(missing_axes)}"
-            )
+            msg = f"'{field_name}' must define axes x, y, z; missing {', '.join(missing_axes)}"
             raise ValueError(msg)
         ordered_values = [value[axis] for axis in expected_axes]
         axis_labels = list(expected_axes)
@@ -925,12 +919,9 @@ def _run_trial(
                     return_code,
                 )
                 metric_values = {
-                    metric_name: float(failure_metric)
-                    for metric_name in tracked_metric_columns
+                    metric_name: float(failure_metric) for metric_name in tracked_metric_columns
                 }
-                metric_best_epochs = {
-                    metric_name: -1 for metric_name in tracked_metric_columns
-                }
+                metric_best_epochs = {metric_name: -1 for metric_name in tracked_metric_columns}
                 report_payload[f"dataset_failed/{dataset_name}"] = 1
                 _update_dataset_progress_entry(
                     trial_progress,
@@ -979,12 +970,9 @@ def _run_trial(
                         trial_id,
                     )
                     metric_values = {
-                        metric_name: float(failure_metric)
-                        for metric_name in tracked_metric_columns
+                        metric_name: float(failure_metric) for metric_name in tracked_metric_columns
                     }
-                    metric_best_epochs = {
-                        metric_name: -1 for metric_name in tracked_metric_columns
-                    }
+                    metric_best_epochs = {metric_name: -1 for metric_name in tracked_metric_columns}
                     report_payload[f"dataset_failed/{dataset_name}"] = 1
 
         for metric_name in tracked_metric_columns:
@@ -998,9 +986,9 @@ def _run_trial(
 
             dataset_metrics_by_name[metric_name].append(metric_value)
             dataset_best_epochs_by_name[metric_name].append(best_epoch)
-            report_payload[
-                _metric_report_key(f"dataset_metric/{dataset_name}", metric_name)
-            ] = metric_value
+            report_payload[_metric_report_key(f"dataset_metric/{dataset_name}", metric_name)] = (
+                metric_value
+            )
             report_payload[
                 _metric_report_key(f"dataset_best_epoch/{dataset_name}", metric_name)
             ] = best_epoch
@@ -1170,13 +1158,9 @@ def main() -> int:
     resources = tune_options.get("resources", {"cpu": 4, "gpu": 1})
     num_samples = int(tune_options.get("num_samples", 50))
     max_concurrent_trials = int(tune_options.get("max_concurrent_trials", 2))
-    use_short_trial_dirnames = bool(
-        tune_options.get("use_short_trial_dirnames", os.name == "nt")
-    )
+    use_short_trial_dirnames = bool(tune_options.get("use_short_trial_dirnames", os.name == "nt"))
 
-    metric_name = str(
-        tune_options.get("metric", tune_settings["default_objective_metric"])
-    )
+    metric_name = str(tune_options.get("metric", tune_settings["default_objective_metric"]))
     metric_mode = str(tune_options.get("mode", "max"))
 
     trainable = tune.with_parameters(

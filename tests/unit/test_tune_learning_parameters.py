@@ -146,9 +146,7 @@ def test_load_tune_settings_validates_template_without_dataset_yaml(
         encoding="utf-8",
     )
 
-    _, _, _, _, tune_settings, initial_evaluation_point = _load_tune_settings(
-        tune_config_path
-    )
+    _, _, _, _, tune_settings, initial_evaluation_point = _load_tune_settings(tune_config_path)
 
     assert tune_settings["datasets"][0]["data"] == synthetic_dataset.as_posix()
     assert initial_evaluation_point == {"workers": 6}
@@ -167,8 +165,7 @@ def test_alphabetical_restore_trial_sort_key_orders_trial_ids_alphabetically() -
     ]
 
     sorted_trial_ids = [
-        trial.trial_id
-        for trial in sorted(trials, key=_alphabetical_restore_trial_sort_key)
+        trial.trial_id for trial in sorted(trials, key=_alphabetical_restore_trial_sort_key)
     ]
 
     assert sorted_trial_ids == ["A1", "b2", "c3"]
@@ -190,7 +187,9 @@ def test_should_resume_dataset_run_uses_matching_incomplete_progress_entry(tmp_p
     assert should_resume is True
 
 
-def test_should_resume_dataset_run_uses_existing_train_config_for_legacy_runs(tmp_path: Path) -> None:
+def test_should_resume_dataset_run_uses_existing_train_config_for_legacy_runs(
+    tmp_path: Path,
+) -> None:
     run_config = {"epochs": 10, "resume": False, "batch_size": 2}
     config_signature = _compute_run_config_signature(run_config)
     config_path = tmp_path / "train_config.yaml"

@@ -136,7 +136,9 @@ def test_plot_results_saves_image_label_curves_separately(tmp_path: Path) -> Non
     assert (tmp_path / "loss_curves_image_labels.png").exists()
 
 
-def test_plot_results_marks_best_fitness_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plot_results_marks_best_fitness_epoch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     results_csv = tmp_path / "results.csv"
     columns = ["epoch", *plotting.RESULTS_PLOT_COLUMNS]
     pd.DataFrame(
@@ -185,7 +187,9 @@ def test_palette_overflow_generates_distinct_followup_variant() -> None:
     assert all(0 <= channel <= 255 for channel in overflow_color)
 
 
-def test_plot_results_uses_shared_palette_for_series(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plot_results_uses_shared_palette_for_series(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     results_csv = tmp_path / "results.csv"
     columns = ["epoch", "train/box_loss", "metrics/fitness"]
     pd.DataFrame(

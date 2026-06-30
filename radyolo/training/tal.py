@@ -463,8 +463,7 @@ class TaskAlignedAssigner(nn.Module):
         return pos_anchors  # noqa: RET504
 
     def select_highest_overlaps(
-        self,
-        mask_pos: torch.Tensor, overlaps: torch.Tensor, n_max_boxes: int
+        self, mask_pos: torch.Tensor, overlaps: torch.Tensor, n_max_boxes: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Select anchor boxes with highest IoU when assigned to multiple ground truths.
 

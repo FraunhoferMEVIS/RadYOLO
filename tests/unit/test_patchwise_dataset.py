@@ -51,7 +51,9 @@ def test_patchwise_dataset_extracts_centered_patch_for_all_supported_formats(
             patch_size=PatchSize(x=16, y=16, z=32),
             augment=False,
         )
-        monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
+        monkeypatch.setattr(
+            dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32)
+        )
 
         sample = dataset[0]
 
@@ -170,7 +172,9 @@ def test_load_chunked_blosc2_patch_uses_loaded_patch_min_for_image_padding(monke
         def min(self) -> float:
             raise AssertionError("store.min() should not be called for image padding")
 
-    monkeypatch.setattr(data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.float32))
+    monkeypatch.setattr(
+        data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.float32)
+    )
 
     patch = data_module._load_chunked_blosc2_patch(
         Path("fake.b2nd"),
@@ -199,7 +203,9 @@ def test_load_chunked_blosc2_patch_uses_zero_for_mask_padding(monkeypatch) -> No
         def min(self) -> int:
             return 9
 
-    monkeypatch.setattr(data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.uint8))
+    monkeypatch.setattr(
+        data_module.blosc2, "open", lambda *_args, **_kwargs: FakeChunkedArray(np.uint8)
+    )
 
     patch = data_module._load_chunked_blosc2_patch(
         Path("fake_mask.b2nd"),
@@ -421,9 +427,9 @@ def test_background_undersampling_sampler_keeps_all_foreground_and_drops_fractio
     dataset_root = tmp_path / "background_fraction_dataset"
     shutil.copytree(synthetic_dataset, dataset_root)
     (dataset_root / "data_splits.json").write_text(
-        json.dumps([
-            {"train": ["case1", "case2", "case3", "case4", "case5"], "val": [], "test": []}
-        ]),
+        json.dumps(
+            [{"train": ["case1", "case2", "case3", "case4", "case5"], "val": [], "test": []}]
+        ),
         encoding="utf-8",
     )
     for case_name in ("case2", "case3", "case4", "case5"):
@@ -460,9 +466,7 @@ def test_patchwise_dataset_oversampled_indices_sample_from_foreground_boxes(
     dataset_root = tmp_path / "foreground_only_case1"
     shutil.copytree(synthetic_dataset, dataset_root)
     (dataset_root / "data_splits.json").write_text(
-        json.dumps([
-            {"train": ["case1", "case2", "case3"], "val": ["case4"], "test": ["case5"]}
-        ]),
+        json.dumps([{"train": ["case1", "case2", "case3"], "val": ["case4"], "test": ["case5"]}]),
         encoding="utf-8",
     )
     (dataset_root / "labels" / "case2.txt").write_text("", encoding="utf-8")
@@ -505,9 +509,7 @@ def test_patchwise_validation_sampling_is_deterministic_per_index(
     dataset_root = tmp_path / "deterministic_val_dataset"
     shutil.copytree(synthetic_dataset, dataset_root)
     (dataset_root / "data_splits.json").write_text(
-        json.dumps([
-            {"train": ["case1"], "val": ["case2", "case3"], "test": ["case4"]}
-        ]),
+        json.dumps([{"train": ["case1"], "val": ["case2", "case3"], "test": ["case4"]}]),
         encoding="utf-8",
     )
 

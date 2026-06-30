@@ -85,9 +85,7 @@ def _read_best_nms_iou_threshold(
         best_row = max(candidate_rows, key=lambda row: float(row.get("fitness", "-inf")))
         return float(best_row["nms_iou_threshold"])
     except (KeyError, ValueError):
-        LOGGER.warning(
-            "Failed to parse best NMS IoU threshold from %s", csv_path, exc_info=True
-        )
+        LOGGER.warning("Failed to parse best NMS IoU threshold from %s", csv_path, exc_info=True)
         return default_threshold
 
 

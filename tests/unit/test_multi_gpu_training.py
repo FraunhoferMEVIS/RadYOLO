@@ -175,7 +175,9 @@ def test_distributed_rank_zero_writes_non_empty_log_file(
     logger = logging.getLogger(RADYOLO_LOGGER_NAME)
     original_handlers = list(logger.handlers)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "0")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "0")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
@@ -218,7 +220,9 @@ def test_launch_distributed_training_preserves_configured_log_level(
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv(LOG_LEVEL_ENV, str(logging.INFO))
     monkeypatch.setattr("radyolo.training.train._find_free_port", lambda: 12345)
 
@@ -256,7 +260,9 @@ def test_distributed_nonzero_rank_writes_rank_specific_log_file(
     logger = logging.getLogger(RADYOLO_LOGGER_NAME)
     original_handlers = list(logger.handlers)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
@@ -290,7 +296,9 @@ def test_trainer_wraps_training_model_for_multiple_gpus_with_ddp(
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
@@ -299,7 +307,9 @@ def test_trainer_wraps_training_model_for_multiple_gpus_with_ddp(
     monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: False)
 
     class FakeDistributedDataParallel(torch.nn.Module):
-        def __init__(self, module: torch.nn.Module, device_ids: list[int], output_device: int) -> None:
+        def __init__(
+            self, module: torch.nn.Module, device_ids: list[int], output_device: int
+        ) -> None:
             super().__init__()
             self.module = module
             self.device_ids = device_ids
@@ -343,7 +353,9 @@ def test_trainer_uses_distributed_sampler_for_training_loader(
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
@@ -432,7 +444,9 @@ def test_trainer_accepts_non_divisible_distributed_batch_size_per_gpu(
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
 
     trainer = Trainer(cfg=config_path)
 
@@ -453,7 +467,9 @@ def test_trainer_uses_per_gpu_batch_size_without_loss_rescaling(
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
@@ -491,7 +507,9 @@ def test_trainer_broadcast_stop_uses_cuda_tensor_for_nccl(
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False)
 
-    monkeypatch.setattr("radyolo.training.train.select_device", lambda _device: torch.device("cuda:0"))
+    monkeypatch.setattr(
+        "radyolo.training.train.select_device", lambda _device: torch.device("cuda:0")
+    )
     monkeypatch.setenv("RADYOLO_DDP_LOCAL_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_RANK", "1")
     monkeypatch.setenv("RADYOLO_DDP_WORLD_SIZE", "2")
@@ -645,12 +663,14 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
     ema = RecordingEMA()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     scaler = torch.GradScaler("cpu", enabled=False)
-    train_loader = DummyTrainLoader(
-        [{"img": torch.ones(1, dtype=torch.float32)} for _ in range(2)]
-    )
+    train_loader = DummyTrainLoader([{"img": torch.ones(1, dtype=torch.float32)} for _ in range(2)])
 
-    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(
+        "radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch
+    )
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
     monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
     monkeypatch.setattr(trainer, "_clear_memory", lambda: None)
@@ -778,8 +798,12 @@ def test_trainer_skips_non_finite_loss_batch(minimal_train_config, monkeypatch) 
         optimizer_step_calls["count"] += 1
         return True
 
-    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(
+        "radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch
+    )
     monkeypatch.setattr(trainer, "optimizer_step", _optimizer_step)
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
     monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
@@ -901,8 +925,12 @@ def test_trainer_skips_non_finite_input_batch(
         optimizer_step_calls["count"] += 1
         return True
 
-    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(
+        "radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch
+    )
     monkeypatch.setattr(trainer, "optimizer_step", _optimizer_step)
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
     monkeypatch.setattr(trainer, "_broadcast_stop", lambda stop: stop)
@@ -917,9 +945,7 @@ def test_trainer_skips_non_finite_input_batch(
             train_loader=train_loader,
             validator=None,
             optimizer=optimizer,
-            scheduler=torch.optim.lr_scheduler.LambdaLR(
-                optimizer, lr_lambda=lambda _epoch: 1.0
-            ),
+            scheduler=torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _epoch: 1.0),
             scaler=scaler,
             lf=lambda _epoch: 1.0,
             ema=cast(ModelEMA, ema),
@@ -1043,8 +1069,12 @@ def test_distributed_non_finite_loss_uses_zero_backward_surrogate(
         all_reduce_calls["count"] += 1
         tensor.fill_(1 if all_reduce_calls["count"] > 1 else 0)
 
-    monkeypatch.setattr("radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch)
+    monkeypatch.setattr(
+        "radyolo.training.train.torch.autocast", lambda *_args, **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        trainer, "_prepare_training_batch", lambda batch, _run_gpu_augmentations: batch
+    )
     monkeypatch.setattr(trainer, "optimizer_step", _optimizer_step)
     monkeypatch.setattr(trainer, "_barrier", lambda: None)
     monkeypatch.setattr(

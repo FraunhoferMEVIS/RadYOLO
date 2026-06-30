@@ -511,10 +511,7 @@ def build_detection_head_layers(
             nn.Conv3d(hidden_channels, out_channels, 1),
         )
     return nn.Sequential(
-        nn.Sequential(
-            DWConv(in_channels, in_channels, 3),
-            Conv(in_channels, hidden_channels, 1)
-        ),
+        nn.Sequential(DWConv(in_channels, in_channels, 3), Conv(in_channels, hidden_channels, 1)),
         nn.Sequential(
             DWConv(hidden_channels, hidden_channels, 3),
             Conv(hidden_channels, hidden_channels, 1),
@@ -733,14 +730,14 @@ class PrototypeMasksFullResolutionV2(nn.Module):
     ) -> None:
         """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
-        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
-        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
-        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
-        self.upsample_half = ConvTransposed(prototypes*2, prototypes, 2, 2)
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes * 4, prototypes * 2, 2, 2)
+        self.upsample_half = ConvTransposed(prototypes * 2, prototypes, 2, 2)
 
-        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
-        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
-        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes * 8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes * 4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes * 2, kernel_size=1)
         self.reshape_full_1 = Conv(input_channels_full, prototypes, kernel_size=3)
         self.reshape_full_2 = Conv(prototypes, prototypes, kernel_size=3)
 
@@ -788,14 +785,14 @@ class PrototypeMasksFullResolution(nn.Module):
     ) -> None:
         """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
-        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
-        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
-        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
-        self.upsample_half = ConvTransposed(prototypes*2, prototypes, 2, 2)
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes * 4, prototypes * 2, 2, 2)
+        self.upsample_half = ConvTransposed(prototypes * 2, prototypes, 2, 2)
 
-        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
-        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
-        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes * 8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes * 4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes * 2, kernel_size=1)
         self.reshape_full = Conv(input_channels_full, prototypes, kernel_size=3)
 
         self.cv_eigth = Conv(prototypes * 8, prototypes * 8, kernel_size=3)
@@ -841,17 +838,17 @@ class PrototypeMasksHalfResolution(nn.Module):
     ) -> None:
         """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
-        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
-        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
-        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes * 4, prototypes * 2, 2, 2)
 
-        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
-        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
-        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes * 8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes * 4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes * 2, kernel_size=1)
 
-        self.cv_eigth = Conv(prototypes*8, prototypes*8, kernel_size=3)
-        self.cv_quater = Conv(prototypes*4, prototypes*4, kernel_size=3)
-        self.cv_half = Conv(prototypes*2, prototypes, kernel_size=3)
+        self.cv_eigth = Conv(prototypes * 8, prototypes * 8, kernel_size=3)
+        self.cv_quater = Conv(prototypes * 4, prototypes * 4, kernel_size=3)
+        self.cv_half = Conv(prototypes * 2, prototypes, kernel_size=3)
         self.cv_final = Conv(prototypes, prototypes, kernel_size=3)
 
     def forward(
@@ -887,17 +884,17 @@ class PrototypeMasksHalfResolutionV2(nn.Module):
     ) -> None:
         """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
-        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes*8, 2, 2)
-        self.upsample_eigth = ConvTransposed(prototypes*8, prototypes*4, 2, 2)
-        self.upsample_quater = ConvTransposed(prototypes*4, prototypes*2, 2, 2)
+        self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
+        self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
+        self.upsample_quater = ConvTransposed(prototypes * 4, prototypes * 2, 2, 2)
 
-        self.reshape_eigth = Conv(input_channels_eigth, prototypes*8, kernel_size=1)
-        self.reshape_quater = Conv(input_channels_quarter, prototypes*4, kernel_size=1)
-        self.reshape_half = Conv(input_channels_half, prototypes*2, kernel_size=1)
+        self.reshape_eigth = Conv(input_channels_eigth, prototypes * 8, kernel_size=1)
+        self.reshape_quater = Conv(input_channels_quarter, prototypes * 4, kernel_size=1)
+        self.reshape_half = Conv(input_channels_half, prototypes * 2, kernel_size=1)
 
-        self.cv_eigth = Conv(prototypes*8*2, prototypes*8, kernel_size=3)
-        self.cv_quater = Conv(prototypes*4*2, prototypes*4, kernel_size=3)
-        self.cv_half = Conv(prototypes*2*2, prototypes, kernel_size=3)
+        self.cv_eigth = Conv(prototypes * 8 * 2, prototypes * 8, kernel_size=3)
+        self.cv_quater = Conv(prototypes * 4 * 2, prototypes * 4, kernel_size=3)
+        self.cv_half = Conv(prototypes * 2 * 2, prototypes, kernel_size=3)
         self.cv_final = Conv(prototypes, prototypes, kernel_size=3)
 
     def forward(
@@ -997,9 +994,7 @@ class PrototypeMasksHighResolution(nn.Module):
         self.cv3 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
         self.upsample2 = nn.ConvTranspose3d(prototypes * 2, prototypes * 2, 2, 2, 0, bias=True)
 
-        self.cv_skip_high_1 = Conv(
-            channels_half_resolution, prototypes * 2, kernel_size=3
-        )
+        self.cv_skip_high_1 = Conv(channels_half_resolution, prototypes * 2, kernel_size=3)
         self.cv_skip_high_2 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)
 
         self.cv_out_1 = Conv(prototypes * 2, prototypes * 2, kernel_size=3)

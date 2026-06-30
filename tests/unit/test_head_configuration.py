@@ -74,7 +74,9 @@ def test_default_head_configuration_matches_existing_layout(
     assert _head_hidden_channels(model.l23.cv_boxes[0]) == int(first_detect_channels * 0.25)
     assert _head_hidden_channels(model.l23.cv_classes[0]) == int(first_detect_channels * 1.0)
     assert _head_hidden_channels(model.l23.cv_obj[0]) == int(first_detect_channels * 1.0)
-    assert _head_hidden_channels(model.mask_coefficient_layer[0]) == int(first_detect_channels * 0.25)
+    assert _head_hidden_channels(model.mask_coefficient_layer[0]) == int(
+        first_detect_channels * 0.25
+    )
 
 
 def test_custom_head_configuration_is_applied(minimal_train_config: Path) -> None:
@@ -104,4 +106,6 @@ def test_custom_head_configuration_is_applied(minimal_train_config: Path) -> Non
     assert _head_hidden_channels(model.l23.cv_boxes[0]) == int(first_detect_channels * 0.5)
     assert _head_hidden_channels(model.l23.cv_classes[0]) == int(first_detect_channels * 0.5)
     assert _head_hidden_channels(model.l23.cv_obj[0]) == int(first_detect_channels * 0.75)
-    assert _head_hidden_channels(model.mask_coefficient_layer[0]) == int(first_detect_channels * 0.5)
+    assert _head_hidden_channels(model.mask_coefficient_layer[0]) == int(
+        first_detect_channels * 0.5
+    )

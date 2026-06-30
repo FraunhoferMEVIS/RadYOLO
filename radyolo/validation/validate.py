@@ -92,9 +92,7 @@ class Validator:
         self.lb = []  # for autolabelling
         self.dice_sum = 0.0
         self.dice_count = 0
-        self.plot_batches: list[
-            tuple[torch.Tensor | None, torch.Tensor, torch.Tensor]
-        ] = []
+        self.plot_batches: list[tuple[torch.Tensor | None, torch.Tensor, torch.Tensor]] = []
         self.image_label_task_specs: dict[str, ImageLabelTaskSpec] = {}
         self.image_label_multiclass_logits: dict[str, list[npt.NDArray[np.float64]]] = {}
         self.image_label_multiclass_targets: dict[str, list[npt.NDArray[np.int64]]] = {}
@@ -134,9 +132,7 @@ class Validator:
         else:
             self.device = model.device
         unwrapped_model = unwrap_model(model)
-        self.image_label_task_specs = dict(
-            getattr(unwrapped_model, "image_label_task_specs", {})
-        )
+        self.image_label_task_specs = dict(getattr(unwrapped_model, "image_label_task_specs", {}))
         model.eval()
 
         bar = tqdm(

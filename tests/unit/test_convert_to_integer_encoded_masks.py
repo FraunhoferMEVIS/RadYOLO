@@ -60,7 +60,9 @@ def test_convert_dataset_to_integer_encoded_masks_squeezes_singleton_mask_axes(t
     assert np.count_nonzero(label_data == 2) == 2 * 2 * 2
 
 
-def test_convert_dataset_to_integer_encoded_masks_writes_empty_mask_without_labels(tmp_path) -> None:
+def test_convert_dataset_to_integer_encoded_masks_writes_empty_mask_without_labels(
+    tmp_path,
+) -> None:
     dataset_dir = tmp_path / "dataset"
     for subdir in ("images", "labels", "masks"):
         (dataset_dir / subdir).mkdir(parents=True, exist_ok=True)

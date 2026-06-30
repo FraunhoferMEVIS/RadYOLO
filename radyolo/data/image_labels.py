@@ -224,8 +224,7 @@ def _coerce_image_label_value(
         class_id = int(numeric_value)
         if task_spec.classes is not None and class_id not in task_spec.classes:
             msg = (
-                f"{context} has class id {class_id}, but valid ids are "
-                f"{sorted(task_spec.classes)}."
+                f"{context} has class id {class_id}, but valid ids are {sorted(task_spec.classes)}."
             )
             raise ValueError(msg)
         return class_id
@@ -249,9 +248,7 @@ def load_case_image_labels(
 
     specs = task_specs or {}
     masking_fields = {
-        task_spec.masking
-        for task_spec in specs.values()
-        if task_spec.masking is not None
+        task_spec.masking for task_spec in specs.values() if task_spec.masking is not None
     }
     image_labels: dict[str, ImageLabelValue] = {}
     for task_name, raw_value in parsed.items():

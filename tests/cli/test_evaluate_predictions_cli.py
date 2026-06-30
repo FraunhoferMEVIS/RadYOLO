@@ -265,7 +265,9 @@ def test_evaluate_predictions_cli_matches_dots_and_underscores(tmp_path) -> None
 
     assert result.exit_code == 0
     metadata_payload = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
-    per_case_payload = json.loads((output_dir / "metrics_per_case.json").read_text(encoding="utf-8"))
+    per_case_payload = json.loads(
+        (output_dir / "metrics_per_case.json").read_text(encoding="utf-8")
+    )
 
     assert metadata_payload["case_counts"]["common"] == 1
     assert metadata_payload["case_counts"]["missing_in_predictions"] == 0

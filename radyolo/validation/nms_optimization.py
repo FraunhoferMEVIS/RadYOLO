@@ -164,9 +164,7 @@ def evaluate_nms_thresholds_for_checkpoint(
                 "metrics/mAP10": round(float(metrics.get("metrics/mAP10", 0.0)), 5),
                 "metrics/mAP10Agn": round(float(metrics.get("metrics/mAP10Agn", 0.0)), 5),
                 "metrics/mAP10-95": round(float(metrics.get("metrics/mAP10-95", 0.0)), 5),
-                "metrics/mAP10-95Agn": round(
-                    float(metrics.get("metrics/mAP10-95Agn", 0.0)), 5
-                ),
+                "metrics/mAP10-95Agn": round(float(metrics.get("metrics/mAP10-95Agn", 0.0)), 5),
                 "metrics/dice": round(float(metrics.get("metrics/dice", 0.0)), 5),
             }
         )

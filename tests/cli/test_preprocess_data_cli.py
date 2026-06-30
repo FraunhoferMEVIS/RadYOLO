@@ -202,7 +202,9 @@ def test_preprocess_data_cli_resamples_to_fixed_extent(synthetic_dataset, tmp_pa
     )
 
     assert result.exit_code == 0
-    converted_image = np.asarray(blosc2.open(str(output_dataset / "images" / "case1.b2nd"), mode="r")[:])
+    converted_image = np.asarray(
+        blosc2.open(str(output_dataset / "images" / "case1.b2nd"), mode="r")[:]
+    )
     assert converted_image.shape == (20, 18, 16)
 
     mask = np.asarray(blosc2.open(str(output_dataset / "masks" / "case1.b2nd"), mode="r")[:])

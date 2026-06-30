@@ -221,9 +221,7 @@ def _serialize_image_label_outputs(
             serialized[task_name] = {
                 "predicted_class": predicted_class,
                 "predicted_class_name": class_names.get(predicted_class, str(predicted_class)),
-                "probabilities": [
-                    round(float(value), 6) for value in probabilities.tolist()
-                ],
+                "probabilities": [round(float(value), 6) for value in probabilities.tolist()],
                 "logits": [round(float(value), 6) for value in logits.tolist()],
             }
             continue
@@ -231,9 +229,7 @@ def _serialize_image_label_outputs(
         if task_spec.type == "survival":
             probabilities = torch.sigmoid(logits)
             task_payload: dict[str, object] = {
-                "probabilities": [
-                    round(float(value), 6) for value in probabilities.tolist()
-                ],
+                "probabilities": [round(float(value), 6) for value in probabilities.tolist()],
                 "logits": [round(float(value), 6) for value in logits.tolist()],
             }
             if task_name == "rfs" and task_spec.survival_bin_thresholds is not None:
@@ -293,10 +289,7 @@ def _load_case_names_from_split_file(
     if not isinstance(selected_cases, list) or not all(
         isinstance(case_name, str) for case_name in selected_cases
     ):
-        msg = (
-            f"Split group '{group}' must exist in fold {fold} and map to a list "
-            "of case names."
-        )
+        msg = f"Split group '{group}' must exist in fold {fold} and map to a list of case names."
         raise ValueError(msg)
 
     return set(selected_cases)
@@ -708,9 +701,7 @@ def _predict_whole_image(
         output_dtype=torch.float32,
     )
 
-    autocast_ctx = (
-        torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
-    )
+    autocast_ctx = torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     with torch.no_grad(), autocast_ctx:
         model_output: ModelOutput = _run_model(
             model,
@@ -797,9 +788,7 @@ def _predict_patchwise_image(
     inference_shape_xyz = _tensor_shape_xyz(img_tensor)
     patch_fill_value = float(img_tensor.min().item())
 
-    autocast_ctx = (
-        torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
-    )
+    autocast_ctx = torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     merged_detections: list[torch.Tensor] = []
     patch_mask_candidates: list[_PatchMaskCandidate | None] = []
     for patch_origin_xyz in _iter_patch_origins(
@@ -1045,7 +1034,10 @@ def _inference_worker(
                 "Ignoring --tabular-input-dir because the loaded checkpoint does not declare "
                 "tabular feature names."
             )
-        if prediction_cfg.tabular_input_dir is not None and train_config.training_mode == "patchwise":
+        if (
+            prediction_cfg.tabular_input_dir is not None
+            and train_config.training_mode == "patchwise"
+        ):
             LOGGER.warning(
                 "Ignoring --tabular-input-dir for patchwise inference. Tabular inputs are only "
                 "used for whole-image inference."
@@ -1103,6 +1095,8 @@ def _writer_worker(
     except Exception:  # pragma: no cover - exercised via process supervision
         _fail_worker(error_queue, stage="writer", case_name=current_case)
         raise
+
+
 def _terminate_processes(processes: list[mp.Process]) -> None:
     for process in processes:
         if process.is_alive():
@@ -1132,9 +1126,7 @@ def _get_worker_failure(
 
 def _get_failed_processes(processes: list[mp.Process]) -> list[mp.Process]:
     return [
-        process
-        for process in processes
-        if process.exitcode is not None and process.exitcode != 0
+        process for process in processes if process.exitcode is not None and process.exitcode != 0
     ]
 
 

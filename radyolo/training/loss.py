@@ -399,10 +399,13 @@ class ImageLabelSurvivalLoss:
         sorted_indices = torch.argsort(survival_times, descending=True)
         sorted_risk_scores = risk_scores[sorted_indices]
         sorted_events = event_indicators[sorted_indices]
-        partial_log_likelihood = sorted_risk_scores[sorted_events] - torch.logcumsumexp(
-            sorted_risk_scores,
-            dim=0,
-        )[sorted_events]
+        partial_log_likelihood = (
+            sorted_risk_scores[sorted_events]
+            - torch.logcumsumexp(
+                sorted_risk_scores,
+                dim=0,
+            )[sorted_events]
+        )
         if partial_log_likelihood.numel() == 0:
             return None
         return -partial_log_likelihood.mean()
@@ -487,8 +490,7 @@ class ImageLabelSurvivalLoss:
         if survival_threshold_task_losses:
             survival_threshold_loss = torch.stack(survival_threshold_task_losses).mean()
             loss_items[self.loss_indices[self.SURVIVAL_THRESHOLD_LOSS_NAME]] = (
-                survival_threshold_loss
-                * (len(survival_threshold_task_losses) / total_task_count)
+                survival_threshold_loss * (len(survival_threshold_task_losses) / total_task_count)
             )
         if survival_cox_task_losses:
             survival_cox_loss = torch.stack(survival_cox_task_losses).mean()
@@ -852,9 +854,9 @@ class DetectionSegmentationLoss:  # noqa: N801
                     mask_coefficients[0, 0],
                     prototype_masks[0],
                 )
-                loss[self.loss_indices["mask_loss"]] += torch.nan_to_num(
-                    fallback_mask_logits
-                ).sum() * 0.0
+                loss[self.loss_indices["mask_loss"]] += (
+                    torch.nan_to_num(fallback_mask_logits).sum() * 0.0
+                )
 
         loss[self.loss_indices["box_loss"]] *= self.box_gain
         loss[self.loss_indices["cls_obj_loss"]] *= self.classification_gain

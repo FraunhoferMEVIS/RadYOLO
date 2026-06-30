@@ -143,8 +143,7 @@ def test_analyze_dataset_box_size_p95_uses_all_objects_from_all_classes(tmp_path
     _write_nifti(images_dir / "case2.nii.gz", image, np.diag((1.0, 1.0, 1.0, 1.0)))
 
     (labels_dir / "case1.txt").write_text(
-        "0 0.5 0.5 0.5 0.1 0.2 0.3\n"
-        "1 0.5 0.5 0.5 0.4 0.5 0.6\n",
+        "0 0.5 0.5 0.5 0.1 0.2 0.3\n1 0.5 0.5 0.5 0.4 0.5 0.6\n",
         encoding="utf-8",
     )
     (labels_dir / "case2.txt").write_text(

@@ -397,9 +397,7 @@ def _resolve_image_label_tasks(
         num_bins=train_config.image_label_survival_num_bins,
     )
     if train_config.enable_image_label_head and not task_specs:
-        msg = (
-            "enable_image_label_head=True requires dataset.yaml to declare image_label_tasks"
-        )
+        msg = "enable_image_label_head=True requires dataset.yaml to declare image_label_tasks"
         raise ValueError(msg)
     return task_specs
 

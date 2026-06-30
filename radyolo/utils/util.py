@@ -201,7 +201,7 @@ class ModelEMA:
             }
             for key, value in ema_state_dict.items():
                 if value.dtype.is_floating_point:  # true for FP16 and FP32
-                    value *= decay                          # noqa: PLW2901
+                    value *= decay  # noqa: PLW2901
                     value += (1 - decay) * model_state_dict[key].detach()  # noqa: PLW2901
 
             if any(

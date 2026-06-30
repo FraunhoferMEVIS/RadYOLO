@@ -497,8 +497,7 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
     pr_precision_curves = metrics.metrics.prec_values.astype(np.float64, copy=False)
     class_ids = [int(class_id) for class_id in metrics.ap_class_index]
     class_names_by_id = {
-        class_id: names.get(class_id, f"class_{class_id}")
-        for class_id in class_ids
+        class_id: names.get(class_id, f"class_{class_id}") for class_id in class_ids
     }
     num_pr_rows = int(pr_precision_curves.shape[0])
     per_class_precision = [

@@ -63,7 +63,9 @@ def _copy_tree_if_exists(src: Path, dst: Path) -> None:
         shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
-def _load_nifti_tensor(nifti_path: Path, *, squeeze: bool = False) -> tuple[torch.Tensor, VoxelSize]:
+def _load_nifti_tensor(
+    nifti_path: Path, *, squeeze: bool = False
+) -> tuple[torch.Tensor, VoxelSize]:
     nifti_image = nib.loadsave.load(nifti_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI image type for case at {nifti_path}"
@@ -259,10 +261,7 @@ def _save_preprocessed_mask(
 
 
 def _has_preprocessed_image_outputs(out_images_dir: Path) -> bool:
-    return (
-        any(out_images_dir.glob("*.npy"))
-        or any(out_images_dir.glob("*.b2nd"))
-    )
+    return any(out_images_dir.glob("*.npy")) or any(out_images_dir.glob("*.b2nd"))
 
 
 def _validate_image_output_options(
@@ -443,9 +442,7 @@ def _preprocess_cases(
             max_workers,
         )
     except BrokenProcessPool:
-        LOGGER.warning(
-            "Process pool preprocessing failed; retrying serially."
-        )
+        LOGGER.warning("Process pool preprocessing failed; retrying serially.")
         _preprocess_cases_serially(
             cases,
             masks_dir,

@@ -176,10 +176,9 @@ def _make_toy_survival_data(
         msg = "Missing-probability vector must match number of features"
         raise RuntimeError(msg)
 
-    observed_mask = (
-        torch.rand((num_samples, spec.num_features), generator=generator)
-        > missing_probability.unsqueeze(0)
-    )
+    observed_mask = torch.rand(
+        (num_samples, spec.num_features), generator=generator
+    ) > missing_probability.unsqueeze(0)
     values = values.masked_fill(~observed_mask, 0.0)
 
     return values.float(), observed_mask, observed_times, events
@@ -235,9 +234,9 @@ def _cox_partial_likelihood_loss(
     sorted_indices = torch.argsort(times, descending=True)
     sorted_risk = risk_scores[sorted_indices]
     sorted_events = events[sorted_indices]
-    partial_log_likelihood = sorted_risk[sorted_events] - torch.logcumsumexp(sorted_risk, dim=0)[
-        sorted_events
-    ]
+    partial_log_likelihood = (
+        sorted_risk[sorted_events] - torch.logcumsumexp(sorted_risk, dim=0)[sorted_events]
+    )
     if partial_log_likelihood.numel() == 0:
         return risk_scores.new_tensor(0.0)
     return -partial_log_likelihood.mean()

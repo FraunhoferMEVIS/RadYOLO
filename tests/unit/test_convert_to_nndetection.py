@@ -102,8 +102,7 @@ def test_try_load_masks_and_mask_composition(tmp_path: Path) -> None:
     assert single_instance.max() == 1
     assert _compose_instance_seg_from_masks(three_dim, num_instances=2) is None
     assert (
-        _compose_instance_seg_from_masks(np.zeros((4, 4), dtype=np.uint8), num_instances=1)
-        is None
+        _compose_instance_seg_from_masks(np.zeros((4, 4), dtype=np.uint8), num_instances=1) is None
     )
 
     channels_last = np.zeros((4, 4, 4, 2), dtype=np.uint8)
