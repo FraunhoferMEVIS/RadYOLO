@@ -395,7 +395,7 @@ def test_write_prediction_result_saves_json_and_masks(tmp_path, monkeypatch) -> 
 
     monkeypatch.setattr(
         predict_module,
-        "_reconstruct_and_save_mask",
+        "reconstruct_and_save_mask",
         fake_reconstruct_and_save_mask,
     )
 
