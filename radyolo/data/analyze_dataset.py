@@ -14,11 +14,13 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from radyolo.config.spatial import PatchSize, VoxelSize
+from radyolo.data.data import _load_nifti_array
 from radyolo.data.image_labels import (
     ImageLabelTaskSpec,
     load_case_image_labels,
     load_image_label_task_specs,
 )
+from radyolo.data.object_labels import ObjectLabelEntry, load_case_object_labels
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -213,13 +215,12 @@ def _foreground_channel_stats_and_samples(
     return foreground_stats, samples
 
 
-def _load_nifti(path: Path) -> tuple[np.ndarray, VoxelSize]:
-    """Load a NIfTI image and return its array data with spatial voxel size."""
+def _load_voxel_size(path: Path) -> VoxelSize:
+    """Load spatial voxel size from a NIfTI header."""
     img = nib.loadsave.load(str(path))
     if not isinstance(img, nib.nifti1.Nifti1Image):
         msg = f"Unsupported NIfTI at {path}"
         raise TypeError(msg)
-    data = np.asanyarray(img.dataobj)
     zooms = img.header.get_zooms()
     spatial_dims = 3
     if len(zooms) >= spatial_dims:
@@ -227,22 +228,20 @@ def _load_nifti(path: Path) -> tuple[np.ndarray, VoxelSize]:
     else:
         LOGGER.warning(f"Could not extract spacing from nifti header in file {path}")
         voxel_size = VoxelSize(x=1.0, y=1.0, z=1.0)
-    return data, voxel_size
+    return voxel_size
 
 
 def _labels_to_mask(
-    entries: list[tuple[int, float, float, float, float, float, float]],
+    entries: list[ObjectLabelEntry],
     image_size: PatchSize,
 ) -> np.ndarray:
-    """Create a boolean union mask of all boxes on a grid of shape (X, Y, Z).
-
-    Label format: class x y z w h d (normalized to [0,1] relative to X,Y,Z).
-    """
+    """Create a boolean union mask of all boxes on a grid of shape (X, Y, Z)."""
     x_shape, y_shape, z_shape = image_size.get_xyz()
     mask = np.zeros((x_shape, y_shape, z_shape), dtype=bool)
     if not entries:
         return mask
-    for _cls, x, y, z, w, h, d in entries:
+    for entry in entries:
+        x, y, z, w, h, d = entry["box_relative_xyzwhd"]
         cx = x * x_shape
         cy = y * y_shape
         cz = z * z_shape
@@ -269,12 +268,18 @@ def _labels_to_mask(
     return mask
 
 
-def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) -> ImageStats:
+def _image_stats(
+    image_path: Path,
+    dataset_path: Path,
+    case_id: str,
+    sample_cap: int = 10_000,
+) -> ImageStats:
     """Compute per-channel foreground statistics for a single image."""
     num_only_spatial_dims = 3
     num_spatial_and_channel_dims = 4
     heuristic_max_channel_number = 8
-    data, voxel_size = _load_nifti(image_path)
+    data = _load_nifti_array(image_path)
+    voxel_size = _load_voxel_size(image_path)
 
     if data.ndim == num_only_spatial_dims:
         data_per_channel = [data]
@@ -290,12 +295,8 @@ def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) 
         msg = f"Unsupported image ndim {data.ndim} at {image_path}"
         raise ValueError(msg)
 
-    entries = _labels_for_case(labels_path)
-    mask = (
-        _labels_to_mask(entries, image_size)
-        if entries
-        else np.zeros(image_size.get_xyz(), dtype=bool)
-    )
+    entries = load_case_object_labels(dataset_path / "labels", case_id)
+    mask = _labels_to_mask(entries, image_size)
 
     per_channel_stats: list[dict[str, float]] = []
     samples_per_channel: list[np.ndarray] = []
@@ -313,52 +314,15 @@ def _image_stats(image_path: Path, labels_path: Path, sample_cap: int = 10_000) 
     )
 
 
-def _parse_label_line(
-    line: str,
-) -> tuple[int, float, float, float, float, float, float]:
-    """Parse one YOLO-style 3D box annotation line."""
-    expected_line_parts = 7
-    parts = line.strip().split()
-    if len(parts) != expected_line_parts:
-        msg = (
-            "Label line must have 7 entries: class x y z w h d (normalized), "
-            f"but has {len(parts)} entries."
-        )
-        raise ValueError(msg)
-    cls = int(float(parts[0]))
-    x, y, z, w, h, d = map(float, parts[1:])
-    return cls, x, y, z, w, h, d
-
-
-def _labels_for_case(
-    labels_path: Path,
-) -> list[tuple[int, float, float, float, float, float, float]]:
-    """Load all non-empty label entries for one case."""
-    if not labels_path.exists():
-        return []
-    label_lines = labels_path.read_text(encoding="utf-8").strip().splitlines()
-    entries: list[tuple[int, float, float, float, float, float, float]] = []
-    for line in label_lines:
-        if not line.strip():
-            continue
-        cls, x, y, z, w, h, d = _parse_label_line(line)
-        if np.isclose(w, 0.0) or np.isclose(h, 0.0) or np.isclose(d, 0.0):
-            LOGGER.warning(
-                f"Zero-extent bounding box found in {labels_path}: "
-                f"class={cls} extents=(w={w:.6f}, h={h:.6f}, d={d:.6f})"
-            )
-        entries.append((cls, x, y, z, w, h, d))
-    return entries
-
-
 def _label_stats_for_case(
-    labels_file: Path,
+    dataset_path: Path,
+    case_id: str,
     image_size: PatchSize,
     voxel_size: VoxelSize,
     target_voxel_size: VoxelSize,
 ) -> LabelStats:
     """Compute per-class box counts and sizes for one label file."""
-    entries = _labels_for_case(labels_file)
+    entries = load_case_object_labels(dataset_path / "labels", case_id)
     n_by_class: dict[str, int] = {}
     sizes_by_class_vox: dict[str, list[VoxelSize]] = {}
     if not entries:
@@ -373,9 +337,9 @@ def _label_stats_for_case(
         dtype=np.float64,
     )
 
-    for cls, _x, _y, _z, w, h, d in entries:
-        cls_key = str(cls)
-        xyz_norm = np.array([w, h, d], dtype=np.float64)
+    for entry in entries:
+        cls_key = str(entry["class_"])
+        xyz_norm = np.array(entry["box_relative_xyzwhd"][3:], dtype=np.float64)
         size_vox = xyz_norm * resampled_image_size
         sizes_by_class_vox.setdefault(cls_key, []).append(
             VoxelSize(x=float(size_vox[0]), y=float(size_vox[1]), z=float(size_vox[2]))
@@ -383,10 +347,6 @@ def _label_stats_for_case(
         n_by_class[cls_key] = n_by_class.get(cls_key, 0) + 1
 
     return LabelStats(n_by_class=n_by_class, sizes_by_class_vox=sizes_by_class_vox)
-
-
-def _has_mask(mask_path: Path) -> bool:
-    return mask_path.exists()
 
 
 def _resolve_resampled_image_size(
@@ -475,27 +435,24 @@ def analyze_dataset(
     pbar = tqdm(total=total_cases, desc="Analyzing", unit="case", smoothing=0.05)
     try:
         for case_id, image_path in cases:
-            label_path = labels_dir / f"{case_id}.txt"
             mask_path = masks_dir / f"{case_id}.nii.gz"
-            future = executor.submit(_image_stats, image_path, label_path)
-            futures[future] = (case_id, image_path, label_path, mask_path)
+            future = executor.submit(_image_stats, image_path, dataset_path, case_id)
+            futures[future] = (case_id, image_path, mask_path)
         for future in as_completed(futures):
-            case_id, image_path, label_path, mask_path = futures[future]
+            case_id, image_path, mask_path = futures[future]
             try:
                 image_stats = future.result()
                 image_stats_results.append(image_stats)
             except Exception:
                 LOGGER.exception("Failed to read image %s", image_path)
             else:
-                label_stats_inputs.append(
-                    (label_path, image_stats.image_size, image_stats.voxel_size)
-                )
+                label_stats_inputs.append((case_id, image_stats.image_size, image_stats.voxel_size))
                 if image_stats.has_objects:
                     n_images_with_objects += 1
                 else:
                     n_images_without_objects += 1
 
-                if _has_mask(mask_path):
+                if mask_path.exists():
                     n_masks += 1
             processed += 1
             pbar.update(1)
@@ -609,17 +566,18 @@ def analyze_dataset(
     resampled_imagesize_p90 = _patch_size_from_percentile(resampled_image_sizes, 90)
 
     label_stats_results: list[LabelStats] = []
-    for label_path, image_size, voxel_size in label_stats_inputs:
+    for case_id, image_size, voxel_size in label_stats_inputs:
         try:
             label_stats = _label_stats_for_case(
-                label_path,
+                dataset_path,
+                case_id,
                 image_size,
                 voxel_size,
                 median_voxel_size,
             )
             label_stats_results.append(label_stats)
         except Exception:
-            LOGGER.exception("Failed to read labels for %s", label_path)
+            LOGGER.exception("Failed to read labels for case %s", case_id)
 
     total_by_class: dict[str, int] = {}
     all_sizes_by_class: dict[str, list[VoxelSize]] = {}

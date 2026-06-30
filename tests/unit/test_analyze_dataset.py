@@ -11,7 +11,6 @@ from radyolo.data.analyze_dataset import (
     _foreground_channel_stats_and_samples,
     _image_stats,
     _labels_to_mask,
-    _load_nifti,
     analyze_dataset,
 )
 
@@ -40,20 +39,13 @@ def test_foreground_channel_stats_and_samples_uses_foreground_voxels() -> None:
     np.testing.assert_array_equal(samples, np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32))
 
 
-def test_load_nifti_returns_data_and_spacing_in_xyz_order(tmp_path: Path) -> None:
-    image_path = tmp_path / "case.nii.gz"
-    array = np.arange(24, dtype=np.int16).reshape(2, 3, 4)
-    affine = np.diag((0.5, 1.5, 2.5, 1.0))
-    _write_nifti(image_path, array, affine)
-
-    data, spacing = _load_nifti(image_path)
-
-    np.testing.assert_array_equal(data, array)
-    assert spacing == VoxelSize(x=0.5, y=1.5, z=2.5)
-
-
 def test_labels_to_mask_builds_union_mask_from_normalized_boxes() -> None:
-    entries = [(0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)]
+    entries = [
+        {
+            "class_": 0,
+            "box_relative_xyzwhd": (0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+        }
+    ]
 
     mask = _labels_to_mask(entries, PatchSize(x=4, y=4, z=4))
 
@@ -63,16 +55,19 @@ def test_labels_to_mask_builds_union_mask_from_normalized_boxes() -> None:
 
 
 def test_image_stats_reads_channels_first_nifti_and_foreground_stats(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset"
+    labels_dir = dataset_path / "labels"
+    labels_dir.mkdir(parents=True)
+
     image_path = tmp_path / "multi_channel.nii.gz"
-    labels_path = tmp_path / "multi_channel.txt"
     channel0 = np.arange(64, dtype=np.float32).reshape(4, 4, 4)
     channel1 = channel0 + 100.0
     array = np.stack([channel0, channel1], axis=0)
     affine = np.diag((1.0, 2.0, 3.0, 1.0))
     _write_nifti(image_path, array, affine)
-    labels_path.write_text("0 0.5 0.5 0.5 0.5 0.5 0.5\n", encoding="utf-8")
+    (labels_dir / "multi_channel.txt").write_text("0 0.5 0.5 0.5 0.5 0.5 0.5\n", encoding="utf-8")
 
-    stats = _image_stats(image_path, labels_path, sample_cap=100)
+    stats = _image_stats(image_path, dataset_path, "multi_channel", sample_cap=100)
 
     foreground0 = channel0[1:3, 1:3, 1:3].astype(np.float32)
     foreground1 = channel1[1:3, 1:3, 1:3].astype(np.float32)
@@ -178,6 +173,7 @@ def test_analyze_dataset_counts_images_with_and_without_objects(tmp_path: Path) 
 
     (labels_dir / "case_with.txt").write_text("0 0.5 0.5 0.5 0.2 0.2 0.2\n", encoding="utf-8")
     (labels_dir / "case_empty.txt").write_text("", encoding="utf-8")
+    (labels_dir / "case_missing.txt").write_text("", encoding="utf-8")
 
     fingerprint_path = analyze_dataset(dataset_path, workers=1)
     fingerprint = json.loads(fingerprint_path.read_text(encoding="utf-8"))
