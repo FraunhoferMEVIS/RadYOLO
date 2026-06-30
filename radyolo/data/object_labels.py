@@ -11,6 +11,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ObjectLabelEntry(TypedDict):
+    """Internal object-label representation used by loaders."""
+
     class_: int
     box_relative_xyzwhd: tuple[float, float, float, float, float, float]
 
@@ -19,6 +21,7 @@ _TXT_DEPRECATION_WARNED = False
 
 
 def _warn_txt_deprecated() -> None:
+    """Log a one-time warning that TXT object labels are deprecated."""
     global _TXT_DEPRECATION_WARNED
     if _TXT_DEPRECATION_WARNED:
         return
@@ -32,10 +35,7 @@ def _warn_txt_deprecated() -> None:
 
 
 def reset_txt_label_deprecation_warning() -> None:
-    """Reset TXT deprecation warning state.
-
-    This is primarily intended for tests that need deterministic warning assertions.
-    """
+    """Reset the one-time TXT deprecation warning flag (mainly for tests)."""
     global _TXT_DEPRECATION_WARNED
     _TXT_DEPRECATION_WARNED = False
 
@@ -45,6 +45,7 @@ def _parse_label_line(
     *,
     source: Path,
 ) -> ObjectLabelEntry:
+    """Parse one YOLO TXT label line into an object-label entry."""
     parts = line.strip().split()
     if len(parts) != 7:
         msg = (
@@ -61,6 +62,7 @@ def _parse_label_line(
 
 
 def _load_case_object_labels_from_txt(label_path: Path) -> list[ObjectLabelEntry]:
+    """Load all object-label entries from a deprecated TXT label file."""
     _warn_txt_deprecated()
     lines = label_path.read_text(encoding="utf-8").strip().splitlines()
     entries: list[ObjectLabelEntry] = []
@@ -72,6 +74,7 @@ def _load_case_object_labels_from_txt(label_path: Path) -> list[ObjectLabelEntry
 
 
 def _load_case_object_labels_from_json(label_path: Path) -> list[ObjectLabelEntry]:
+    """Load and validate object-label entries from a JSON label file."""
     parsed = json.loads(label_path.read_text(encoding="utf-8"))
     if not isinstance(parsed, list):
         msg = f"Label file {label_path} must contain a list of objects."
@@ -113,6 +116,7 @@ def load_case_object_labels(
     labels_dir: Path,
     case_name: str,
 ) -> list[ObjectLabelEntry]:
+    """Load labels for one case, preferring JSON and falling back to TXT."""
     json_path = labels_dir / f"{case_name}.json"
     txt_path = labels_dir / f"{case_name}.txt"
 
@@ -131,6 +135,7 @@ def load_case_object_labels(
 def create_json_labels_from_txt(
     labels_dir: Path,
 ) -> list[Path]:
+    """Convert all TXT object-label files in a directory to JSON files."""
     if not labels_dir.exists() or not labels_dir.is_dir():
         msg = f"Label directory not found: {labels_dir}"
         raise FileNotFoundError(msg)
