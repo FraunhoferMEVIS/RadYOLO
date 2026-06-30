@@ -25,21 +25,26 @@ ExportInternalDType = Literal["float16", "float32"]
 
 
 class ExportModelWrapper(nn.Module):
+    """Wrap `HardcodedModel` to expose export-ready tensor outputs."""
+
     def __init__(self, model: HardcodedModel) -> None:
         super().__init__()
         self.model = model
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        """Run the model and return tensors in the export output format."""
         return self.model(x).to_export_tensors()
 
 
 def _looks_truthy(value: str | None) -> bool:
+    """Return whether a CSV-like string value represents true."""
     if value is None:
         return False
     return value.strip().lower() in {"true", "1", "yes"}
 
 
 def _checkpoint_kind_from_path(checkpoint_path: Path) -> str | None:
+    """Infer checkpoint kind (`best`/`last`) from the checkpoint filename."""
     stem = checkpoint_path.stem.lower()
     if "best" in stem:
         return "best"
@@ -53,6 +58,7 @@ def _read_best_nms_iou_threshold(
     *,
     default_threshold: float = 0.1,
 ) -> float:
+    """Read the best suggested NMS IoU threshold from sibling optimization CSV."""
     csv_path = checkpoint_path.parent / "nms_optimization.csv"
     if not csv_path.exists():
         return default_threshold
@@ -90,6 +96,7 @@ def _read_best_nms_iou_threshold(
 
 
 def _to_metadata_string(value: object) -> str:
+    """Serialize metadata values to stable strings for ONNX metadata fields."""
     if value is None:
         return "null"
     if isinstance(value, (str, int, float, bool)):
@@ -104,6 +111,7 @@ def build_export_metadata(
     default_nms_iou_threshold: float = 0.1,
     metadata_overrides: dict[str, object] | None = None,
 ) -> dict[str, str]:
+    """Build ONNX metadata from training config and export-time overrides."""
     model_config = train_config.model_dump(mode="json")
     metadata = {
         "training_mode": _to_metadata_string(model_config.get("training_mode")),
@@ -128,6 +136,7 @@ def build_export_metadata(
 
 
 def _resolve_output_names(model: HardcodedModel) -> list[str]:
+    """Determine ONNX output names from enabled model heads."""
     if model.enable_output_masks and not model.separate_objectness_head:
         return ["boxes", "classScores", "maskCoefficients", "prototypeMasks"]
     if not model.enable_output_masks and model.separate_objectness_head:
@@ -144,6 +153,7 @@ def _resolve_output_names(model: HardcodedModel) -> list[str]:
 
 
 def _write_onnx_metadata(onnx_model: onnx.ModelProto, metadata: dict[str, str]) -> None:
+    """Merge and write metadata entries into an ONNX model in sorted key order."""
     merged_metadata = {entry.key: entry.value for entry in onnx_model.metadata_props}
     merged_metadata.update(metadata)
 
@@ -161,6 +171,7 @@ def export_model(
     internal_dtype: ExportInternalDType = "float16",
     metadata: dict[str, str] | None = None,
 ) -> Path:
+    """Export a model to ONNX, optionally convert internal dtype, and attach metadata."""
     if internal_dtype not in {"float16", "float32"}:
         msg = f"Unsupported internal ONNX dtype: {internal_dtype}"
         raise ValueError(msg)
