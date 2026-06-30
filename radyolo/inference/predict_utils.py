@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -172,38 +171,3 @@ def build_prediction_entries(
     return image_results, mask_detections
 
 
-def _write_prediction_result(output_dir: Path, write_task: WriteTask) -> None:
-    """Write prediction JSON, image-label JSON, and optional masks to disk."""
-    if write_task.prototype_masks is not None or write_task.merged_mask_probabilities:
-        mask_affine = np.asarray(write_task.affine, dtype=np.float32)
-    if write_task.prototype_masks is not None:
-        for det_i, det_tensor in enumerate(write_task.mask_detections):
-            reconstruct_and_save_mask(
-                det_tensor,
-                write_task.prototype_masks,
-                write_task.original_shape,
-                mask_affine,
-                output_dir / "masks",
-                det_i,
-                write_task.case_name,
-            )
-    if write_task.merged_mask_probabilities:
-        for det_i, mask_probability in enumerate(write_task.merged_mask_probabilities):
-            save_merged_mask_probability(
-                mask_probability,
-                write_task.original_shape,
-                mask_affine,
-                output_dir / "masks",
-                det_i,
-                write_task.case_name,
-            )
-
-    out_json = output_dir / f"{write_task.case_name}.json"
-    with out_json.open("w", encoding="utf-8") as jf:
-        json.dump(write_task.image_results, jf, indent=2)
-    if write_task.image_label_results is not None:
-        labels_output_dir = output_dir / "labels_image"
-        labels_output_dir.mkdir(parents=True, exist_ok=True)
-        labels_json = labels_output_dir / f"{write_task.case_name}.json"
-        with labels_json.open("w", encoding="utf-8") as jf:
-            json.dump(write_task.image_label_results, jf, indent=2, sort_keys=True)
