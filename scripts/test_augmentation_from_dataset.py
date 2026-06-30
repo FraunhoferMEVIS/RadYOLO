@@ -9,7 +9,7 @@ from typing import Any
 import nibabel as nib
 import torch
 
-from radyolo.config.config import DefaultConfig, get_training_config, get_dataset_cfg
+from radyolo.config.config import DefaultConfig, get_dataset_config, get_training_config
 from radyolo.data.data import (
     PatchWiseDataset,
     WholeImageDataset,
@@ -221,7 +221,7 @@ def _load_class_names(data_root: Path) -> dict[int, str] | None:
         return None
 
     try:
-        ds_cfg = get_dataset_cfg(dataset_cfg_path)
+        ds_cfg = get_dataset_config(dataset_cfg_path)
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("Could not load dataset class names: %s", exc)
         return None

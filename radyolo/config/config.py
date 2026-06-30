@@ -701,7 +701,15 @@ def save_model_checkpoint(  # noqa: PLR0913
 
 
 def get_dataset_config(dataset_folder: str | Path) -> DatasetConfig:
-    return get_dataset_cfg(Path(dataset_folder) / "dataset.yaml")
+    dataset_path = Path(dataset_folder)
+    config_path = (
+        dataset_path
+        if dataset_path.suffix in {".yaml", ".yml"}
+        else dataset_path / "dataset.yaml"
+    )
+    with config_path.open(encoding="utf-8") as file:
+        yaml_config = yaml.safe_load(file)
+    return DatasetConfig.model_validate(yaml_config)
 
 
 def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
@@ -792,9 +800,3 @@ def get_training_config(config_path: str | Path, overrides: dict[str, Any] | Non
         LOGGER.warning(message)
 
     return DefaultConfig.model_validate(yaml_config)
-
-
-def get_dataset_cfg(config_path: str | Path) -> DatasetConfig:
-    with Path(config_path).open() as f:
-        yaml_config = yaml.safe_load(f)
-    return DatasetConfig.model_validate(yaml_config)
