@@ -9,6 +9,7 @@ import yaml
 
 
 def load_tabular_feature_names(dataset_path: Path) -> tuple[str, ...]:
+    """Load and validate tabular feature names from dataset.yaml."""
     dataset_yaml_path = Path(dataset_path) / "dataset.yaml"
     if not dataset_yaml_path.exists():
         return ()
@@ -42,6 +43,7 @@ def _coerce_tabular_value(
     feature_name: str,
     source_path: Path,
 ) -> float:
+    """Convert a JSON feature value to a finite float with context-rich errors."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         msg = (
             "Tabular feature values must be numeric scalars or null, but "
@@ -63,6 +65,7 @@ def load_case_tabular_inputs(
     case_name: str,
     feature_names: tuple[str, ...],
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load per-case tabular values and an observed-feature mask."""
     num_features = len(feature_names)
     values = torch.zeros(num_features, dtype=torch.float32)
     observed_mask = torch.zeros(num_features, dtype=torch.bool)
