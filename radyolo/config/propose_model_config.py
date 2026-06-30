@@ -37,6 +37,8 @@ _CANONICAL_NORMALIZATION_TAGS: dict[str, NormalizationTag] = {
 
 @dataclass(frozen=True)
 class ProposedModelConfigResult:
+    """Result information about proposed model config."""
+
     output_path: Path
     fingerprint_path: Path
     analysis_ran: bool
@@ -44,6 +46,7 @@ class ProposedModelConfigResult:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
+    """Load a YAML file and require a mapping at the top level."""
     with path.open(encoding="utf-8") as file:
         loaded = yaml.safe_load(file) or {}
     if not isinstance(loaded, dict):
@@ -53,6 +56,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
+    """Load a JSON file and require an object at the top level."""
     with path.open(encoding="utf-8") as file:
         loaded = json.load(file)
     if not isinstance(loaded, dict):
@@ -62,11 +66,13 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _align_up(values: np.ndarray, stride: int = _PATCH_STRIDE) -> np.ndarray:
+    """Round each axis up to the stride while enforcing the minimum patch size."""
     aligned = np.ceil(values.astype(np.float64) / stride).astype(np.int64) * stride
     return np.maximum(aligned, _MIN_PATCH_SIZE)
 
 
 def _flatten_tensors(value: object) -> list[torch.Tensor]:
+    """Collect all tensors nested inside arbitrary containers or objects."""
     if isinstance(value, torch.Tensor):
         return [value]
     if isinstance(value, dict):
@@ -85,6 +91,7 @@ def _flatten_tensors(value: object) -> list[torch.Tensor]:
 
 
 def _canonicalize_normalization_tag(value: str) -> NormalizationTag:
+    """Map dataset normalization aliases to the supported canonical tag names."""
     key = "".join(char for char in value if char.isalnum()).lower()
     if key not in _CANONICAL_NORMALIZATION_TAGS:
         msg = (
@@ -99,6 +106,7 @@ def _parse_normalization_mapping(  # noqa: PLR0911
     value: object,
     n_channels: int,
 ) -> dict[int, NormalizationTag] | None:
+    """Parse dataset.yaml normalization metadata into a per-channel tag mapping."""
     if isinstance(value, dict):
         if "type" in value:
             return None
@@ -130,6 +138,7 @@ def resolve_dataset_normalization_tags(
     dataset_yaml: dict[str, Any],
     n_channels: int,
 ) -> dict[int, NormalizationTag]:
+    """Resolve per-channel normalization tags from supported dataset.yaml fields."""
     for key in ("normalization", "modalities", "modality", "channel_names"):
         if key not in dataset_yaml:
             continue
@@ -149,6 +158,7 @@ def build_runtime_normalization_config(
     normalization_tags: dict[int, NormalizationTag],
     fingerprint: dict[str, Any],
 ) -> dict[str, Any] | list[dict[str, Any]]:
+    """Convert normalization tags plus fingerprint stats into train-config entries."""
     stats = fingerprint.get("foreground_channel_stats")
     if not isinstance(stats, list) or len(stats) < len(normalization_tags):
         msg = "Dataset fingerprint does not contain per-channel intensity statistics."
@@ -206,6 +216,7 @@ def _resolve_training_mode(
     patch_size: PatchSize,
     fingerprint: dict[str, Any],
 ) -> tuple[ResolvedTrainingMode, VoxelSize | None]:
+    """Choose the final training mode and optional voxel size from the proposal inputs."""
     patch_xyz = np.asarray(patch_size.get_xyz(), dtype=np.float64)
 
     if selection == "wholeimage":
@@ -237,6 +248,7 @@ def propose_model_config(
     workers: int = 0,
     reference_config_path: Path = _DEFAULT_REFERENCE_CONFIG,
 ) -> ProposedModelConfigResult:
+    """Generate a dataset-specific training config proposal from dataset metadata."""
     dataset_path = Path(dataset_path)
     dataset_yaml_path = dataset_path / "dataset.yaml"
     if not dataset_yaml_path.exists():
