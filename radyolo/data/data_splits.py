@@ -14,6 +14,7 @@ DEFAULT_SPLIT_FILE_NAME = "data_splits.json"
 
 
 def get_split_file_path(dataset_path: Path, split_file_name: str = DEFAULT_SPLIT_FILE_NAME) -> Path:
+    """Return the output path for the split JSON file inside a dataset directory."""
     return dataset_path / split_file_name
 
 
@@ -44,6 +45,7 @@ def _find_case_names(images_dir: Path) -> list[str]:
 
 
 def _kfold_chunks(items: list[str], k: int, seed: int, *, min_splits: int = 2) -> list[list[str]]:
+    """Shuffle items deterministically and split them into k near-even chunks."""
     if k < min_splits:
         msg = f"k must be >= {min_splits}"
         raise ValueError(msg)
@@ -91,6 +93,7 @@ def _build_folds(
 
 
 def _group_cases_by_prefix(cases: list[str], sep: str) -> dict[str, list[str]]:
+    """Group case names by the substring before the first separator occurrence."""
     groups: dict[str, list[str]] = {}
     for c in cases:
         key = c.split(sep, 1)[0] if sep else c
@@ -101,12 +104,14 @@ def _group_cases_by_prefix(cases: list[str], sep: str) -> dict[str, list[str]]:
 def _get_case_groups(
     cases: list[str], *, group_by_prefix: bool, prefix_sep: str
 ) -> list[list[str]]:
+    """Return singleton groups or prefix-based groups for the provided case names."""
     if not group_by_prefix:
         return [[case] for case in cases]
     return list(_group_cases_by_prefix(cases, sep=prefix_sep).values())
 
 
 def _flatten_case_groups(case_groups: list[list[str]]) -> list[str]:
+    """Flatten grouped case names into a single sorted list."""
     return sorted(case for group in case_groups for case in group)
 
 
@@ -116,6 +121,7 @@ def _allocate_split_group_counts(
     val_percentage: float,
     test_percentage: float,
 ) -> tuple[int, int, int]:
+    """Convert split percentages into integer group counts using largest remainders."""
     percentages = [train_percentage, val_percentage, test_percentage]
     if any(percentage < 0 for percentage in percentages):
         msg = "train, val and test percentages must all be greater than or equal to 0"
