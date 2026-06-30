@@ -9,7 +9,7 @@ import torch
 from torch.nn import functional as F  # noqa: N812
 import yaml
 
-from radyolo.config.config import get_cfg
+from radyolo.config.config import get_training_config
 from radyolo.data.augmentations import apply_tabular_mask_augmentation
 from radyolo.data.image_labels import ImageLabelTaskSpec
 from radyolo.models.layers import ModelOutput
@@ -124,7 +124,7 @@ def _write_train_config(
 def test_build_model_from_config_emits_image_label_outputs(tmp_path: Path) -> None:
     dataset_path = _write_image_label_dataset(tmp_path / "dataset")
     config_path = _write_train_config(tmp_path / "train.yaml", dataset_path)
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     model = build_model_from_config(config)
     model.eval()
@@ -168,7 +168,7 @@ def test_build_model_from_config_fuses_tabular_inputs_for_image_label_head(tmp_p
             "tabular_transformer_dropout": 0.0,
         },
     )
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     model = build_model_from_config(config)
     model.eval()
@@ -234,7 +234,7 @@ def test_build_model_from_config_supports_v2_tabular_projection_and_mask_options
             "tabular_transformer_v2_shared_mask_token": True,
         },
     )
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     model = build_model_from_config(config)
     model.eval()
@@ -283,7 +283,7 @@ def test_config_rejects_tabular_fusion_without_dataset_tabular_feature_names(tmp
             "enable_tabular_image_label_fusion": True,
         },
     )
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
     with pytest.raises(ValueError, match="tabular_feature_names"):
         build_model_from_config(config)
 
@@ -323,7 +323,7 @@ def test_apply_tabular_mask_augmentation_masks_observed_values() -> None:
 def test_detection_loss_includes_image_label_loss_term(tmp_path: Path) -> None:
     dataset_path = _write_image_label_dataset(tmp_path / "dataset")
     config_path = _write_train_config(tmp_path / "train.yaml", dataset_path)
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     model = build_model_from_config(config)
     loss_fn = build_detection_loss_from_config(config, model, torch.device("cpu"))
@@ -367,7 +367,7 @@ def test_detection_loss_skips_zero_gain_image_label_losses(tmp_path: Path) -> No
             "image_label_survival_cox_gain": 0.0,
         },
     )
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     model = build_model_from_config(config)
     loss_fn = build_detection_loss_from_config(config, model, torch.device("cpu"))
@@ -380,7 +380,7 @@ def test_detection_loss_skips_zero_gain_image_label_losses(tmp_path: Path) -> No
 def test_detection_loss_propagates_single_grid_cell_mask_option(tmp_path: Path) -> None:
     dataset_path = _write_image_label_dataset(tmp_path / "dataset")
     default_config_path = _write_train_config(tmp_path / "train_default.yaml", dataset_path)
-    default_config = get_cfg(default_config_path, {})
+    default_config = get_training_config(default_config_path, {})
     default_model = build_model_from_config(default_config)
     default_loss_fn = build_detection_loss_from_config(
         default_config,
@@ -397,7 +397,7 @@ def test_detection_loss_propagates_single_grid_cell_mask_option(tmp_path: Path) 
         dataset_path,
         overrides={"mask_loss_on_only_one_grid_cell": True},
     )
-    enabled_config = get_cfg(enabled_config_path, {})
+    enabled_config = get_training_config(enabled_config_path, {})
     enabled_model = build_model_from_config(enabled_config)
     enabled_loss_fn = build_detection_loss_from_config(
         enabled_config,
@@ -413,7 +413,7 @@ def test_detection_loss_propagates_single_grid_cell_mask_option(tmp_path: Path) 
 def test_detection_loss_keeps_mask_branch_graph_connected_without_masks(
     minimal_train_config: Path,
 ) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
     model = build_model_from_config(config)
     loss_fn = build_detection_loss_from_config(config, model, torch.device("cpu"))
     images = torch.randn((1, 1, 32, 32, 64), dtype=torch.float32)

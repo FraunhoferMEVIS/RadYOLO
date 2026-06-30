@@ -49,6 +49,8 @@ HeadConvolutionType = Literal["regular", "separable"]
 
 @dataclass(frozen=True)
 class DetectionPostprocessConfig:
+    """Config object for postprocessing of detections / predictions."""
+
     confidence_threshold: float
     nms_iou_threshold: float
     agnostic_nms: bool
@@ -80,12 +82,16 @@ def _validate_normalization_entry(entry: dict) -> dict:
 
 
 class DefaultConfig(BaseModel):
+    """Basic config object for RadYOLO trainings."""
+
     # Data and output settings
     data: Path  # path to data folder containing dataset.yaml
     fold: int  # fold from data splits file to use for training
     split_file_name: str = "data_splits.json"  # split file name inside the dataset folder
     output_folder_base: str = ""  # base folder for experiment outputs
-    experiment_name: int | str  # experiment name, results saved to 'output_folder_base/experiment_name'
+    experiment_name: (
+        int | str
+    )  # experiment name, results saved to 'output_folder_base/experiment_name'
 
     # General Settings
     device: str = ""  # device to run on, "" for automatic selection, "cpu" for cpu, "0" for cuda:0, "0,1" for multi-GPU training
@@ -133,9 +139,7 @@ class DefaultConfig(BaseModel):
     image_label_head_mlp_hidden_channels: int = Field(256, ge=1)
     image_label_head_dropout: float = Field(0.1, ge=0.0, lt=1.0)
     image_label_multiclass_cce_gain: float = Field(1.0, ge=0.0)
-    image_label_multiclass_cce_class_weights: dict[str, list[float]] = Field(
-        default_factory=dict
-    )
+    image_label_multiclass_cce_class_weights: dict[str, list[float]] = Field(default_factory=dict)
     image_label_survival_num_bins: int = Field(32, ge=1)
     image_label_survival_mtlr_gain: float = Field(1.0, ge=0.0)
     image_label_survival_cox_gain: float = Field(1.0, ge=0.0)
@@ -165,7 +169,9 @@ class DefaultConfig(BaseModel):
     # mean, std, clip_min and clip_max in the dict.
     normalization: dict | list[dict] = {"type": "none"}
     apply_preprocessing: bool = True  # keep preprocessing settings in config for inference, and apply them while loading raw training data
-    preprocessing_device: Literal["cpu", "gpu"] = "cpu"  # choose where training/validation preprocessing runs
+    preprocessing_device: Literal["cpu", "gpu"] = (
+        "cpu"  # choose where training/validation preprocessing runs
+    )
     foreground_oversampling: float = Field(
         0.0,
         ge=0.0,
@@ -183,16 +189,18 @@ class DefaultConfig(BaseModel):
     )  # minimum fraction of a box volume that must remain inside a sampled patch to keep it
     batch_size: int = 2  # number of images per GPU/process
     nominal_batch_size: int = 64  # nominal effective global batch size for gradient accumulation
-    optimizer: Literal["SGD", "Adam", "Adamax", "AdamW", "MuSGD", "NAdam", "RAdam", "RMSProp", "auto"] = (
-        "Adam"  # optimizer to use
-    )
+    optimizer: Literal[
+        "SGD", "Adam", "Adamax", "AdamW", "MuSGD", "NAdam", "RAdam", "RMSProp", "auto"
+    ] = "Adam"  # optimizer to use
     muon_weight: float = Field(
         0.5,
         ge=0.0,
         le=1.0,
     )  # MuSGD mixture: muon_weight * moun + (1 - muon_weight) * sgd
     initial_learning_rate: float = 0.01  # initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
-    final_learning_rate_ratio: float = 0.01  # final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
+    final_learning_rate_ratio: float = (
+        0.01  # final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
+    )
     momentum: float = 0.937  # SGD momentum/Adam beta1
     weight_decay: float = 5e-4  # optimizer weight decay 5e-4
     warmup_epochs: float = 3.0  # warmup epochs
@@ -222,7 +230,9 @@ class DefaultConfig(BaseModel):
     mask_loss_on_only_one_grid_cell: bool = False  # if True, use one random grid cell per GT mask
     box_loss_gain: float = 7.5  # box loss gain (based on complete IoU (CIoU) loss)
     dfl_loss_gain: float = 1.5  # DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
-    dfl_reg_max: int = Field(16, ge=1)  # DFL histogram size; use 1 for direct box edge regression without DFL
+    dfl_reg_max: int = Field(
+        16, ge=1
+    )  # DFL histogram size; use 1 for direct box edge regression without DFL
     bbox_center_offset_limit: float = Field(
         4.0, gt=0.5
     )  # max absolute anchor-relative center offset for center_extents bbox prediction
@@ -235,10 +245,14 @@ class DefaultConfig(BaseModel):
     confidence_threshold_validation: float = (
         0.001  # object confidence threshold for validation/detection metrics
     )
-    nms_iou_threshold: float = 0.2  # intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+    nms_iou_threshold: float = (
+        0.2  # intersection over union (IoU) threshold for non-maxiumum suppression (NMS)
+    )
     agnostic_nms: bool = False  # class-agnostic NMS
     max_det: int = 300  # maximum number of detections per image
-    clip_boxes_to_image: bool = True  # clip predicted 3D boxes to image bounds during validation/prediction
+    clip_boxes_to_image: bool = (
+        True  # clip predicted 3D boxes to image bounds during validation/prediction
+    )
     nms_iou_threshold_candidates: list[float] = Field(
         default_factory=lambda: [0.02, 0.04, 0.06, 0.1, 0.15, 0.2]
     )  # NMS IoU thresholds evaluated after training for best/last checkpoints
@@ -309,11 +323,15 @@ class DefaultConfig(BaseModel):
     intensity_blur_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_mult_brightness_prob: float = 0.15
     intensity_mult_brightness_range: tuple[float, float] = (0.75, 1.25)
-    intensity_mult_brightness_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+    intensity_mult_brightness_augmentation_device: Literal["cpu", "gpu"] = (
+        "gpu"  # set to "cpu" or "gpu"
+    )
     intensity_add_brightness_prob: float = 0.15
     intensity_add_brightness_mu: float = 0.0
     intensity_add_brightness_sigma: float = 0.4
-    intensity_add_brightness_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+    intensity_add_brightness_augmentation_device: Literal["cpu", "gpu"] = (
+        "gpu"  # set to "cpu" or "gpu"
+    )
     intensity_contrast_prob: float = 0.15
     intensity_contrast_range: tuple[float, float] = (0.75, 1.25)
     intensity_contrast_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
@@ -325,6 +343,21 @@ class DefaultConfig(BaseModel):
     intensity_gamma_p_invert: float = 0.25
     intensity_gamma_p_retain_stats: float = 1.0
     intensity_gamma_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    # GIN augmentation
+    gin_layers: int = 4
+    gin_channels: int = 2
+    gin_prob_kernel_size_one: float = 0.8
+    gin_prob: float = 0.3
+    gin_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
+
+    # Channel dropout augmentation (drop at most one channel)
+    channel_dropout_probabilities: tuple[float, ...] = Field(
+        default_factory=tuple
+    )  # must be empty or match channel count
+    channel_dropout_fill_value: float = 0.0  # ignored if channel_dropout_use_mean=true
+    channel_dropout_use_mean: bool = False  # if true, replace dropped channel with its mean
+    channel_dropout_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
     @model_validator(mode="before")
     @classmethod
@@ -348,9 +381,7 @@ class DefaultConfig(BaseModel):
                 raise ValueError(msg)
 
             migrated = dict(data)
-            migrated["prototype_layer"] = (
-                enabled_modes[0] if enabled_modes else "higher_resolution"
-            )
+            migrated["prototype_layer"] = enabled_modes[0] if enabled_modes else "higher_resolution"
             for key, _ in legacy_modes:
                 migrated.pop(key, None)
 
@@ -382,21 +413,6 @@ class DefaultConfig(BaseModel):
             raise ValueError(msg)
         self.nms_iou_threshold_candidates = sorted(set(candidates))
         return self
-
-    # GIN augmentation
-    gin_layers: int = 4
-    gin_channels: int = 2
-    gin_prob_kernel_size_one: float = 0.8
-    gin_prob: float = 0.3
-    gin_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
-
-    # Channel dropout augmentation (drop at most one channel)
-    channel_dropout_probabilities: tuple[float, ...] = Field(
-        default_factory=tuple
-    )  # must be empty or match channel count
-    channel_dropout_fill_value: float = 0.0  # ignored if channel_dropout_use_mean=true
-    channel_dropout_use_mean: bool = False  # if true, replace dropped channel with its mean
-    channel_dropout_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
     @model_validator(mode="after")
     def _validate_normalization(self) -> Self:
@@ -443,15 +459,10 @@ class DefaultConfig(BaseModel):
             msg = "image_label_head_feature_maps must contain at least one feature map when enabled"
             raise ValueError(msg)
         if self.enable_tabular_image_label_fusion and not self.enable_image_label_head:
-            msg = (
-                "enable_tabular_image_label_fusion=True requires enable_image_label_head=True"
-            )
+            msg = "enable_tabular_image_label_fusion=True requires enable_image_label_head=True"
             raise ValueError(msg)
         if self.tabular_transformer_d_model % self.tabular_transformer_num_heads != 0:
-            msg = (
-                "tabular_transformer_d_model must be divisible by "
-                "tabular_transformer_num_heads"
-            )
+            msg = "tabular_transformer_d_model must be divisible by tabular_transformer_num_heads"
             raise ValueError(msg)
         if not np.isfinite(self.image_label_survival_mtlr_gain):
             msg = "image_label_survival_mtlr_gain must be finite"
@@ -564,6 +575,8 @@ class DatasetConfig(BaseModel):
 
 
 class ImageLabelTaskSpecCheckpoint(TypedDict):
+    """Holds the specification for image-level classification or survival predictions tasks."""
+
     type: str
     classes: dict[int, str] | None
     unit: str | None
@@ -572,12 +585,15 @@ class ImageLabelTaskSpecCheckpoint(TypedDict):
 
 
 class ModelMetadataCheckpoint(TypedDict):
+    """Metadata from dataset yaml, tabular features and image-level tasks for checkpoints."""
+
     image_label_tasks: dict[str, ImageLabelTaskSpecCheckpoint]
     tabular_feature_names: tuple[str, ...]
     dataset_yaml: dict[str, Any]
 
 
 class ModelCheckpoint(TypedDict):
+    """Model checkpoint object holding weights and training state for resuming."""
 
     epoch: int
     best_fitness: float
@@ -631,6 +647,7 @@ def _sanitize_checkpoint_value(value: Any) -> Any:
 
 
 def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
+    """Load a RadYOLO model checkpoint."""
     checkpoint = torch.load(checkpoint, map_location="cpu", weights_only=True)
     return ModelCheckpoint(
         epoch=checkpoint["epoch"],
@@ -661,6 +678,7 @@ def save_model_checkpoint(  # noqa: PLR0913
     train_config: DefaultConfig,
     train_metrics: dict[str, float],
 ) -> None:
+    """Save a RadYOLO model checkpoint."""
     dataset_yaml = _load_dataset_yaml_for_checkpoint(Path(train_config.data))
     checkpoint = ModelCheckpoint(
         epoch=epoch,
@@ -687,6 +705,7 @@ def get_dataset_config(dataset_folder: str | Path) -> DatasetConfig:
 
 
 def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
+    """Infer number of output channels / classes from dataset.yaml."""
     dataset_root = yaml_config.get("data")
     if dataset_root is None:
         return int(yaml_config.get("num_classes", 0))
@@ -713,6 +732,7 @@ def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
 
 
 def _input_channels_from_dataset(yaml_config: dict[str, Any]) -> int | None:
+    """Infer number of input channels from dataset.yaml."""
     dataset_root = yaml_config.get("data")
     if dataset_root is None:
         return None
@@ -728,7 +748,8 @@ def _input_channels_from_dataset(yaml_config: dict[str, Any]) -> int | None:
     return None
 
 
-def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:
+def get_training_config(config_path: str | Path, overrides: dict[str, Any] | None) -> DefaultConfig:
+    """Get config object for RadYOLO training."""
     config_path = Path(config_path)
     with config_path.open() as f:
         yaml_config = yaml.safe_load(f) or {}
@@ -745,9 +766,7 @@ def get_cfg(config_path: str | Path, overrides: dict[str, Any] | None) -> Defaul
     if inferred_input_channels is not None and "input_channels" not in yaml_config:
         yaml_config["input_channels"] = inferred_input_channels
     if "deterministic" in deprecated_config_keys:
-        LOGGER.warning(
-            "Config field 'deterministic' is deprecated and ignored."
-        )
+        LOGGER.warning("Config field 'deterministic' is deprecated and ignored.")
     if "input_channels" in deprecated_config_keys:
         LOGGER.warning(
             "Config field 'input_channels' is deprecated; "

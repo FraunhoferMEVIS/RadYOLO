@@ -12,7 +12,7 @@ import yaml
 
 from radyolo.config.config import (
     DefaultConfig,
-    get_cfg,
+    get_training_config,
     load_model_checkpoint,
     save_model_checkpoint,
 )
@@ -26,7 +26,7 @@ def test_load_model_checkpoint_rejects_legacy_numpy_metadata(
     minimal_train_config: Path,
     tmp_path: Path,
 ) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
     model = build_model_from_config(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scaler = torch.GradScaler("cpu", enabled=False)
@@ -53,7 +53,7 @@ def test_save_model_checkpoint_writes_weights_only_safe_metadata(
     minimal_train_config: Path,
     tmp_path: Path,
 ) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
     model = build_model_from_config(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     optimizer.param_groups[0]["lr"] = np.float64(0.001)
@@ -86,7 +86,7 @@ def test_resume_preserves_typed_patch_size(
     minimal_train_config: Path,
     tmp_path: Path,
 ) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
     run_root = tmp_path / "runs"
     experiment_name = "resume_e2e"
     model = build_model_from_config(config)
@@ -129,7 +129,7 @@ def test_save_model_copies_best_validation_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     trainer = Trainer.__new__(Trainer)
-    trainer.config = get_cfg(minimal_train_config, {})
+    trainer.config = get_training_config(minimal_train_config, {})
     trainer.save_period = -1
     trainer.epoch = 0
     trainer.save_dir = Path(trainer.config.output_folder_base) / trainer.config.experiment_name
@@ -189,7 +189,7 @@ def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing
     minimal_train_config: Path,
     tmp_path: Path,
 ) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
     checkpoint_dataset = tmp_path / "missing_cluster_dataset"
     checkpoint_dataset.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(config.data / "dataset.yaml", checkpoint_dataset / "dataset.yaml")
@@ -235,7 +235,7 @@ def test_resume_preserves_local_dataset_override_when_checkpoint_path_is_missing
 
 
 def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path) -> None:
-    config = get_cfg(minimal_train_config, {"voxel_size": {"x": 1.5, "y": 1.2, "z": 2.5}})
+    config = get_training_config(minimal_train_config, {"voxel_size": {"x": 1.5, "y": 1.2, "z": 2.5}})
 
     assert config.voxel_size == VoxelSize(x=1.5, y=1.2, z=2.5)
     assert "voxel_size" in config.model_dump()
@@ -243,7 +243,7 @@ def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path
 
 
 def test_default_config_uses_epoch_based_ema_tau_default(minimal_train_config: Path) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
 
     assert config.ema_tau == 400.0
 
@@ -301,7 +301,7 @@ def test_load_checkpoint_model_uses_saved_metadata_when_dataset_yaml_omits_image
         encoding="utf-8",
     )
 
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
     model = build_model_from_config(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scaler = torch.GradScaler("cpu", enabled=False)
@@ -337,7 +337,7 @@ def test_get_cfg_infers_num_classes_from_dataset_names(minimal_train_config: Pat
     config_path = minimal_train_config.parent / "inferred_num_classes.yaml"
     config_path.write_text(yaml.safe_dump(config_data, sort_keys=False), encoding="utf-8")
 
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     assert config.num_classes == 1
 
@@ -383,7 +383,7 @@ def test_get_cfg_infers_input_channels_from_dataset_normalization(
         encoding="utf-8",
     )
 
-    config = get_cfg(config_path, {})
+    config = get_training_config(config_path, {})
 
     assert config.input_channels == 2
 
@@ -432,7 +432,7 @@ def test_get_cfg_warns_when_input_channels_is_set_in_config(
     )
 
     with caplog.at_level("WARNING"):
-        config = get_cfg(config_path, {})
+        config = get_training_config(config_path, {})
 
     assert config.input_channels == 1
     assert "Config field 'input_channels' is deprecated" in caplog.text
@@ -482,7 +482,7 @@ def test_get_cfg_warns_and_uses_legacy_input_channels_when_dataset_lacks_normali
     )
 
     with caplog.at_level("WARNING"):
-        config = get_cfg(config_path, {})
+        config = get_training_config(config_path, {})
 
     assert config.input_channels == 3
     assert "dataset.yaml does not define a per-channel normalization mapping" in caplog.text
@@ -528,7 +528,7 @@ def test_get_cfg_warns_when_num_classes_is_set_in_config(
     )
 
     with caplog.at_level("WARNING"):
-        config = get_cfg(config_path, {})
+        config = get_training_config(config_path, {})
 
     assert config.num_classes == 1
     assert "Config field 'num_classes' is deprecated and ignored" in caplog.text
@@ -605,7 +605,7 @@ def test_get_cfg_warns_when_deprecated_config_is_set(
     )
 
     with caplog.at_level("WARNING"):
-        config = get_cfg(config_path, {})
+        config = get_training_config(config_path, {})
 
     assert getattr(config, expected_field) == expected_value
     assert expected_message in caplog.text
@@ -619,7 +619,7 @@ def test_get_cfg_rejects_relative_dataset_path(minimal_train_config: Path, tmp_p
     config_path.write_text(yaml.safe_dump(config_data, sort_keys=False), encoding="utf-8")
 
     with pytest.raises(FileNotFoundError, match="Configured dataset folder does not exist"):
-        get_cfg(config_path, {})
+        get_training_config(config_path, {})
 
 
 def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) -> None:
@@ -658,7 +658,7 @@ def test_validation_fitness_uses_image_label_metric_weights(minimal_train_config
 
 
 def test_default_config_defaults_tal_topk_schedule_to_static_value(minimal_train_config: Path) -> None:
-    config = get_cfg(minimal_train_config, {})
+    config = get_training_config(minimal_train_config, {})
 
     assert config.tal_topk_final == config.tal_topk
     assert config.tal_topk_final_epoch == config.epochs

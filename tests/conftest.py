@@ -12,7 +12,7 @@ import yaml
 
 from radyolo.config.config import (
     DatasetConfig,
-    get_cfg,
+    get_training_config,
     load_model_checkpoint,
     save_model_checkpoint,
 )
@@ -122,7 +122,7 @@ def trained_run(minimal_train_config: Path) -> Path:
     Fails fast if checkpoint creation does not produce both weights_last.pt and weights_best.pt.
     """
     cfg = minimal_train_config
-    train_config = get_cfg(cfg, {})
+    train_config = get_training_config(cfg, {})
     model = build_model_from_config(train_config)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scaler = torch.GradScaler("cpu", enabled=False)

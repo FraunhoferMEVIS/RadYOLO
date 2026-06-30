@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch.nn as nn
 
-from radyolo.config.config import get_cfg
+from radyolo.config.config import get_training_config
 from radyolo.models.layers import Conv, DWConv
 from radyolo.models.model import build_model_from_config
 
@@ -52,7 +52,7 @@ def _assert_separable_head(head: nn.Sequential) -> None:
 def test_default_head_configuration_matches_existing_layout(
     minimal_train_config: Path,
 ) -> None:
-    config = get_cfg(minimal_train_config, {"separate_objectness_head": True})
+    config = get_training_config(minimal_train_config, {"separate_objectness_head": True})
 
     assert config.classification_head_convolutions == "separable"
     assert config.objectness_head_convolutions == "separable"
@@ -78,7 +78,7 @@ def test_default_head_configuration_matches_existing_layout(
 
 
 def test_custom_head_configuration_is_applied(minimal_train_config: Path) -> None:
-    config = get_cfg(
+    config = get_training_config(
         minimal_train_config,
         {
             "separate_objectness_head": True,

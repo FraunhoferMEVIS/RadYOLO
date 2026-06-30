@@ -24,7 +24,7 @@ from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import (
     ModelCheckpoint,
-    get_cfg,
+    get_training_config,
     get_dataset_config,
     load_model_checkpoint,
     save_model_checkpoint,
@@ -203,7 +203,7 @@ def _configure_process_logging() -> None:
 class Trainer:
     def __init__(self, cfg: str | Path) -> None:
         self.config_path = Path(cfg)
-        self.config = get_cfg(cfg, {})
+        self.config = get_training_config(cfg, {})
         self.in_distributed_worker = DDP_LOCAL_RANK_ENV in os.environ
         self.local_rank = int(os.environ.get(DDP_LOCAL_RANK_ENV, "0"))
         self.rank = int(os.environ.get(DDP_RANK_ENV, "0"))

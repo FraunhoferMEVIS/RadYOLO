@@ -9,7 +9,7 @@ from typing import Any
 import nibabel as nib
 import torch
 
-from radyolo.config.config import DefaultConfig, get_cfg, get_dataset_cfg
+from radyolo.config.config import DefaultConfig, get_training_config, get_dataset_cfg
 from radyolo.data.data import (
     PatchWiseDataset,
     WholeImageDataset,
@@ -349,7 +349,7 @@ def _write_batch_samples(
 def main() -> int:
     args = parse_args()
     torch.manual_seed(args.seed)
-    config = get_cfg(args.config, overrides=None)
+    config = get_training_config(args.config, overrides=None)
     if args.fold is not None:
         config.fold = args.fold
     names = _load_class_names(args.data_root)

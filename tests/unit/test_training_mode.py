@@ -7,7 +7,7 @@ import pytest
 import torch
 import yaml
 
-from radyolo.config.config import get_cfg
+from radyolo.config.config import get_training_config
 from radyolo.config.spatial import PatchSize
 from radyolo.data.data import PatchWiseDataset, WholeImageDataset
 from radyolo.models.model import build_model_from_config
@@ -30,7 +30,7 @@ def _write_config_with_updates(
 
 def _make_trainer_for_dataloader(config_path: Path) -> Trainer:
     trainer = Trainer.__new__(Trainer)
-    trainer.config = get_cfg(config_path, {})
+    trainer.config = get_training_config(config_path, {})
     trainer.distributed = False
     trainer.world_size = 1
     trainer.rank = 0
@@ -220,7 +220,7 @@ def test_wholeimage_gpu_preprocessing_rejects_cpu_augmentations(
     minimal_train_config: Path,
     tmp_path: Path,
 ) -> None:
-    config = get_cfg(
+    config = get_training_config(
         _write_config_with_updates(
             minimal_train_config,
             tmp_path,
