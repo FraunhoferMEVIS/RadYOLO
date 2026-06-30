@@ -29,6 +29,7 @@ _TORCH_DTYPES: dict[ImageArrayDType, torch.dtype] = {
 
 
 def resolve_numpy_dtype(dtype_name: ImageArrayDType | str) -> np.dtype:
+    """Return a NumPy dtype for a configured image dtype name."""
     try:
         return _NUMPY_DTYPES[cast("ImageArrayDType", dtype_name.lower())]
     except KeyError as exc:
@@ -37,6 +38,7 @@ def resolve_numpy_dtype(dtype_name: ImageArrayDType | str) -> np.dtype:
 
 
 def resolve_torch_dtype(dtype_name: ImageArrayDType | str) -> torch.dtype:
+    """Return a torch dtype for a configured image dtype name."""
     try:
         return _TORCH_DTYPES[cast("ImageArrayDType", dtype_name.lower())]
     except KeyError as exc:
@@ -51,6 +53,7 @@ def resolve_target_shape(
     input_voxel_size: VoxelSize | None = None,
     target_voxel_size: VoxelSize | None = None,
 ) -> tuple[int, int, int]:
+    """Resolve output ZYX shape from an explicit target shape or voxel spacing."""
     if target_shape is not None and target_voxel_size is not None:
         msg = "Only one of target_shape or target_voxel_size can be specified."
         raise ValueError(msg)
@@ -86,6 +89,7 @@ def preprocess_image(
     apply_normalization: bool = True,
     output_dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
+    """Optionally resample and normalize an image, returning source and destination shapes."""
     if image.ndim == 3:
         image = image.unsqueeze(0)
     if image.ndim != 4:
@@ -125,6 +129,7 @@ def preprocess_image(
 
 
 def resample_mask(mask: torch.Tensor, target_shape: PatchSize) -> torch.Tensor:
+    """Resample a segmentation mask to target ZYX shape with nearest-neighbor interpolation."""
     if mask.ndim == 3:
         mask = mask.unsqueeze(0)
     if mask.ndim != 4:
