@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -19,6 +20,45 @@ class ImageLabelTaskSpec:
     unit: str | None = None
     masking: str | None = None
     survival_bin_thresholds: tuple[float, ...] | None = None
+
+    @classmethod
+    def from_checkpoint_payload(
+        cls,
+        raw_spec: object,
+        *,
+        task_name: str | None = None,
+    ) -> ImageLabelTaskSpec:
+        if isinstance(raw_spec, cls):
+            return raw_spec
+        if not isinstance(raw_spec, Mapping):
+            context = f" for '{task_name}'" if task_name is not None else ""
+            msg = (
+                "Checkpoint image-label task specs must be mappings or "
+                f"ImageLabelTaskSpec instances, got {type(raw_spec)!r}{context}."
+            )
+            raise TypeError(msg)
+
+        task_type = raw_spec.get("type")
+        if task_type not in {"multiclass", "survival"}:
+            context = f" for '{task_name}'" if task_name is not None else ""
+            msg = (
+                "Checkpoint image-label task spec 'type' must be 'multiclass' or 'survival', "
+                f"got {task_type!r}{context}."
+            )
+            raise ValueError(msg)
+
+        survival_bin_thresholds = raw_spec.get("survival_bin_thresholds")
+        return cls(
+            type=task_type,
+            classes=raw_spec.get("classes"),
+            unit=raw_spec.get("unit"),
+            masking=raw_spec.get("masking"),
+            survival_bin_thresholds=(
+                tuple(float(value) for value in survival_bin_thresholds)
+                if survival_bin_thresholds is not None
+                else None
+            ),
+        )
 
 
 def _coerce_int_keys(mapping: object, *, context: str) -> dict[int, str]:

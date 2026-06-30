@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, TypedDict
 
@@ -22,6 +22,7 @@ from radyolo.config.spatial import (  # noqa: TC001, needs to be imported for py
     PatchSize,
     VoxelSize,
 )
+from radyolo.data.image_labels import ImageLabelTaskSpec
 
 if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
@@ -570,20 +571,10 @@ class DatasetConfig(BaseModel):
         return len(self.names)
 
 
-class ImageLabelTaskSpecCheckpoint(TypedDict):
-    """Holds the specification for image-level classification or survival predictions tasks."""
-
-    type: str
-    classes: dict[int, str] | None
-    unit: str | None
-    masking: str | None
-    survival_bin_thresholds: tuple[float, ...] | None
-
-
 class ModelMetadataCheckpoint(TypedDict):
     """Metadata from dataset yaml, tabular features and image-level tasks for checkpoints."""
 
-    image_label_tasks: dict[str, ImageLabelTaskSpecCheckpoint]
+    image_label_tasks: dict[str, ImageLabelTaskSpec]
     tabular_feature_names: tuple[str, ...]
     dataset_yaml: dict[str, Any]
 
@@ -611,10 +602,10 @@ def _load_dataset_yaml_for_checkpoint(dataset_path: Path) -> dict[str, Any]:
 
 def _serialize_image_label_task_specs_for_checkpoint(
     model: HardcodedModel,
-) -> dict[str, ImageLabelTaskSpecCheckpoint]:
-    serialized: dict[str, ImageLabelTaskSpecCheckpoint] = {}
+) -> dict[str, ImageLabelTaskSpec]:
+    serialized: dict[str, ImageLabelTaskSpec] = {}
     for task_name, task_spec in model.image_label_task_specs.items():
-        serialized[task_name] = ImageLabelTaskSpecCheckpoint(
+        serialized[task_name] = ImageLabelTaskSpec(
             type=task_spec.type,
             classes=task_spec.classes,
             unit=task_spec.unit,
@@ -625,6 +616,8 @@ def _serialize_image_label_task_specs_for_checkpoint(
 
 
 def _sanitize_checkpoint_value(value: Any) -> Any:
+    if is_dataclass(value):
+        return _sanitize_checkpoint_value(asdict(value))
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, np.ndarray):
@@ -645,6 +638,7 @@ def _sanitize_checkpoint_value(value: Any) -> Any:
 def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
     """Load a RadYOLO model checkpoint."""
     checkpoint = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    model_metadata = checkpoint["model_metadata"]
     return ModelCheckpoint(
         epoch=checkpoint["epoch"],
         best_fitness=checkpoint["best_fitness"],
@@ -656,9 +650,15 @@ def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
         train_metrics=checkpoint["train_metrics"],
         date=datetime.datetime.fromisoformat(checkpoint["date"]),
         model_metadata=ModelMetadataCheckpoint(
-            image_label_tasks=checkpoint["model_metadata"]["image_label_tasks"],
-            tabular_feature_names=tuple(checkpoint["model_metadata"]["tabular_feature_names"]),
-            dataset_yaml=checkpoint["model_metadata"]["dataset_yaml"],
+            image_label_tasks={
+                task_name: ImageLabelTaskSpec.from_checkpoint_payload(
+                    task_spec,
+                    task_name=task_name,
+                )
+                for task_name, task_spec in model_metadata["image_label_tasks"].items()
+            },
+            tabular_feature_names=tuple(model_metadata["tabular_feature_names"]),
+            dataset_yaml=model_metadata["dataset_yaml"],
         ),
     )
 

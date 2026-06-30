@@ -416,21 +416,7 @@ def _resolve_tabular_feature_names(train_config: DefaultConfig) -> tuple[str, ..
 def _load_image_label_tasks_from_checkpoint_metadata(
     checkpoint: ModelCheckpoint,
 ) -> dict[str, ImageLabelTaskSpec]:
-    checkpoint_tasks = checkpoint["model_metadata"]["image_label_tasks"]
-    loaded_tasks: dict[str, ImageLabelTaskSpec] = {}
-    for task_name, task_spec in checkpoint_tasks.items():
-        loaded_tasks[task_name] = ImageLabelTaskSpec(
-            type=task_spec["type"],
-            classes=task_spec["classes"],
-            unit=task_spec["unit"],
-            masking=task_spec["masking"],
-            survival_bin_thresholds=(
-                tuple(float(value) for value in task_spec["survival_bin_thresholds"])
-                if task_spec["survival_bin_thresholds"] is not None
-                else None
-            ),
-        )
-    return loaded_tasks
+    return dict(checkpoint["model_metadata"]["image_label_tasks"])
 
 
 class HardcodedModel(nn.Module):
