@@ -10,7 +10,12 @@ import numpy as np
 import torch
 import yaml
 
-from radyolo.config.config import DatasetConfig, DefaultConfig, input_channels_from_dataset
+from radyolo.config.config import (
+    DatasetConfig,
+    DefaultConfig,
+    get_dataset_config,
+    input_channels_from_dataset,
+)
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
 
@@ -135,14 +140,19 @@ def _parse_normalization_mapping(  # noqa: PLR0911
 
 
 def resolve_dataset_normalization_tags(
-    dataset_yaml: dict[str, Any],
+    dataset_yaml: DatasetConfig | dict[str, Any],
     n_channels: int,
 ) -> dict[int, NormalizationTag]:
     """Resolve per-channel normalization tags from supported dataset.yaml fields."""
+    if isinstance(dataset_yaml, DatasetConfig):
+        normalization_candidates: dict[str, object] = {"normalization": dataset_yaml.normalization}
+    else:
+        normalization_candidates = dataset_yaml
+
     for key in ("normalization", "modalities", "modality", "channel_names"):
-        if key not in dataset_yaml:
+        if key not in normalization_candidates:
             continue
-        mapping = _parse_normalization_mapping(dataset_yaml[key], n_channels)
+        mapping = _parse_normalization_mapping(normalization_candidates[key], n_channels)
         if mapping is not None:
             return mapping
 
@@ -262,15 +272,14 @@ def propose_model_config(
         fingerprint_path = analyze_dataset_fn(dataset_path=dataset_path, workers=workers)
         analysis_ran = True
 
-    dataset_yaml = _load_yaml(dataset_yaml_path)
-    dataset_cfg = DatasetConfig.model_validate(dataset_yaml)
+    dataset_cfg = get_dataset_config(dataset_path)
     fingerprint = _load_json(fingerprint_path)
     reference_config = _load_yaml(reference_config_path)
 
-    input_channels = input_channels_from_dataset(dataset_yaml) or 1
-    normalization_tags = resolve_dataset_normalization_tags(dataset_yaml, input_channels)
+    input_channels = input_channels_from_dataset(dataset_cfg) or 1
+    normalization_tags = resolve_dataset_normalization_tags(dataset_cfg, input_channels)
     runtime_normalization = build_runtime_normalization_config(normalization_tags, fingerprint)
-    enable_image_label_head = bool(dataset_yaml.get("image_label_tasks")) and bool(
+    enable_image_label_head = bool(dataset_cfg.image_label_tasks) and bool(
         reference_config.get("enable_image_label_head", False)
     )
     enable_tabular_image_label_fusion = enable_image_label_head and bool(

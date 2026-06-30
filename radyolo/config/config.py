@@ -543,35 +543,31 @@ class DefaultConfig(BaseModel):
 
 
 class DatasetConfig(BaseModel):
-    names: dict[NonNegativeInt, str] | None = None
-    nc: NonNegativeInt = 0
+    names: dict[NonNegativeInt, str]
+    normalization: (
+        dict[str, Any] | list[dict[str, Any]] | dict[int, str] | list[str] | str | None
+    ) = None
+    image_label_tasks: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_classes(self) -> Self:
-        if self.names is not None:
-            if not self.nc:
-                self.nc = len(self.names)
-
-            if len(self.names) == self.nc:
-                if max(self.names.keys()) == self.nc - 1:
-                    return self
-
-                msg = (
-                    f"{self.nc}-class dataset requires class indices 0-{self.nc - 1}, but there are"
-                    f" invalid class indices {min(self.names.keys())}-{max(self.names.keys())} "
-                    "defined in dataset.yaml"
-                )
-                raise KeyError(msg)
-
-            msg = f"'names' length: {len(self.names)} and 'nc: {self.nc}' must match."
+        if not self.names:
+            msg = "dataset.yaml must define at least one class in 'names'"
             raise ValueError(msg)
 
-        if not self.nc:
-            self.names = {i: f"class_{i}" for i in range(self.nc)}
+        if max(self.names.keys()) == len(self.names) - 1:
             return self
 
-        msg = "key missing.\n either 'names' or 'nc' are required in all data YAMLs."
-        raise ValueError(msg)
+        msg = (
+            f"{len(self.names)}-class dataset requires class indices 0-{len(self.names) - 1}, "
+            f"but there are invalid class indices {min(self.names.keys())}-{max(self.names.keys())} "
+            "defined in dataset.yaml"
+        )
+        raise KeyError(msg)
+
+    @property
+    def nc(self) -> int:
+        return len(self.names)
 
 
 class ImageLabelTaskSpecCheckpoint(TypedDict):
@@ -703,9 +699,7 @@ def save_model_checkpoint(  # noqa: PLR0913
 def get_dataset_config(dataset_folder: str | Path) -> DatasetConfig:
     dataset_path = Path(dataset_folder)
     config_path = (
-        dataset_path
-        if dataset_path.suffix in {".yaml", ".yml"}
-        else dataset_path / "dataset.yaml"
+        dataset_path if dataset_path.suffix in {".yaml", ".yml"} else dataset_path / "dataset.yaml"
     )
     with config_path.open(encoding="utf-8") as file:
         yaml_config = yaml.safe_load(file)
@@ -733,15 +727,16 @@ def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
         raise FileNotFoundError(msg)
 
     dataset_cfg = get_dataset_config(dataset_root_path)
-    if dataset_cfg.names is None:
-        msg = "dataset.yaml must define 'names' so num_classes can be inferred"
-        raise ValueError(msg)
-    return len(dataset_cfg.names)
+    return dataset_cfg.nc
 
 
-def input_channels_from_dataset(dataset_yaml: dict[str, Any]) -> int | None:
+def input_channels_from_dataset(dataset_yaml: dict[str, Any] | DatasetConfig) -> int | None:
     """Infer number of input channels from dataset.yaml."""
-    normalization = dataset_yaml.get("normalization")
+    normalization: object
+    if isinstance(dataset_yaml, DatasetConfig):
+        normalization = dataset_yaml.normalization
+    else:
+        normalization = dataset_yaml.get("normalization")
     if isinstance(normalization, list):
         return len(normalization) if normalization else None
     if isinstance(normalization, dict) and "type" not in normalization:

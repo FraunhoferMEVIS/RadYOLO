@@ -105,7 +105,7 @@ def test_propose_model_config_automatic_selects_patchwise_and_sets_voxel_size(
     dataset_path = tmp_path / "dataset"
     dataset_path.mkdir()
     (dataset_path / "dataset.yaml").write_text(
-        "nc: 1\nnames: {0: lesion}\nnormalization: {0: CT}\n",
+        "names: {0: lesion}\nnormalization: {0: CT}\n",
         encoding="utf-8",
     )
     (dataset_path / "dataset_fingerprint.json").write_text(
@@ -135,7 +135,7 @@ def test_propose_model_config_explicit_wholeimage_leaves_voxel_size_null(tmp_pat
     dataset_path = tmp_path / "dataset"
     dataset_path.mkdir()
     (dataset_path / "dataset.yaml").write_text(
-        "nc: 1\nnames: {0: lesion}\nnormalization: {0: CT}\n",
+        "names: {0: lesion}\nnormalization: {0: CT}\n",
         encoding="utf-8",
     )
     (dataset_path / "dataset_fingerprint.json").write_text(

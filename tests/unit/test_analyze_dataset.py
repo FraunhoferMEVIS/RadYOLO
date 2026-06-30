@@ -207,7 +207,6 @@ def test_analyze_dataset_summarizes_global_image_labels(tmp_path: Path) -> None:
     )
 
     (dataset_path / "dataset.yaml").write_text(
-        "nc: 1\n"
         "names: {0: lesion}\n"
         "image_label_tasks:\n"
         "  tumor_stage:\n"
@@ -275,7 +274,6 @@ def test_analyze_dataset_treats_null_image_labels_as_missing(tmp_path: Path) -> 
     )
 
     (dataset_path / "dataset.yaml").write_text(
-        "nc: 1\n"
         "names: {0: lesion}\n"
         "image_label_tasks:\n"
         "  tumor_stage:\n"

@@ -79,7 +79,6 @@ def test_dataset_loads_optional_global_image_labels_and_preprocess_copies_them(
         encoding="utf-8",
     )
     (dataset_path / "dataset.yaml").write_text(
-        "nc: 1\n"
         "names: {0: lesion}\n"
         "image_label_tasks:\n"
         "  tumor_stage:\n"
@@ -137,7 +136,6 @@ def test_dataset_loads_null_global_image_labels_as_none(
         encoding="utf-8",
     )
     (dataset_path / "dataset.yaml").write_text(
-        "nc: 1\n"
         "names: {0: lesion}\n"
         "image_label_tasks:\n"
         "  tumor_stage:\n"

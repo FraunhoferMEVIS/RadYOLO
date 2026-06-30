@@ -65,7 +65,7 @@ def synthetic_dataset(tmp_path_factory: pytest.TempPathFactory) -> Path:
         )
         _write_mask(root / "masks" / f"{case}.nii.gz", (vol > 0).astype(np.uint8))
 
-    (root / "dataset.yaml").write_text("nc: 1\nnames: {0: lesion}\n", encoding="utf-8")
+    (root / "dataset.yaml").write_text("names: {0: lesion}\n", encoding="utf-8")
     splits = [{"train": cases[:3], "val": [cases[3]], "test": [cases[4]]}]
     (root / "data_splits.json").write_text(json.dumps(splits), encoding="utf-8")
     return root
