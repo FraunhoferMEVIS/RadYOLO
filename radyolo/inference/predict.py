@@ -50,6 +50,8 @@ _SENTINEL = None
 
 @dataclass(slots=True)
 class _WorkerFailure:
+    """Serializable failure report sent from child workers to the supervisor."""
+
     stage: str
     case_name: str | None
     error: str
@@ -58,6 +60,8 @@ class _WorkerFailure:
 
 @dataclass(slots=True)
 class _PatchMaskCandidate:
+    """Mask data retained for a patch detection before final image-level NMS."""
+
     detection: torch.Tensor
     prototype_masks: torch.Tensor
     patch_origin_xyz: tuple[int, int, int]
@@ -65,6 +69,8 @@ class _PatchMaskCandidate:
 
 @dataclass
 class PredictionConfig:
+    """Runtime options for the prediction pipeline."""
+
     model_path: Path
     input_dir: Path
     output_dir: Path
@@ -101,6 +107,7 @@ def _load_model(
     dict[str, ImageLabelTaskSpec],
     tuple[str, ...],
 ]:
+    """Load a checkpoint model and metadata needed by prediction workers."""
     loaded_model = load_checkpoint_model(cfg.model_path, device_override=cfg.device)
     train_config = loaded_model.train_config
     num_classes = train_config.num_classes
@@ -115,6 +122,7 @@ def _load_case_tabular_inputs(
     case_name: str,
     feature_names: tuple[str, ...],
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Load optional per-case tabular features in checkpoint feature order."""
     if tabular_input_dir is None or not feature_names:
         return None, None
 
@@ -160,6 +168,7 @@ def _run_model(
     tabular_values: torch.Tensor | None,
     tabular_mask: torch.Tensor | None,
 ) -> ModelOutput:
+    """Run the model with optional tabular side inputs."""
     if tabular_values is None and tabular_mask is None:
         return model(image_batch)
     return model(
@@ -170,6 +179,7 @@ def _run_model(
 
 
 def _survival_bin_widths(thresholds: torch.Tensor) -> torch.Tensor:
+    """Compute bin widths for survival output aggregation."""
     if thresholds.numel() == 1:
         return torch.ones_like(thresholds)
     trailing_width = thresholds[-1] - thresholds[-2]
@@ -182,6 +192,7 @@ def _serialize_image_label_outputs(
     image_label_outputs: dict[str, torch.Tensor] | None,
     image_label_task_specs: dict[str, ImageLabelTaskSpec],
 ) -> dict[str, object] | None:
+    """Convert global image-label tensors into JSON-serializable values."""
     if image_label_outputs is None:
         return None
 
@@ -261,6 +272,7 @@ def _load_case_names_from_split_file(
     fold: int,
     group: str,
 ) -> set[str]:
+    """Read selected case names from a RadYOLO split file."""
     with split_file.open(encoding="utf-8") as file:
         split_data = json.load(file)
 
@@ -295,6 +307,7 @@ def _resolve_normalization(
     train_config: DefaultConfig,
     prediction_config: PredictionConfig,
 ) -> dict | list[dict]:
+    """Choose prediction-time normalization, honoring CLI overrides."""
     return (
         prediction_config.overwrite_normalization
         if prediction_config.overwrite_normalization is not None
@@ -306,6 +319,7 @@ def _resolve_patch_size(
     train_config: DefaultConfig,
     prediction_config: PredictionConfig,
 ) -> PatchSize:
+    """Choose prediction patch size, honoring CLI overrides."""
     return (
         prediction_config.overwrite_patch_size
         if prediction_config.overwrite_patch_size is not None
@@ -314,6 +328,7 @@ def _resolve_patch_size(
 
 
 def _resolve_input_voxel_size(loaded_image: LoadedImageTask) -> VoxelSize | None:
+    """Return input voxel size metadata when it is available."""
     if loaded_image.voxel_size_xyz is None:
         return None
     return VoxelSize.from_xyz(loaded_image.voxel_size_xyz)
@@ -323,16 +338,19 @@ def _resolve_target_voxel_size(
     train_config: DefaultConfig,
     prediction_config: PredictionConfig,
 ) -> VoxelSize | None:
+    """Choose target voxel size, honoring CLI overrides."""
     if prediction_config.overwrite_voxel_size is not None:
         return prediction_config.overwrite_voxel_size
     return train_config.voxel_size
 
 
 def _tensor_shape_xyz(image: torch.Tensor) -> tuple[int, int, int]:
+    """Return a tensor spatial shape in XYZ order."""
     return tuple(int(dim) for dim in reversed(image.shape[-3:]))
 
 
 def _get_patch_starts(size: int, patch_size: int, overlap: float) -> list[int]:
+    """Compute evenly spaced patch start indices for one axis."""
     if patch_size >= size:
         return [0]
 
@@ -347,6 +365,7 @@ def _iter_patch_origins(
     patch_shape_xyz: tuple[int, int, int],
     overlap: float,
 ) -> Iterable[tuple[int, int, int]]:
+    """Yield all sliding-window patch origins in XYZ order."""
     starts_per_axis = [
         _get_patch_starts(size, patch_size, overlap)
         for size, patch_size in zip(image_shape_xyz, patch_shape_xyz, strict=True)
@@ -360,6 +379,7 @@ def _extract_tensor_patch(
     patch_shape_xyz: tuple[int, int, int],
     fill_value: float,
 ) -> torch.Tensor:
+    """Extract an XYZ-origin patch, padding outside the image with a fill value."""
     patch_shape_zyx = tuple(reversed(patch_shape_xyz))
     image_shape_zyx = tuple(int(dim) for dim in image.shape[-3:])
     patch_origin_zyx = tuple(reversed(patch_origin_xyz))
@@ -404,6 +424,7 @@ def _apply_patch_border_weight(
     patch_shape_xyz: tuple[int, int, int],
     border_weight: float,
 ) -> torch.Tensor:
+    """Downweight detections close to patch borders."""
     if border_weight >= 1.0:
         return detection
 
@@ -440,6 +461,7 @@ def _shift_detection_to_image(
     detection: torch.Tensor,
     patch_origin_xyz: tuple[int, int, int],
 ) -> torch.Tensor:
+    """Translate a patch-local detection into image coordinates."""
     shifted_detection = detection.clone()
     shifted_detection[:6] += shifted_detection.new_tensor(
         [
@@ -461,6 +483,7 @@ def _merge_patch_detections(
     agnostic_nms: bool,
     max_det: int,
 ) -> tuple[torch.Tensor, list[int]]:
+    """Merge patch detections with class-aware or class-agnostic NMS."""
     if not detections:
         return torch.zeros((0, 8), dtype=torch.float32), []
 
@@ -485,6 +508,7 @@ def _reconstruct_patch_mask_to_image(
     image_shape_zyx: tuple[int, int, int],
     patch_origin_xyz: tuple[int, int, int],
 ) -> torch.Tensor | None:
+    """Reconstruct one patch mask and place it into full-image space."""
     nm = detection.shape[0] - 8
     if nm <= 0:
         return None
@@ -554,6 +578,7 @@ def _postprocess_single(
 def _relative_box(
     box_image_xyzxyz: torch.Tensor, original_shape: tuple[int, int, int]
 ) -> list[float]:
+    """Compatibility wrapper for relative box conversion."""
     return predict_utils_relative_box(box_image_xyzxyz, original_shape)
 
 
@@ -568,6 +593,7 @@ def _predict_whole_image(
     tabular_values: torch.Tensor | None,
     tabular_mask: torch.Tensor | None,
 ) -> WriteTask:
+    """Run preprocessing, model inference, and postprocessing for one full image."""
     img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
         *reversed(range(loaded_image.image.ndim))
     )
@@ -652,6 +678,7 @@ def _predict_patchwise_image(
     names: dict[int, str],
     prediction_config: PredictionConfig,
 ) -> WriteTask:
+    """Run sliding-window prediction and merge patch-level detections for one image."""
     img_tensor = torch.from_numpy(np.ascontiguousarray(loaded_image.image)).permute(
         *reversed(range(loaded_image.image.ndim))
     )
@@ -806,6 +833,7 @@ def _predict_loaded_image(
     tabular_values: torch.Tensor | None = None,
     tabular_mask: torch.Tensor | None = None,
 ) -> WriteTask:
+    """Dispatch one loaded image to whole-image or patchwise prediction."""
     resolved_image_label_task_specs = dict(image_label_task_specs or {})
     if train_config.training_mode == "patchwise":
         return _predict_patchwise_image(
@@ -828,6 +856,7 @@ def _predict_loaded_image(
 
 
 def _write_prediction_result(output_dir: Path, write_task: WriteTask) -> None:
+    """Write prediction outputs for one case."""
     if write_task.prototype_masks is not None or write_task.merged_mask_probabilities:
         mask_affine = np.asarray(write_task.affine, dtype=np.float32)
     if write_task.prototype_masks is not None:
@@ -868,6 +897,7 @@ def _run_ensemble_tta_inference_worker(
     inference_queue: mp.queues.Queue[LoadedImageTask | None],
     write_queue: mp.queues.Queue[WriteTask | None],
 ) -> None:
+    """Run inference worker logic for flip TTA and model ensembles."""
     from radyolo.inference.predict_ensemble_tta import (  # noqa: PLC0415
         _load_ensemble_models,
         predict_loaded_image_ensemble_tta,
@@ -920,6 +950,7 @@ def _fail_worker(
     stage: str,
     case_name: str | None,
 ) -> None:
+    """Report the current exception from a child worker to the supervisor."""
     error_queue.put(
         _WorkerFailure(
             stage=stage,
@@ -935,6 +966,7 @@ def _loader_worker(
     inference_queue: mp.queues.Queue[LoadedImageTask | None],
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> None:
+    """Load NIfTI volumes and enqueue image tasks for inference."""
     current_case: str | None = None
     try:
         while True:
@@ -964,6 +996,7 @@ def _inference_worker(
     write_queue: mp.queues.Queue[WriteTask | None],
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> None:
+    """Consume loaded images, run prediction, and enqueue write tasks."""
     current_case: str | None = None
     try:
         if prediction_cfg.tta_flipping or prediction_cfg.ensemble_model_paths:
@@ -1027,6 +1060,7 @@ def _writer_worker(
     write_queue: mp.queues.Queue[WriteTask | None],
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> None:
+    """Write prediction tasks produced by the inference worker."""
     current_case: str | None = None
     try:
         while True:
@@ -1042,6 +1076,7 @@ def _writer_worker(
 
 
 def _terminate_processes(processes: list[mp.Process]) -> None:
+    """Terminate live child processes and wait briefly for shutdown."""
     for process in processes:
         if process.is_alive():
             process.terminate()
@@ -1050,6 +1085,7 @@ def _terminate_processes(processes: list[mp.Process]) -> None:
 
 
 def _log_worker_failure(failure: _WorkerFailure) -> None:
+    """Log a structured child-worker failure report."""
     LOGGER.error(
         "Prediction %s worker failed%s: %s\n%s",
         failure.stage,
@@ -1062,6 +1098,7 @@ def _log_worker_failure(failure: _WorkerFailure) -> None:
 def _get_worker_failure(
     error_queue: mp.queues.Queue[_WorkerFailure],
 ) -> _WorkerFailure | None:
+    """Return one queued worker failure without blocking."""
     try:
         return error_queue.get_nowait()
     except queue.Empty:
@@ -1069,16 +1106,19 @@ def _get_worker_failure(
 
 
 def _get_failed_processes(processes: list[mp.Process]) -> list[mp.Process]:
+    """Return child processes that exited unsuccessfully."""
     return [
         process for process in processes if process.exitcode is not None and process.exitcode != 0
     ]
 
 
 def _all_processes_succeeded(processes: list[mp.Process]) -> bool:
+    """Return whether every child process exited with code zero."""
     return all(process.exitcode == 0 for process in processes)
 
 
 def _log_failed_processes(processes: list[mp.Process]) -> None:
+    """Log nonzero exit codes from failed child processes."""
     for process in processes:
         LOGGER.error(
             "Prediction worker %s exited with code %s",
@@ -1088,6 +1128,7 @@ def _log_failed_processes(processes: list[mp.Process]) -> None:
 
 
 def _validate_prediction_config(prediction_cfg: PredictionConfig) -> None:
+    """Validate prediction options that do not require loading a checkpoint."""
     if not 0.0 <= prediction_cfg.patch_overlap < 1.0:
         msg = "patch_overlap must be in the range [0, 1)."
         raise ValueError(msg)
@@ -1109,6 +1150,7 @@ def _validate_loaded_model_prediction_config(
     train_config: DefaultConfig,
     prediction_cfg: PredictionConfig,
 ) -> None:
+    """Validate prediction options that depend on checkpoint training config."""
     if (
         train_config.training_mode != "patchwise"
         and prediction_cfg.overwrite_voxel_size is not None
@@ -1127,6 +1169,7 @@ def _update_progress_from_load_queue(
     progress_bar: tqdm,
     total_files: int,
 ) -> None:
+    """Update progress based on queue size when the platform supports it."""
     try:
         remaining = load_queue.qsize()
     except (AttributeError, NotImplementedError):
@@ -1145,6 +1188,7 @@ def _monitor_prediction_processes(
     progress_bar: tqdm,
     total_files: int,
 ) -> int:
+    """Supervise prediction workers and stop the pipeline on failures."""
     sent_sentinels = False
     while True:
         _update_progress_from_load_queue(load_queue, progress_bar, total_files)
@@ -1174,6 +1218,7 @@ def _monitor_prediction_processes(
 
 
 def _run_prediction_pipeline(prediction_cfg: PredictionConfig, files: list[Path]) -> int:
+    """Start loader, inference, and writer processes for selected files."""
     if prediction_cfg.num_load_workers < 1:
         msg = "num_load_workers must be at least 1"
         raise ValueError(msg)
@@ -1239,6 +1284,7 @@ def _run_prediction_pipeline(prediction_cfg: PredictionConfig, files: list[Path]
 
 
 def run_prediction(prediction_cfg: PredictionConfig) -> int:
+    """Run prediction for all selected input volumes."""
     try:
         _validate_prediction_config(prediction_cfg)
         if not prediction_cfg.output_dir.exists():

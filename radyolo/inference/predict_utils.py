@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class LoadedImageTask:
+    """Image volume and metadata handed from loader to inference workers."""
+
     case_name: str
     affine: np.ndarray
     image: np.ndarray
@@ -25,6 +27,8 @@ class LoadedImageTask:
 
 @dataclass(slots=True)
 class WriteTask:
+    """Prediction payload handed from inference workers to writer workers."""
+
     case_name: str
     image_results: list[dict[str, object]]
     affine: np.ndarray
@@ -36,12 +40,14 @@ class WriteTask:
 
 
 def to_numpy_float32_contiguous(tensor: torch.Tensor | np.ndarray) -> np.ndarray:
+    """Return a CPU float32 contiguous NumPy array."""
     if isinstance(tensor, np.ndarray):
         return np.ascontiguousarray(tensor, dtype=np.float32)
     return tensor.detach().to(device="cpu", dtype=torch.float32).contiguous().numpy()
 
 
 def to_torch_float32_contiguous(array: torch.Tensor | np.ndarray) -> torch.Tensor:
+    """Return a CPU float32 contiguous Torch tensor."""
     if isinstance(array, torch.Tensor):
         return array.detach().to(device="cpu", dtype=torch.float32).contiguous()
     return torch.from_numpy(np.ascontiguousarray(array)).to(dtype=torch.float32)
@@ -55,6 +61,7 @@ def save_merged_mask_probability(
     det_index: int,
     case_name: str,
 ) -> str:
+    """Threshold and save an already reconstructed mask probability volume."""
     mask_probability_tensor = to_torch_float32_contiguous(mask_probability)
     mask_up = F.interpolate(
         mask_probability_tensor.unsqueeze(0).unsqueeze(0),
@@ -74,6 +81,7 @@ def save_merged_mask_probability(
 def relative_box(
     box_image_xyzxyz: torch.Tensor, original_shape: tuple[int, int, int]
 ) -> list[float]:
+    """Convert an image-space XYZXYZ box to relative coordinates."""
     rel_box = box_image_xyzxyz.clone()
     d, h, w = original_shape
     rel_box[0] /= w
@@ -90,6 +98,7 @@ def reconstruct_mask_probability_to_original_shape(
     proto: torch.Tensor | np.ndarray,
     original_shape: tuple[int, int, int],
 ) -> torch.Tensor | None:
+    """Reconstruct a detection mask probability map at the original image shape."""
     det_tensor = to_torch_float32_contiguous(det)
     proto_tensor = to_torch_float32_contiguous(proto)
     nm = det_tensor.shape[0] - 8
@@ -114,6 +123,7 @@ def reconstruct_and_save_mask(
     det_index: int,
     case_name: str,
 ) -> str | None:
+    """Reconstruct a detection mask and save it as a thresholded NIfTI file."""
     mask_prob = reconstruct_mask_probability_to_original_shape(det, proto, original_shape)
     if mask_prob is None:
         return None
@@ -136,6 +146,7 @@ def build_prediction_entries(
     names: dict[int, str],
     include_masks: bool,
 ) -> tuple[list[dict[str, object]], list[np.ndarray]]:
+    """Build JSON-ready detection entries and optional mask detections."""
     image_results: list[dict[str, object]] = []
     mask_detections: list[np.ndarray] = []
     for det_i, det in enumerate(detections):
@@ -162,6 +173,7 @@ def build_prediction_entries(
 
 
 def _write_prediction_result(output_dir: Path, write_task: WriteTask) -> None:
+    """Write prediction JSON, image-label JSON, and optional masks to disk."""
     if write_task.prototype_masks is not None or write_task.merged_mask_probabilities:
         mask_affine = np.asarray(write_task.affine, dtype=np.float32)
     if write_task.prototype_masks is not None:

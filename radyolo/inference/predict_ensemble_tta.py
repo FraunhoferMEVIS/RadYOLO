@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class _LoadedEnsembleModel:
+    """Loaded checkpoint and metadata used for one ensemble member."""
+
     model: HardcodedModel
     train_config: DefaultConfig
     names: dict[int, str]
@@ -39,6 +41,8 @@ class _LoadedEnsembleModel:
 
 @dataclass(slots=True)
 class _PassPrediction:
+    """Detections and auxiliary outputs from one model/TTA pass."""
+
     detections: torch.Tensor
     masks: list[torch.Tensor | None]
     image_label_results: dict[str, object] | None
@@ -47,6 +51,7 @@ class _PassPrediction:
 
 
 def _iter_flip_axis_combinations(enabled: bool) -> list[tuple[int, ...]]:
+    """Return spatial-axis flip combinations for TTA."""
     if not enabled:
         return [()]
     return [
@@ -56,6 +61,7 @@ def _iter_flip_axis_combinations(enabled: bool) -> list[tuple[int, ...]]:
 
 
 def _flip_loaded_image(loaded_image: LoadedImageTask, axes: tuple[int, ...]) -> LoadedImageTask:
+    """Return a loaded image with selected spatial axes flipped."""
     if not axes:
         return loaded_image
     return LoadedImageTask(
@@ -71,6 +77,7 @@ def _unflip_detections(
     axes: tuple[int, ...],
     original_shape: tuple[int, int, int],
 ) -> torch.Tensor:
+    """Map detections from flipped image space back to original image space."""
     if not axes or not detections.numel():
         return detections
     unflipped = detections.clone()
@@ -90,6 +97,7 @@ def _unflip_mask(
     mask: torch.Tensor | None,
     axes: tuple[int, ...],
 ) -> torch.Tensor | None:
+    """Map a mask probability volume from flipped to original orientation."""
     if mask is None or not axes:
         return mask
     spatial_dims_zyx = {0: 2, 1: 1, 2: 0}
@@ -97,6 +105,7 @@ def _unflip_mask(
 
 
 def _detections_from_write_task(write_task: WriteTask) -> torch.Tensor:
+    """Convert JSON-ready detection entries back to an aggregation tensor."""
     rows: list[list[float]] = []
     for entry in write_task.image_results:
         box = entry.get("box_image_xyzxyz")
@@ -118,6 +127,7 @@ def _resize_mask_to_original_shape(
     mask_probability: torch.Tensor | np.ndarray,
     original_shape: tuple[int, int, int],
 ) -> torch.Tensor:
+    """Resize a mask probability volume to the original image shape if needed."""
     mask_tensor = to_torch_float32_contiguous(mask_probability)
     if tuple(mask_tensor.shape) == original_shape:
         return mask_tensor
@@ -132,6 +142,7 @@ def _resize_mask_to_original_shape(
 def _masks_from_write_task(
     write_task: WriteTask, detections: torch.Tensor
 ) -> list[torch.Tensor | None]:
+    """Extract per-detection mask probabilities from a prediction write task."""
     if not detections.numel():
         return []
     if write_task.prototype_masks is not None:
@@ -159,6 +170,7 @@ def _write_task_to_pass_prediction(
     axes: tuple[int, ...],
     pass_index: int,
 ) -> _PassPrediction:
+    """Convert a standard write task into one normalized TTA pass prediction."""
     detections = _unflip_detections(
         _detections_from_write_task(write_task),
         axes,
@@ -177,6 +189,7 @@ def _write_task_to_pass_prediction(
 
 
 def _average_numeric_lists(values: list[list[object]]) -> list[object]:
+    """Average same-length numeric lists while preserving nonnumeric entries."""
     width = min(len(value) for value in values)
     averaged: list[object] = []
     for index in range(width):
@@ -189,6 +202,7 @@ def _average_numeric_lists(values: list[list[object]]) -> list[object]:
 
 
 def _average_image_label_values(values: list[object]) -> object:
+    """Average compatible serialized image-label values across passes."""
     if all(isinstance(value, (int, float)) for value in values):
         return round(float(sum(values)) / len(values), 6)
     if all(isinstance(value, list) for value in values):
@@ -213,6 +227,7 @@ def _average_image_label_values(values: list[object]) -> object:
 def _average_image_label_results(
     pass_predictions: list[_PassPrediction],
 ) -> dict[str, object] | None:
+    """Average serialized global image-label outputs across ensemble/TTA passes."""
     results = [prediction.image_label_results for prediction in pass_predictions]
     dict_results = [result for result in results if isinstance(result, dict)]
     if not dict_results:
@@ -227,6 +242,7 @@ def _average_image_label_results(
 def _flatten_pass_detections(
     pass_predictions: list[_PassPrediction],
 ) -> tuple[torch.Tensor, list[torch.Tensor | None], list[int]]:
+    """Flatten pass-local detections while retaining mask and pass indices."""
     detections: list[torch.Tensor] = []
     masks: list[torch.Tensor | None] = []
     pass_indices: list[int] = []
@@ -241,6 +257,7 @@ def _flatten_pass_detections(
 
 
 def _select_cluster_class(cluster: list[int], detections: torch.Tensor) -> float:
+    """Select the class with the largest summed confidence in a cluster."""
     cluster_detections = detections[cluster]
     class_confidences: dict[float, float] = {}
     for detection in cluster_detections:
@@ -260,6 +277,7 @@ def _aggregate_detection_clusters(
     total_passes: int,
     max_det: int,
 ) -> tuple[torch.Tensor, list[np.ndarray]]:
+    """Cluster matched detections and average boxes, confidences, classes, and masks."""
     detections, masks, pass_indices = _flatten_pass_detections(pass_predictions)
     if not detections.numel():
         return torch.zeros((0, 8), dtype=torch.float32), []
@@ -333,10 +351,12 @@ def _aggregate_detection_clusters(
 
 
 def _model_paths(prediction_cfg: PredictionConfig) -> tuple[Path, ...]:
+    """Return primary and additional ensemble checkpoint paths."""
     return (prediction_cfg.model_path, *prediction_cfg.ensemble_model_paths)
 
 
 def _load_ensemble_models(prediction_cfg: PredictionConfig) -> list[_LoadedEnsembleModel]:
+    """Load all checkpoint models participating in TTA/model ensembling."""
     from radyolo.inference.predict import (  # noqa: PLC0415
         _load_model,
         _validate_loaded_model_prediction_config,
@@ -370,6 +390,7 @@ def predict_loaded_image_ensemble_tta(
     tabular_values: torch.Tensor | None,
     tabular_mask: torch.Tensor | None,
 ) -> WriteTask:
+    """Run all model/TTA passes for one image and return aggregated predictions."""
     from radyolo.inference.predict import _predict_loaded_image  # noqa: PLC0415
 
     pass_predictions: list[_PassPrediction] = []
