@@ -6,6 +6,7 @@ import numpy as np
 def _sorted_instances(
     labels_tuples: list[tuple[int, float, float, float, float, float, float]],
 ) -> list[tuple[int, int, float, float, float, float, float, float]]:
+    """Return label instances sorted by descending volume and input order."""
     indexed_instances = [
         (index, cls, xc, yc, zc, sx, sy, sz)
         for index, (cls, xc, yc, zc, sx, sy, sz) in enumerate(labels_tuples)
@@ -21,6 +22,7 @@ def compose_labelmap_from_masks(
     mask_arr: np.ndarray,
     labels_tuples: list[tuple[int, float, float, float, float, float, float]],
 ) -> np.ndarray | None:
+    """Compose a labelmap from instance masks when the mask layout is known."""
     mask_arr = np.squeeze(mask_arr)
     if not labels_tuples:
         if mask_arr.ndim == 3:
@@ -54,6 +56,7 @@ def compose_labelmap_from_boxes(
     image_shape: tuple[int, int, int],
     labels_tuples: list[tuple[int, float, float, float, float, float, float]],
 ) -> np.ndarray:
+    """Compose a labelmap by rasterizing bounding boxes into a volume."""
     width, height, depth = image_shape
     out = np.zeros((width, height, depth), dtype=np.uint16)
     for _, cls, xc, yc, zc, sx, sy, sz in _sorted_instances(labels_tuples):
