@@ -53,6 +53,7 @@ def _has_intensity_augmentations_on_device(
     config: DefaultConfig,
     placement: Literal["cpu", "gpu"],
 ) -> bool:
+    """Return whether any configured intensity augmentation runs on the target device."""
     return any(
         augmentation_device == placement
         for augmentation_device in (
@@ -72,6 +73,7 @@ def _apply_configured_image_augmentations(
     config: DefaultConfig,
     placement: Literal["cpu", "gpu"],
 ) -> torch.Tensor:
+    """Apply configured intensity-style image augmentations for one device placement."""
     if config.do_batchgenerators_intensity_augmentation and _has_intensity_augmentations_on_device(
         config,
         placement,
@@ -131,6 +133,7 @@ def _has_spatial_augmentations_on_device(
     config: DefaultConfig,
     placement: Literal["cpu", "gpu"],
 ) -> bool:
+    """Return whether any configured spatial augmentation runs on the target device."""
     return any(
         augmentation_device == placement
         for augmentation_device in (
@@ -145,10 +148,12 @@ def _has_spatial_augmentations_on_device(
 def _get_other_augmentation_placement(
     placement: Literal["cpu", "gpu"],
 ) -> Literal["cpu", "gpu"]:
+    """Return the opposite augmentation placement."""
     return "gpu" if placement == "cpu" else "cpu"
 
 
 def _get_tensor_spatial_shape_xyz(tensor: torch.Tensor) -> tuple[int, int, int]:
+    """Return tensor spatial shape as xyz."""
     return tuple(int(dim) for dim in reversed(tensor.shape[-3:]))
 
 
@@ -157,6 +162,7 @@ def _center_crop_tensor_spatial(
     crop_origin_xyz: tuple[int, int, int],
     crop_shape_xyz: tuple[int, int, int],
 ) -> torch.Tensor:
+    """Center-crop tensor spatial dimensions using xyz crop coordinates."""
     crop_origin_zyx = tuple(reversed(crop_origin_xyz))
     crop_shape_zyx = tuple(reversed(crop_shape_xyz))
     slices = [slice(None)] * tensor.ndim
@@ -174,6 +180,7 @@ def _center_crop_sample_to_patch(
     *,
     min_box_crop_fraction: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Center-crop sample tensors to target patch size and update labels/masks."""
     current_patch_shape_xyz = _get_tensor_spatial_shape_xyz(image)
     if current_patch_shape_xyz == target_patch_shape_xyz:
         return image, classes, bboxes, masks
@@ -220,6 +227,7 @@ def _should_center_crop_after_augmentations(
     config: DefaultConfig,
     placement: Literal["cpu", "gpu"],
 ) -> bool:
+    """Return whether center cropping should run after current placement augmentations."""
     if placement == "gpu":
         return True
     return not _has_spatial_augmentations_on_device(
@@ -237,6 +245,7 @@ def _apply_configured_augmentations_to_sample(
     patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Apply configured spatial and intensity augmentations to one sample."""
     if _has_spatial_augmentations_on_device(config, placement):
         image, classes, bboxes, masks = _apply_configured_spatial_augmentations_to_sample(
             image,
@@ -269,6 +278,7 @@ def _apply_configured_spatial_augmentations_to_sample(
     patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Apply configured spatial augmentations and keep labels in normalized xyzwhd format."""
     labels = torch.cat((classes, bboxes), dim=1)
     scale_tensor = torch.tensor(
         patch_size.get_zyx(),
@@ -342,6 +352,7 @@ def apply_configured_augmentations_to_batch(
     patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> Batch:
+    """Apply configured augmentations to each sample in a batch."""
     images = batch["img"]
     batch_device = images.device
     images_out: list[torch.Tensor] = []
@@ -432,10 +443,12 @@ def apply_configured_spatial_augmentations_to_batch(
     patch_size: PatchSize,
     placement: Literal["cpu", "gpu"],
 ) -> Batch:
+    """Apply batch augmentations through the compatibility wrapper."""
     return apply_configured_augmentations_to_batch(batch, config, patch_size, placement)
 
 
 class Sample(TypedDict):
+    """Single-sample structure used by datasets before collation."""
     image: torch.Tensor
     shape: tuple[int, int, int]
     original_shape: tuple[int, int, int]
@@ -450,6 +463,7 @@ class Sample(TypedDict):
 
 
 class Batch(TypedDict):
+    """Batch structure consumed by training, validation, and inference steps."""
     img: ImageBatch
     ori_shape: tuple[tuple[int, int, int], ...]
     ratio_pad: tuple[
@@ -468,6 +482,7 @@ class Batch(TypedDict):
 
 
 def _load_image_label_tasks(src_path: Path) -> dict[str, ImageLabelTaskSpec]:
+    """Load image-label task specifications for a dataset."""
     return load_image_label_task_specs(src_path)
 
 
@@ -476,6 +491,7 @@ def _load_image_labels(
     case_name: str,
     image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
 ) -> dict[str, ImageLabelValue]:
+    """Load image-level labels for one case."""
     return load_case_image_labels(src_path, case_name, image_label_tasks)
 
 
@@ -484,18 +500,22 @@ def _load_tabular_inputs(
     case_name: str,
     tabular_feature_names: tuple[str, ...],
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load tabular values and validity mask for one case."""
     return load_case_tabular_inputs(src_path, case_name, tabular_feature_names)
 
 
 def _load_tabular_feature_names(src_path: Path) -> tuple[str, ...]:
+    """Load ordered tabular feature names for the dataset."""
     return load_tabular_feature_names(src_path)
 
 
 def _get_spatial_axis_offset(array_shape: tuple[int, ...]) -> int:
+    """Return channel-axis offset for arrays with optional leading singleton channel."""
     return 1 if len(array_shape) == 4 and array_shape[0] == 1 else 0
 
 
 def _get_spatial_shape(array_shape: tuple[int, ...]) -> tuple[int, int, int]:
+    """Extract xyz-compatible spatial shape from raw array shape."""
     spatial_axis_offset = _get_spatial_axis_offset(array_shape)
     spatial_shape = array_shape[spatial_axis_offset : spatial_axis_offset + 3]
     if len(spatial_shape) != 3:
@@ -508,6 +528,7 @@ def _compute_patch_origin(
     patch_center_xyz: tuple[int, int, int],
     patch_shape_xyz: tuple[int, int, int],
 ) -> tuple[int, int, int]:
+    """Convert patch center coordinates to patch origin coordinates."""
     return tuple(
         int(center) - int(size) // 2
         for center, size in zip(patch_center_xyz, patch_shape_xyz, strict=True)
@@ -519,6 +540,7 @@ def _compute_patch_layout(
     patch_shape_xyz: tuple[int, int, int],
     image_shape_xyz: tuple[int, int, int],
 ) -> tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]:
+    """Compute source and destination ranges for clipping a patch against image bounds."""
     source_start_xyz = []
     source_end_xyz = []
     destination_start_xyz = []
@@ -555,6 +577,7 @@ def _extract_patch_from_array(
     *,
     fill_value: float | None = None,
 ) -> np.ndarray:
+    """Extract a possibly out-of-bounds patch, padding with fill value where needed."""
     array_shape = tuple(int(dim) for dim in array.shape)
     spatial_axis_offset = _get_spatial_axis_offset(array_shape)
     image_shape_xyz = _get_spatial_shape(array_shape)
@@ -587,6 +610,7 @@ def _extract_patch_from_array(
 def _resolve_normalization(
     normalization: NormalizationConfig | list[NormalizationConfig] | None,
 ) -> NormalizationConfig | list[NormalizationConfig]:
+    """Normalize optional normalization config to an explicit runtime value."""
     return {"type": "none"} if normalization is None else normalization
 
 
@@ -596,6 +620,7 @@ def _load_split_cases(
     group: Literal["train", "val", "test"],
     split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
 ) -> list[str]:
+    """Load case names for one fold and split group from split file."""
     splits_file = get_split_file_path(src_path, split_file_name)
     with splits_file.open("r") as file:
         splits = json.load(file)
@@ -610,6 +635,7 @@ def _get_image_path(
     case_name: str,
     image_format: Literal["nifti", "blosc2"],
 ) -> Path:
+    """Build the image path for a case and image format."""
     suffixes = {
         "nifti": ".nii.gz",
         "blosc2": ".b2nd",
@@ -622,6 +648,7 @@ def _get_mask_path(
     case_name: str,
     image_format: Literal["nifti", "blosc2"],
 ) -> Path | None:
+    """Return the first existing mask path for a case, preferring format-specific suffixes."""
     preferred_suffixes = {
         "nifti": (".nii.gz", ".b2nd"),
         "blosc2": (".b2nd", ".nii.gz"),
@@ -635,6 +662,7 @@ def _get_mask_path(
 
 
 def _load_nifti_array(image_path: Path) -> np.ndarray:
+    """Load image data from a NIfTI file."""
     nifti_image = nib.loadsave.load(image_path)
     if not isinstance(nifti_image, nib.nifti1.Nifti1Image):
         raise TypeError
@@ -642,6 +670,7 @@ def _load_nifti_array(image_path: Path) -> np.ndarray:
 
 
 def _array_to_runtime_tensor(array: np.ndarray) -> torch.Tensor:
+    """Convert array data to contiguous tensor and flip to runtime axis order."""
     if array.ndim == 4 and array.shape[0] == 1:
         array = array[0]
     tensor = torch.from_numpy(np.ascontiguousarray(array))
@@ -653,6 +682,7 @@ def _load_image_array(
     case_name: str,
     image_format: Literal["nifti", "blosc2"],
 ) -> np.ndarray:
+    """Load a case image array from NIfTI or blosc2 storage."""
     image_path = _get_image_path(src_path, case_name, image_format)
     if not image_path.exists():
         msg = f"Image path does not exists: {image_path}. Is your dataset format correct?"
@@ -666,6 +696,7 @@ def _load_image_array(
 
 
 def _load_labels(src_path: Path, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load object labels and return classes plus relative xyzwhd boxes."""
     entries = load_case_object_labels(src_path / "labels", case_name)
     if not entries:
         labels = np.zeros((0, 7), dtype=np.float32)
@@ -681,6 +712,7 @@ def _load_foreground_case_bboxes(
     src_path: Path,
     cases: list[str],
 ) -> dict[str, torch.Tensor]:
+    """Collect per-case bounding boxes for cases containing foreground objects."""
     foreground_case_bboxes: dict[str, torch.Tensor] = {}
     for case_name in cases:
         _classes, bboxes = _load_labels(src_path, case_name)
@@ -693,12 +725,14 @@ def _compute_foreground_oversample_count(
     num_cases: int,
     foreground_oversampling: float,
 ) -> int:
+    """Compute synthetic sample count needed to achieve target foreground oversampling."""
     if foreground_oversampling <= 0 or num_cases == 0:
         return 0
     return math.ceil((num_cases * foreground_oversampling) / (1.0 - foreground_oversampling))
 
 
 def _validate_foreground_oversampling(foreground_oversampling: float) -> None:
+    """Validate foreground oversampling ratio is in [0, 1)."""
     if not 0.0 <= foreground_oversampling < 1.0:
         msg = f"foreground_oversampling must be in the range [0, 1), got {foreground_oversampling}."
         raise ValueError(msg)
@@ -708,6 +742,7 @@ def _compute_background_keep_count(
     num_background_cases: int,
     background_undersampling: float,
 ) -> int:
+    """Compute number of background cases to keep after undersampling."""
     if background_undersampling <= 0.0 or num_background_cases == 0:
         return num_background_cases
     if background_undersampling >= 1.0:
@@ -716,6 +751,7 @@ def _compute_background_keep_count(
 
 
 class BackgroundUndersamplingSampler(Sampler[int]):
+    """Sampler that undersamples background-only cases while preserving foreground coverage."""
     def __init__(
         self,
         dataset: WholeImageDataset | PatchWiseDataset,
@@ -726,6 +762,7 @@ class BackgroundUndersamplingSampler(Sampler[int]):
         num_replicas: int = 1,
         rank: int = 0,
     ) -> None:
+        """Initialize an index sampler with background undersampling support."""
         if num_replicas < 1:
             msg = f"num_replicas must be >= 1, got {num_replicas}."
             raise ValueError(msg)
@@ -742,9 +779,11 @@ class BackgroundUndersamplingSampler(Sampler[int]):
         self.epoch = 0
 
     def set_epoch(self, epoch: int) -> None:
+        """Set epoch used to seed deterministic index generation."""
         self.epoch = int(epoch)
 
     def _build_epoch_indices(self) -> list[int]:
+        """Build active indices for the current epoch after sampling policies."""
         random_generator = random.Random(self.seed + self.epoch)
         active_indices = list(self.dataset.foreground_case_indices)
         background_case_indices = list(self.dataset.background_case_indices)
@@ -774,6 +813,7 @@ class BackgroundUndersamplingSampler(Sampler[int]):
         return active_indices
 
     def __iter__(self) -> Iterator[int]:
+        """Yield this rank's sampled indices, padding for distributed splits."""
         indices = self._build_epoch_indices()
         if self.num_replicas == 1:
             return iter(indices)
@@ -789,6 +829,7 @@ class BackgroundUndersamplingSampler(Sampler[int]):
         return iter(rank_indices)
 
     def __len__(self) -> int:
+        """Return number of indices yielded per epoch for this rank."""
         active_count = (
             len(self.dataset.foreground_case_indices)
             + _compute_background_keep_count(
@@ -809,6 +850,7 @@ def _sample_patch_center_from_bbox(
     image_shape_xyz: tuple[int, int, int],
     rng: random.Random | None = None,
 ) -> tuple[int, int, int]:
+    """Sample a patch center coordinate from within a bounding box extent."""
     bbox_tensor = bbox.to(dtype=torch.float32).unsqueeze(0)
     image_scale = bbox_tensor.new_tensor((*image_shape_xyz, *image_shape_xyz))
     box_xyzxyz = xyzwhd2xyzxyz(bbox_tensor * image_scale)[0]
@@ -837,6 +879,7 @@ def _load_mask_array(
     *,
     load_masks: bool,
 ) -> np.ndarray | None:
+    """Load a case mask array when enabled, supporting NIfTI and blosc2 storage."""
     if not load_masks:
         return None
 
@@ -862,6 +905,7 @@ def _detect_image_format(
     src_path: Path,
     cases: list[str],
 ) -> Literal["nifti", "blosc2"]:
+    """Detect image storage format by probing case files on disk."""
     for case_name in cases:
         nifti_path = src_path / "images" / f"{case_name}.nii.gz"
         if nifti_path.exists():
@@ -882,6 +926,7 @@ def _load_case_index(
     group: Literal["train", "val", "test"],
     split_file_name: str = DEFAULT_SPLIT_FILE_NAME,
 ) -> tuple[list[str], Literal["nifti", "blosc2"]]:
+    """Load split case names and detect their image storage format."""
     cases = _load_split_cases(src_path, fold, group, split_file_name)
     return cases, _detect_image_format(src_path, cases)
 
@@ -893,6 +938,7 @@ def _augment_sample(
     config: DefaultConfig | None,
     patch_size: PatchSize,
 ) -> Sample:
+    """Apply configured CPU-side augmentations to a sample when enabled."""
     if not augment:
         return sample
 
@@ -947,6 +993,7 @@ def _load_labels_and_masks(
     load_masks: bool,
     patch_size: PatchSize,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Load labels and optional masks, resampling masks to patch resolution."""
     classes, bboxes = _load_labels(src_path, case_name)
     mask_numpy = _load_mask_array(
         src_path,
@@ -962,6 +1009,7 @@ def _load_labels_and_masks(
 
 
 def _to_image_batch(images: list[torch.Tensor]) -> ImageBatch:
+    """Stack equal-sized images or return tuple for variable-sized samples."""
     if not images:
         msg = "Expected at least one image to collate."
         raise ValueError(msg)
@@ -981,6 +1029,7 @@ def preprocess_batch_images(
     preprocessing_device: Literal["cpu", "gpu"],
     non_blocking: bool = True,
 ) -> Batch:
+    """Move batch images to device and optionally preprocess them on GPU."""
     images = batch["img"]
     if preprocessing_device == "cpu":
         if isinstance(images, torch.Tensor):
@@ -1028,6 +1077,7 @@ def preprocess_batch_images(
 
 
 def _collate_samples(batch: list[Sample]) -> Batch:
+    """Collate a list of Sample records into a Batch dictionary."""
     with torch.no_grad():
         return {
             "img": _to_image_batch([sample["image"] for sample in batch]),
@@ -1055,6 +1105,7 @@ def _sample_patch_center_for_axis(
     crop_dim: int | None = None,
     allow_overhang: bool = False,
 ) -> int:
+    """Sample one axis coordinate for patch center with optional overhang support."""
     if patch_dim >= image_dim:
         return image_dim // 2
 
@@ -1084,6 +1135,7 @@ def _sample_patch_center(
     crop_shape_xyz: tuple[int, int, int] | None = None,
     allow_overhang: bool = False,
 ) -> tuple[int, int, int]:
+    """Sample xyz patch center coordinates under configured boundary constraints."""
     if allow_overhang and crop_shape_xyz is None:
         msg = "crop_shape_xyz must be provided when allow_overhang=True"
         raise ValueError(msg)
@@ -1103,6 +1155,7 @@ def _sample_patch_center(
 
 
 def _get_chunked_blosc2_shape(store_path: Path) -> tuple[int, int, int]:
+    """Read spatial shape metadata from a chunked blosc2 store."""
     blosc2.set_nthreads(1)
     return _get_spatial_shape(
         tuple(int(dim) for dim in blosc2.open(str(store_path), mode="r").shape)
@@ -1110,6 +1163,7 @@ def _get_chunked_blosc2_shape(store_path: Path) -> tuple[int, int, int]:
 
 
 def _get_patchwise_training_extraction_size(patch_size: PatchSize) -> PatchSize:
+    """Return enlarged extraction size used before patch-wise training augmentations."""
     return PatchSize(
         x=math.ceil(patch_size.x * PATCHWISE_TRAIN_EXTRACTION_SCALE),
         y=math.ceil(patch_size.y * PATCHWISE_TRAIN_EXTRACTION_SCALE),
@@ -1125,6 +1179,7 @@ def _load_chunked_blosc2_patch(
     dtype: np.dtype,
     fill_value: float | None = None,
 ) -> np.ndarray:
+    """Load a clipped patch from chunked blosc2 storage with optional padding fill."""
     blosc2.set_nthreads(1)
     store = blosc2.open(str(store_path), mode="r")
 
@@ -1167,6 +1222,7 @@ def _crop_boxes_to_patch(
     patch_shape_xyz: tuple[int, int, int],
     min_box_crop_fraction: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Crop boxes into patch coordinates and return filtered classes and boxes."""
     cropped_classes, cropped_bboxes, _ = _crop_boxes_to_patch_with_keep(
         classes,
         bboxes,
@@ -1186,6 +1242,7 @@ def _crop_boxes_to_patch_with_keep(
     patch_shape_xyz: tuple[int, int, int],
     min_box_crop_fraction: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Crop boxes to patch space and return keep mask for aligned tensor filtering."""
     if bboxes.numel() == 0:
         return classes, bboxes, torch.zeros((0,), dtype=torch.bool, device=classes.device)
 
@@ -1219,6 +1276,7 @@ def _filter_instance_masks(
     masks: torch.Tensor | None,
     keep: torch.Tensor,
 ) -> torch.Tensor | None:
+    """Filter instance masks using keep mask, preserving None for empty outcomes."""
     if masks is None:
         return None
     if masks.shape[0] != keep.shape[0]:
@@ -1238,6 +1296,7 @@ def _load_patch_mask(
     *,
     load_masks: bool,
 ) -> torch.Tensor | None:
+    """Load mask patch for one case and convert it to uint8 runtime tensor format."""
     mask_path = _get_mask_path(src_path, case_name, image_format)
     if not load_masks or mask_path is None:
         return None
@@ -1272,6 +1331,7 @@ def _load_patch_mask(
 
 
 class WholeImageDataset(Dataset[Sample], Sized):
+    """Dataset that loads full preprocessed volumes per sample."""
     def __init__(  # noqa: PLR0913
         self,
         src_path: Path,
@@ -1290,6 +1350,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         split_file_name: str | None = None,
         config: DefaultConfig | None = None,
     ) -> None:
+        """Initialize a whole-image dataset with optional sampling and preprocessing controls."""
         super().__init__()
         _validate_foreground_oversampling(foreground_oversampling)
         self.src_path = src_path
@@ -1352,26 +1413,33 @@ class WholeImageDataset(Dataset[Sample], Sized):
             )
 
     def _get_image_path(self, case_name: str) -> Path:
+        """Return the image path for a case."""
         return _get_image_path(self.src_path, case_name, self.image_format)
 
     def _get_mask_path(self, case_name: str) -> Path | None:
+        """Return the mask path for a case when present."""
         return _get_mask_path(self.src_path, case_name, self.image_format)
 
     @staticmethod
     def _load_nifti_array(image_path: Path) -> np.ndarray:
+        """Load a NIfTI image from disk as a numpy array."""
         return _load_nifti_array(image_path)
 
     @staticmethod
     def _array_to_runtime_tensor(array: np.ndarray) -> torch.Tensor:
+        """Convert an array to the runtime tensor layout."""
         return _array_to_runtime_tensor(array)
 
     def _load_image_array(self, case_name: str) -> np.ndarray:
+        """Load the case image array in the dataset image format."""
         return _load_image_array(self.src_path, case_name, self.image_format)
 
     def _load_labels(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Load classes and bounding boxes for a case."""
         return _load_labels(self.src_path, case_name)
 
     def _load_mask_array(self, case_name: str) -> np.ndarray | None:
+        """Load the raw mask array for a case when masks are enabled."""
         return _load_mask_array(
             self.src_path,
             case_name,
@@ -1380,21 +1448,27 @@ class WholeImageDataset(Dataset[Sample], Sized):
         )
 
     def _load_image_labels(self, case_name: str) -> dict[str, ImageLabelValue]:
+        """Load image-level labels for a case."""
         return _load_image_labels(self.src_path, case_name, self.image_label_tasks)
 
     def _load_tabular_inputs(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Load tabular values and mask for a case."""
         return _load_tabular_inputs(self.src_path, case_name, self.tabular_feature_names)
 
     def _detect_image_format(self) -> Literal["nifti", "blosc2"]:
+        """Detect the active image storage format for this dataset."""
         return _detect_image_format(self.src_path, self.cases)
 
     def __len__(self) -> int:
+        """Return dataset length including foreground oversamples."""
         return len(self.cases) + self.foreground_oversample_count
 
     def _sample_foreground_case(self) -> str:
+        """Randomly sample one foreground case name."""
         return random.choice(self.foreground_cases)
 
     def _resolve_case_name(self, index: int) -> str:
+        """Resolve dataset index to case name, including oversampled indices."""
         dataset_length = len(self)
         if index < 0 or index >= dataset_length:
             raise IndexError(index)
@@ -1403,10 +1477,12 @@ class WholeImageDataset(Dataset[Sample], Sized):
         return self._sample_foreground_case()
 
     def __getitem__(self, index: int) -> Sample:
+        """Load and augment a sample for the given index."""
         with torch.no_grad():
             return self.augmentation(self.load_image_label_and_mask(index))
 
     def augmentation(self, sample: Sample) -> Sample:
+        """Apply configured augmentation pipeline to a sample."""
         return _augment_sample(
             sample,
             augment=self.augment,
@@ -1415,6 +1491,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         )
 
     def load_image_label_and_mask(self, index: int) -> Sample:
+        """Load image, labels, masks, and metadata for a dataset index."""
         case_name = self._resolve_case_name(index)
 
         image = self.load_image(case_name)
@@ -1444,12 +1521,14 @@ class WholeImageDataset(Dataset[Sample], Sized):
         )
 
     def load_image(self, case_name: str) -> torch.Tensor:
+        """Load a case image as a runtime tensor."""
         image = self._load_image_array(case_name)
         return _array_to_runtime_tensor(image)
 
     def resample_and_normalize(
         self, image: torch.Tensor
     ) -> tuple[torch.Tensor, tuple[int, int, int], tuple[int, int, int]]:
+        """Resample and normalize an image unless GPU preprocessing is deferred."""
         if self.preprocessing_device == "gpu":
             source_shape = tuple(int(dim) for dim in image.shape[-3:])
             return image, source_shape, source_shape
@@ -1466,6 +1545,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
     def load_labels_and_masks(
         self, case_name: str
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Load detection labels and optional masks for a case."""
         return _load_labels_and_masks(
             self.src_path,
             case_name,
@@ -1476,10 +1556,12 @@ class WholeImageDataset(Dataset[Sample], Sized):
 
     @staticmethod
     def collate_fn(batch: list[Sample]) -> Batch:
+        """Collate sample dictionaries into a batch dictionary."""
         return _collate_samples(batch)
 
 
 class PatchWiseDataset(Dataset[Sample], Sized):
+    """Dataset that samples spatial patches from case volumes on demand."""
     def __init__(  # noqa: PLR0913
         self,
         src_path: Path,
@@ -1500,6 +1582,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         deterministic_sampling: bool | None = None,
         sampling_seed: int | None = None,
     ) -> None:
+        """Initialize a patch-wise dataset with configurable sampling behavior."""
         super().__init__()
         _validate_foreground_oversampling(foreground_oversampling)
         self.src_path = src_path
@@ -1566,13 +1649,16 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             )
 
     def __len__(self) -> int:
+        """Return dataset length including foreground oversamples."""
         return len(self.cases) + self.foreground_oversample_count
 
     def __getitem__(self, index: int) -> Sample:
+        """Load and augment one patch sample for an index."""
         with torch.no_grad():
             return self.augmentation(self.load_image_label_and_mask(index))
 
     def augmentation(self, sample: Sample) -> Sample:
+        """Apply configured augmentation pipeline to a sample."""
         return _augment_sample(
             sample,
             augment=self.augment,
@@ -1582,12 +1668,15 @@ class PatchWiseDataset(Dataset[Sample], Sized):
 
     @staticmethod
     def collate_fn(batch: list[Sample]) -> Batch:
+        """Collate sample dictionaries into a batch dictionary."""
         return _collate_samples(batch)
 
     def _load_image_labels(self, case_name: str) -> dict[str, ImageLabelValue]:
+        """Load image-level labels for a case."""
         return _load_image_labels(self.src_path, case_name, self.image_label_tasks)
 
     def _load_tabular_inputs(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Load tabular values and mask for a case."""
         return _load_tabular_inputs(self.src_path, case_name, self.tabular_feature_names)
 
     def _sample_patch_center(
@@ -1596,6 +1685,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_shape_xyz: tuple[int, int, int],
         rng: random.Random | None = None,
     ) -> tuple[int, int, int]:
+        """Sample a patch center in image space for the configured crop mode."""
         return _sample_patch_center(
             image_shape_xyz,
             patch_shape_xyz,
@@ -1610,9 +1700,11 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         image_shape_xyz: tuple[int, int, int],
         rng: random.Random | None = None,
     ) -> tuple[int, int, int]:
+        """Sample a patch center constrained to a foreground box."""
         return _sample_patch_center_from_bbox(bbox, image_shape_xyz, rng)
 
     def _get_index_rng(self, index: int) -> random.Random | None:
+        """Return a deterministic RNG for index-based sampling when enabled."""
         if not self.deterministic_sampling:
             return None
 
@@ -1629,6 +1721,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         self,
         rng: random.Random | None = None,
     ) -> tuple[str, torch.Tensor]:
+        """Sample a foreground case and one of its boxes."""
         random_generator = random if rng is None else rng
         case_name = random_generator.choice(self.foreground_cases)
         case_bboxes = self.foreground_case_bboxes[case_name]
@@ -1640,6 +1733,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         index: int,
         rng: random.Random | None = None,
     ) -> tuple[str, torch.Tensor | None]:
+        """Resolve index to a case and optional foreground target box."""
         dataset_length = len(self)
         if index < 0 or index >= dataset_length:
             raise IndexError(index)
@@ -1653,6 +1747,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_shape_xyz: tuple[int, int, int],
         rng: random.Random | None,
     ) -> tuple[int, int, int]:
+        """Sample a patch center for one index with optional deterministic RNG."""
         if rng is None:
             return self._sample_patch_center(image_shape_xyz, patch_shape_xyz)
         return self._sample_patch_center(image_shape_xyz, patch_shape_xyz, rng)
@@ -1663,11 +1758,13 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         image_shape_xyz: tuple[int, int, int],
         rng: random.Random | None,
     ) -> tuple[int, int, int]:
+        """Sample a bbox-guided patch center for one index."""
         if rng is None:
             return self._sample_patch_center_from_bbox(bbox, image_shape_xyz)
         return self._sample_patch_center_from_bbox(bbox, image_shape_xyz, rng)
 
     def _get_chunked_image_shape(self, case_name: str) -> tuple[int, int, int]:
+        """Read spatial shape for a chunked image store."""
         return _get_chunked_blosc2_shape(
             _get_image_path(self.src_path, case_name, self.image_format)
         )
@@ -1680,6 +1777,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         *,
         dtype: np.dtype,
     ) -> np.ndarray:
+        """Load a patch from chunked blosc2 storage with dtype-aware fill behavior."""
         return _load_chunked_blosc2_patch(
             store_path,
             patch_origin_xyz,
@@ -1694,6 +1792,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_origin_xyz: tuple[int, int, int],
         patch_shape_xyz: tuple[int, int, int],
     ) -> np.ndarray:
+        """Load a chunked image patch for a case."""
         return self._load_chunked_blosc2_patch(
             _get_image_path(self.src_path, case_name, self.image_format),
             patch_origin_xyz,
@@ -1707,6 +1806,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_origin_xyz: tuple[int, int, int],
         patch_shape_xyz: tuple[int, int, int],
     ) -> np.ndarray:
+        """Load a chunked mask patch from storage."""
         return self._load_chunked_blosc2_patch(
             mask_path,
             patch_origin_xyz,
@@ -1723,6 +1823,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_origin_xyz: tuple[int, int, int],
         patch_shape_xyz: tuple[int, int, int],
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Crop boxes to patch coordinates and drop invalid boxes."""
         return _crop_boxes_to_patch(
             classes,
             bboxes,
@@ -1741,6 +1842,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_origin_xyz: tuple[int, int, int],
         patch_shape_xyz: tuple[int, int, int],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Crop labels to patch coordinates and filter masks by kept instances."""
         cropped_classes, cropped_bboxes, keep = _crop_boxes_to_patch_with_keep(
             classes,
             bboxes,
@@ -1757,6 +1859,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         patch_origin_xyz: tuple[int, int, int],
         patch_shape_xyz: tuple[int, int, int],
     ) -> torch.Tensor | None:
+        """Load a patch-aligned mask tensor for a case when available."""
         return _load_patch_mask(
             self.src_path,
             case_name,
@@ -1767,6 +1870,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         )
 
     def load_image_label_and_mask(self, index: int) -> Sample:
+        """Load one patch sample with image data, labels, masks, and metadata."""
         rng = self._get_index_rng(index)
         case_name, foreground_bbox = self._resolve_sampling_target(index, rng)
         patch_shape_xyz = self.extraction_patch_size.get_xyz()
