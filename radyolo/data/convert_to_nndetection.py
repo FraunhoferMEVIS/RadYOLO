@@ -7,7 +7,6 @@ import logging
 import os
 import pickle
 import re
-import shutil
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -95,14 +94,6 @@ def _read_splits(
 
 def _ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
-
-
-def _copy_image_to_nndet(image_path: Path, out_images_dir: Path, case_id: str) -> Path:
-    out_path = out_images_dir / f"{case_id}_0000.nii.gz"
-    _ensure_dir(out_images_dir)
-    # Prefer copying over re-saving to keep headers identical
-    shutil.copy2(image_path, out_path)
-    return out_path
 
 
 def _labels_for_case(

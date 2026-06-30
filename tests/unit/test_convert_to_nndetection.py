@@ -12,7 +12,6 @@ from radyolo.data.convert_to_nndetection import (
     _compose_instance_seg_from_boxes,
     _compose_instance_seg_from_masks,
     _convert_one_case,
-    _copy_image_to_nndet,
     _labels_for_case,
     _load_dataset_names,
     _read_splits,
@@ -137,20 +136,15 @@ def test_compose_instance_seg_from_boxes_skips_degenerate_boxes() -> None:
     assert np.count_nonzero(labelmap == 2) > 0
 
 
-def test_copy_image_and_write_label_files(tmp_path: Path) -> None:
-    image_path = tmp_path / "src.nii.gz"
+def test_write_label_files(tmp_path: Path) -> None:
+    ref_path = tmp_path / "caseX_0000.nii.gz"
     data = np.ones((5, 5, 5), dtype=np.float32)
-    _write_nifti(image_path, data)
-
-    out_images_dir = tmp_path / "out_images"
-    copied = _copy_image_to_nndet(image_path, out_images_dir, "caseX")
-    assert copied.exists()
-    assert copied.name == "caseX_0000.nii.gz"
+    _write_nifti(ref_path, data)
 
     out_labels_dir = tmp_path / "out_labels"
     labelmap = np.zeros((5, 5, 5), dtype=np.uint16)
     labelmap[1:3, 1:3, 1:3] = 1
-    ref_nii = nib.load(copied)
+    ref_nii = nib.load(ref_path)
     _write_label_files(out_labels_dir, "caseX", labelmap, [7], ref_nii)
 
     label_path = out_labels_dir / "caseX.nii.gz"
