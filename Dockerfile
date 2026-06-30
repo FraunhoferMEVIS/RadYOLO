@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project --compile-bytecode --link-mode=copy
 
+ADD config/ /app/config
 ADD hyperparameter_tuning/ /app/hyperparameter_tuning
 ADD radyolo/ /app/radyolo
 ADD scripts/ /app/scripts
