@@ -15,6 +15,8 @@ type ImageLabelTaskType = Literal["multiclass", "survival"]
 
 @dataclass(frozen=True)
 class ImageLabelTaskSpec:
+    """Specification for one image-level prediction task."""
+
     type: ImageLabelTaskType
     classes: dict[int, str] | None = None
     unit: str | None = None
@@ -28,6 +30,7 @@ class ImageLabelTaskSpec:
         *,
         task_name: str | None = None,
     ) -> ImageLabelTaskSpec:
+        """Build a task spec from checkpoint metadata payload."""
         if isinstance(raw_spec, cls):
             return raw_spec
         if not isinstance(raw_spec, Mapping):
@@ -62,6 +65,7 @@ class ImageLabelTaskSpec:
 
 
 def _coerce_int_keys(mapping: object, *, context: str) -> dict[int, str]:
+    """Validate and coerce mapping keys to integer class IDs."""
     if not isinstance(mapping, dict):
         msg = f"{context} must be a mapping of integer class ids to names."
         raise TypeError(msg)
@@ -81,6 +85,7 @@ def _coerce_int_keys(mapping: object, *, context: str) -> dict[int, str]:
 
 
 def _validate_multiclass_names(classes: dict[int, str], *, task_name: str) -> None:
+    """Ensure multiclass names use contiguous IDs starting at 0."""
     if not classes:
         msg = f"image_label_tasks.{task_name}.classes must not be empty."
         raise ValueError(msg)
@@ -95,6 +100,7 @@ def _validate_multiclass_names(classes: dict[int, str], *, task_name: str) -> No
 
 
 def load_image_label_task_specs(dataset_path: Path) -> dict[str, ImageLabelTaskSpec]:
+    """Load and validate image-label task specs from dataset.yaml."""
     dataset_yaml_path = Path(dataset_path) / "dataset.yaml"
     if not dataset_yaml_path.exists():
         return {}
@@ -165,6 +171,7 @@ def resolve_survival_task_specs(
     *,
     num_bins: int,
 ) -> dict[str, ImageLabelTaskSpec]:
+    """Resolve missing survival bin thresholds from dataset labels."""
     if num_bins < 1:
         msg = f"Survival task bin count must be at least 1, got {num_bins}."
         raise ValueError(msg)
@@ -222,6 +229,7 @@ def resolve_survival_task_specs(
 
 
 def _validate_numeric_scalar(value: object, *, context: str) -> int | float:
+    """Validate a finite numeric scalar and return the original value."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         msg = f"{context} must be a numeric scalar."
         raise TypeError(msg)
@@ -233,6 +241,7 @@ def _validate_numeric_scalar(value: object, *, context: str) -> int | float:
 
 
 def _validate_boolean_scalar(value: object, *, context: str) -> bool:
+    """Validate a boolean scalar value."""
     if not isinstance(value, bool):
         msg = f"{context} must be a boolean scalar."
         raise TypeError(msg)
@@ -244,6 +253,7 @@ def _coerce_image_label_value(
     raw_value: object,
     task_spec: ImageLabelTaskSpec | None,
 ) -> ImageLabelValue:
+    """Coerce one raw image-label value according to optional task spec."""
     context = f"labels_image task '{task_name}'"
     if raw_value is None:
         return None
@@ -277,6 +287,7 @@ def load_case_image_labels(
     case_name: str,
     task_specs: dict[str, ImageLabelTaskSpec] | None = None,
 ) -> dict[str, ImageLabelValue]:
+    """Load and validate per-case image labels from labels_image/<case>.json."""
     labels_image_path = Path(dataset_path) / "labels_image" / f"{case_name}.json"
     if not labels_image_path.exists():
         return {}
