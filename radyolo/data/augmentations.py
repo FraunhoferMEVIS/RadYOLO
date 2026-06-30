@@ -20,11 +20,18 @@ if TYPE_CHECKING:
 
 
 def bbox_iov(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """Returns the intersection over box2 volume given box1, box2. Boxes are z1x1y1z2x2y2.
+    """Compute intersection-over-volume (IoV) of one box against many boxes.
 
-    box1:       np.array of shape(6)
-    box2:       np.array of shape(nx6)
-    returns:    np.array of shape(n)
+    Boxes are expected in ``[x1, y1, z1, x2, y2, z2]`` voxel coordinates.
+
+    Args:
+        box1 (torch.Tensor): Reference box with shape ``(6,)``.
+        box2 (torch.Tensor): Candidate boxes with shape ``(N, 6)``.
+        eps (float): Small constant added to denominator for numerical stability.
+
+    Returns:
+        torch.Tensor: IoV values with shape ``(N,)``, defined as
+            ``intersection(box1, box2_i) / volume(box2_i)``.
     """
     box2 = box2.T
 
@@ -50,6 +57,21 @@ def apply_tabular_mask_augmentation(
     batch: dict[str, torch.Tensor | object],
     drop_probability: float,
 ) -> dict[str, torch.Tensor | object]:
+    """Randomly mask tabular features in-place for regularization.
+
+    This augmentation requires ``batch`` to contain both ``"tabular_values"`` and
+    ``"tabular_mask"`` tensors of equal shape. A Bernoulli mask is sampled per
+    element with probability ``drop_probability`` and combined with the existing
+    tabular mask. Newly masked values are set to ``0.0``.
+
+    Args:
+        batch (dict[str, torch.Tensor | object]): Batch dictionary that may include
+            tabular tensors.
+        drop_probability (float): Element-wise masking probability in ``[0, 1]``.
+
+    Returns:
+        dict[str, torch.Tensor | object]: The updated batch dictionary.
+    """
     if drop_probability <= 0.0:
         return batch
     if "tabular_values" not in batch or "tabular_mask" not in batch:
@@ -77,34 +99,37 @@ def apply_tabular_mask_augmentation(
 
 
 def tensor_cutout(
-    im: torch.Tensor,
+    image: torch.Tensor,
     labels: torch.Tensor,
     masks: torch.Tensor | None,
     cutout_params: list[tuple[float, int]],
     p: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
-    """Applies image cutout augmentation https://arxiv.org/abs/1708.04552.
+    """Apply 3D cutout augmentation to an image and aligned targets.
+
+    Reference: https://arxiv.org/abs/1708.04552
 
     Args:
-        im (torch.Tensor): 3-D tensor to be augmented.
-        labels (torch.Tensor): labels corresponding to image. class x1 y1 z1 y2 y2 z2
-        masks (torch.Tensor | None): corresponding masks
-        cutout_params (list[tuple[float, int]]): a list of ordered pairs that set sizes and numbers
-            of cutout boxes. The maximum extent of the boxes is set by the first element of the
-            ordered pair. The number of boxes with that maximum extent is set by the second element
-            of the ordered pair
-        p (float, optional): probability of performing cutout augmentation. Defaults to 0.5.
+        image (torch.Tensor): Image tensor of shape ``(C, D, H, W)``.
+        labels (torch.Tensor): Bounding boxes with shape ``(N, 7)`` in
+            ``[class, x1, y1, z1, x2, y2, z2]`` format.
+        masks (torch.Tensor | None): Optional instance masks aligned with ``labels``.
+        cutout_params (list[tuple[float, int]]): Sequence of
+            ``(max_extent_fraction, repeats)`` settings controlling cutout region size
+            and number of sampled regions.
+        p (float): Probability of applying this augmentation.
 
     Returns:
-        tuple[torch.Tensor, torch.Tensor]: A tuple of the augmented image and labels.
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+            ``(augmented_image, augmented_labels, augmented_masks)``.
     """
     if random.random() >= p:
-        return im, labels, masks
+        return image, labels, masks
 
-    d, h, w = im.shape[1:]
+    d, h, w = image.shape[1:]
 
-    image_min = torch.min(im).item()
-    image_max = torch.max(im).item()
+    image_min = torch.min(image).item()
+    image_max = torch.max(image).item()
     for scale in (scale for scale, num_repeats in cutout_params for _ in range(num_repeats)):
         mask_d = random.randint(1, int(d * scale))  # create random masks
         mask_h = random.randint(1, int(h * scale))
@@ -120,7 +145,7 @@ def tensor_cutout(
 
         # apply random greyscale mask
         # images scaled between 0 and 1 after being returned by the dataset
-        im[:, zmin:zmax, ymin:ymax, xmin:xmax] = random.uniform(image_min, image_max)
+        image[:, zmin:zmax, ymin:ymax, xmin:xmax] = random.uniform(image_min, image_max)
 
         # remove obscured labels
         if len(labels):
@@ -133,7 +158,7 @@ def tensor_cutout(
             if masks is not None and keep_mask.logical_not().any():
                 masks = masks[keep_mask]
 
-    return im, labels, masks
+    return image, labels, masks
 
 
 def random_zoom(
@@ -147,24 +172,26 @@ def random_zoom(
     padding_fill_value: float = 0,
     uniform_zoom: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
-    """Randomly zooms in or out of a random part of the input image.
+    """Randomly zoom in or out and update aligned boxes/masks.
 
     Args:
-        image (torch.Tensor): 3-D tensor to be augmented.
-        labels (torch.Tensor): Llbels corresponding to image. class x1 y1 z1 x2 y2 z2
-        masks (torach.Tensor | None): corresponding masks
-        max_zoom (float, optional): maximum edge length multiplier. Defaults to 1.5.
-        min_zoom (float, optional): minimum edge length multiplier. Defaults to 0.7.
-        p (float, optional): probability of zooming the input. Defaults to 0.5.
-        out_zoom_padding (str): Padding strategy when zooming out ("random" or "constant").
-        padding_fill_value (float): Fill value to use for constant padding.
-        uniform_zoom (bool): If True (default) a single zoom factor is sampled and applied to all
-            spatial dimensions. If False, an independent zoom factor is sampled for each spatial
-            dimension (depth, height, width) uniformly from [min_zoom, max_zoom].
+        image (torch.Tensor): Image tensor of shape ``(C, D, H, W)``.
+        labels (torch.Tensor): Bounding boxes with shape ``(N, 7)`` in
+            ``[class, x1, y1, z1, x2, y2, z2]`` format.
+        masks (torch.Tensor | None): Optional instance masks aligned with ``labels``.
+        max_zoom (float): Upper bound of zoom factor sampling interval.
+        min_zoom (float): Lower bound of zoom factor sampling interval.
+        p (float): Probability of applying this augmentation.
+        out_zoom_padding (str): Padding strategy used when ``zoom < 1``.
+            Supported values are ``"random"`` and ``"constant"``.
+        padding_fill_value (float): Constant value used when
+            ``out_zoom_padding == "constant"``.
+        uniform_zoom (bool): If ``True``, use one shared zoom factor for
+            depth/height/width. If ``False``, sample independent factors per axis.
 
     Returns:
-        image: Augmented tensor.
-        augmented_labels: Adjusted labels.
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+            ``(augmented_image, augmented_labels, augmented_masks)``.
     """
     if random.random() >= p:
         return image, labels, masks
@@ -331,16 +358,21 @@ def random_rotation(
     """Randomly rotate the 3D volume around its center with independent angles per axis.
 
     Args:
-        image: Tensor (C, D, H, W)
-        labels: Tensor (N, 7) with columns [cls, x1, y1, z1, x2, y2, z2] in absolute voxel coords.
-        masks: Optional tensor (M, D, H, W) of per-instance masks aligned with image.
-        angle_ranges: ((min_x,max_x),(min_y,max_y),(min_z,max_z)) in degrees for rotations each axis
-        p: Probability of applying the rotation.
-        keep_box_volume (bool): Reduce box size after rotation to preserve box volume
-        fill_value (float): Fill value for padded area.
+        image (torch.Tensor): Image tensor of shape ``(C, D, H, W)``.
+        labels (torch.Tensor): Bounding boxes with shape ``(N, 7)`` in
+            ``[class, x1, y1, z1, x2, y2, z2]`` format.
+        masks (torch.Tensor | None): Optional instance masks with shape
+            ``(N, D, H, W)`` aligned with ``labels``.
+        angle_ranges (tuple[tuple[float, float], tuple[float, float], tuple[float, float]]):
+            Rotation ranges in degrees for x/y/z axes.
+        p (float): Probability of applying the rotation.
+        keep_box_volume (bool): If ``True``, isotropically shrink/expand rotated AABBs
+            to better preserve original box volume.
+        fill_value (float): Constant fill value for areas outside the sampled image grid.
 
     Returns:
-        Rotated (image, labels, masks).
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+            ``(rotated_image, rotated_labels, rotated_masks)``.
     """
     if random.random() >= p or (labels.numel() == 0 and masks is None):
         return image, labels, masks
@@ -539,18 +571,20 @@ def random_mirroring(
     mirror_axes: tuple[str] = ("z", "y", "x"),
     p: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor | None] | None]:
-    """Applies image mirroring augmentation.
+    """Randomly mirror image/targets along selected spatial axes.
 
     Args:
-        image (torch.Tensor): 3-D tensor to be augmented.
-        labels (np.ndarray): Labels corresponding to image. class x y z w h d
-        masks (torch.Tensor | None): masks corresponding to labels
-        mirror_axes (List[str]): list of axes to be randomly mirrored
-        p (float, optional): probability of performing mirroring augmentation.
+        image (torch.Tensor): Image tensor of shape ``(C, D, H, W)``.
+        labels (torch.Tensor): Label tensor expected in normalized center format
+            ``[class, x, y, z, ...]`` for mirrored coordinates.
+        masks (torch.Tensor | None): Optional masks aligned with labels.
+        mirror_axes (tuple[str]): Candidate axes to mirror. Supported labels are
+            ``"x"``, ``"y"``, and ``"z"``.
+        p (float): Probability of applying mirroring.
 
     Returns:
-        image: augmented image
-        labels: augmented labels
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+            ``(mirrored_image, mirrored_labels, mirrored_masks)``.
     """
     if random.random() >= p:
         return image, labels, masks
@@ -602,6 +636,45 @@ def batch_generators_intensity_augmentations(
     gamma_augmentation_device: Literal["cpu", "gpu"] = "cpu",
     placement: Literal["cpu", "gpu"] = "cpu",
 ) -> torch.Tensor:
+    """Apply configured intensity augmentations using batchgenerators-style transforms.
+
+    Each augmentation is applied only when both conditions are met:
+    1) its probability is greater than ``0`` and
+    2) its configured device matches ``placement``.
+
+    Args:
+        image (torch.Tensor): Image tensor of shape ``(C, D, H, W)``.
+        do_intensity_augmentations_per_channel (bool): If ``True``, sample
+            transform parameters independently per channel.
+        noise_prob (float): Probability for Gaussian noise augmentation.
+        noise_variance (tuple[float, float]): Variance sampling range for noise.
+        noise_augmentation_device (Literal["cpu", "gpu"]): Execution placement for noise.
+        blur_prob (float): Probability for Gaussian blur augmentation.
+        blur_sigma (tuple[float, float]): Sigma sampling range for blur.
+        blur_augmentation_device (Literal["cpu", "gpu"]): Execution placement for blur.
+        mult_brightness_prob (float): Probability for multiplicative brightness.
+        mult_brightness_range (tuple[float, float]): Multiplicative factor range.
+        mult_brightness_augmentation_device (Literal["cpu", "gpu"]): Execution placement.
+        add_brightness_prob (float): Probability for additive brightness.
+        add_brightness_mu (float): Mean of additive brightness shift.
+        add_brightness_sigma (float): Standard deviation of additive brightness shift.
+        add_brightness_augmentation_device (Literal["cpu", "gpu"]): Execution placement.
+        contrast_prob (float): Probability for contrast augmentation.
+        contrast_range (tuple[float, float]): Contrast factor range.
+        contrast_augmentation_device (Literal["cpu", "gpu"]): Execution placement.
+        lowres_prob (float): Probability for low-resolution simulation.
+        lowres_scale (tuple[float, float]): Downsampling scale range.
+        lowres_augmentation_device (Literal["cpu", "gpu"]): Execution placement.
+        gamma_prob (float): Probability for gamma augmentation.
+        gamma_range (tuple[float, float]): Gamma factor range.
+        gamma_p_invert (float): Probability of intensity inversion before gamma.
+        gamma_p_retain_stats (float): Probability of retaining original intensity statistics.
+        gamma_augmentation_device (Literal["cpu", "gpu"]): Execution placement.
+        placement (Literal["cpu", "gpu"]): Current execution placement.
+
+    Returns:
+        torch.Tensor: Augmented image tensor.
+    """
     synchronize_channels = not do_intensity_augmentations_per_channel
     if noise_augmentation_device == placement and noise_prob > 0:
         image = gaussian_noise_augmentation(
@@ -856,13 +929,14 @@ def gamma_augmentation(
 def ensure_non_zero_box_extents(
     labels: torch.Tensor,
 ) -> torch.Tensor:
-    """Ensures bounding box extents are non-zero, which would cause issues in IoU computation.
+    """Ensure box size components are at least one voxel.
 
     Args:
-        labels (torch.Tensor): bounding boxes. class x y z w h d
+        labels (torch.Tensor): Bounding boxes where columns ``4:`` are spatial extents
+            (for example ``[class, x, y, z, w, h, d]``).
 
     Returns:
-        torch.Tensor: augmented labels
+        torch.Tensor: Labels with non-zero extents.
     """
     if labels.shape[0] == 0:
         return labels
@@ -880,14 +954,15 @@ def random_channel_dropout(
     """Drop (zero-out or constant-fill) at most one channel based on per-channel probabilities.
 
     Args:
-        image: (C, D, H, W) tensor.
-        drop_probabilities: per-channel independent probabilities. Only one channel can be dropped;
-            if multiple trigger, one is chosen proportionally to their probabilities.
-        p: Global probability to attempt a dropout event at all.
-        fill_value: Value to fill the dropped channel with. If None, use channel mean.
+        image (torch.Tensor): Tensor with shape ``(C, D, H, W)``.
+        drop_probabilities (list[float] | tuple[float, ...]): Per-channel Bernoulli
+            probabilities. At most one sampled channel is dropped; if multiple channels
+            trigger, one is chosen proportionally to their probabilities.
+        fill_value (float | None): Fill value for the dropped channel. If ``None``,
+            the channel mean is used.
 
     Returns:
-        image with possibly one channel dropped.
+        torch.Tensor: Image with at most one channel replaced.
     """
     channels = image.shape[0]
     if len(drop_probabilities) != channels:
@@ -919,6 +994,8 @@ def random_channel_dropout(
 
 
 class GINNet(nn.Module):
+    """Small randomized 3D CNN used by :func:`gin_augmentation`."""
+
     def __init__(
         self,
         hidden_layers: int,
@@ -990,7 +1067,18 @@ def gin_augmentation(
     p_kernel_size_1: float = 0.5,
     p: float = 0.2,
 ) -> torch.Tensor:
-    """Applies GIN (Global Intensity Non-linear) augumentation to input image."""
+    """Apply GIN (Global Intensity Non-linear) augmentation.
+
+    Args:
+        image (torch.Tensor): Image tensor of shape ``(C, D, H, W)``.
+        hidden_layers (int): Number of convolutional layers in the GIN network.
+        hidden_channels (int): Hidden channel width for intermediate layers.
+        p_kernel_size_1 (float): Probability of selecting a ``1x1x1`` convolution per layer.
+        p (float): Probability of applying the augmentation.
+
+    Returns:
+        torch.Tensor: Augmented image tensor.
+    """
     if random.random() >= p:
         return image
 
