@@ -566,7 +566,7 @@ class DatasetConfig(BaseModel):
         raise KeyError(msg)
 
     @property
-    def nc(self) -> int:
+    def num_classes(self) -> int:
         return len(self.names)
 
 
@@ -727,7 +727,7 @@ def _num_classes_from_dataset(yaml_config: dict[str, Any]) -> int:
         raise FileNotFoundError(msg)
 
     dataset_cfg = get_dataset_config(dataset_root_path)
-    return dataset_cfg.nc
+    return dataset_cfg.num_classes
 
 
 def input_channels_from_dataset(dataset_yaml: dict[str, Any] | DatasetConfig) -> int | None:

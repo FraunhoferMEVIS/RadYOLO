@@ -8,7 +8,7 @@ from radyolo.config.config import DatasetConfig
 def test_dataset_config_derives_nc_from_names() -> None:
     config = DatasetConfig.model_validate({"names": {0: "lesion", 1: "organ"}})
 
-    assert config.nc == 2
+    assert config.num_classes == 2
 
 
 def test_dataset_config_rejects_legacy_nc_key() -> None:

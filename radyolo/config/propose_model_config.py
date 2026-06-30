@@ -332,7 +332,7 @@ def propose_model_config(
 
     output_path = output_path or _default_output_path(dataset_path, model_scale)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    DefaultConfig.model_validate({**proposed_config, "num_classes": dataset_cfg.nc})
+    DefaultConfig.model_validate({**proposed_config, "num_classes": dataset_cfg.num_classes})
     with output_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(proposed_config, file, sort_keys=False)
 

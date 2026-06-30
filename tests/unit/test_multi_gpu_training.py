@@ -324,7 +324,7 @@ def test_trainer_wraps_training_model_for_multiple_gpus_with_ddp(
     )
 
     trainer = Trainer(cfg=config_path)
-    model = build_model_from_config(trainer.config, num_classes=trainer.data.nc)
+    model = build_model_from_config(trainer.config, num_classes=trainer.data.num_classes)
 
     wrapped = wrap_model_for_training(
         model,
@@ -364,7 +364,7 @@ def test_trainer_uses_distributed_sampler_for_training_loader(
     monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: False)
 
     trainer = Trainer(cfg=config_path)
-    model = build_model_from_config(trainer.config, num_classes=trainer.data.nc)
+    model = build_model_from_config(trainer.config, num_classes=trainer.data.num_classes)
 
     train_loader = trainer.get_dataloader(trainer.config.data, model, fold=0, mode="train")
     val_loader = trainer.get_dataloader(trainer.config.data, model, fold=0, mode="val")

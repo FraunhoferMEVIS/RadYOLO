@@ -549,7 +549,7 @@ class Trainer:
         int,
     ]:
         ckpt, model = self.setup_model(
-            self.data.nc,
+            self.data.num_classes,
         )
         model = model.to(self.device)
         self.loss = build_detection_loss_from_config(self.config, model, self.device)
