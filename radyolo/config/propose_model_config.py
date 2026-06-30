@@ -13,7 +13,6 @@ import yaml
 from radyolo.config.config import DatasetConfig, DefaultConfig
 from radyolo.config.spatial import PatchSize
 from radyolo.data.analyze_dataset import analyze_dataset as analyze_dataset_fn
-from radyolo.models.model import build_model_from_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,40 +38,6 @@ class ProposedModelConfigResult:
     output_path: Path
     fingerprint_path: Path
     analysis_ran: bool
-    estimated_memory_gb: float
-
-
-@dataclass(frozen=True)
-class PatchMemoryBreakdown:
-    feature_map_bytes: int
-    feature_gradient_bytes: int
-    parameter_bytes: int
-    parameter_gradient_bytes: int
-    optimizer_state_bytes: int
-    ema_state_bytes: int
-    input_patch_bytes: int
-    augmentation_overhead_bytes: int
-    loss_computation_bytes: int
-    buffer_bytes: int
-
-    @property
-    def total_bytes(self) -> int:
-        return (
-            self.feature_map_bytes
-            + self.feature_gradient_bytes
-            + self.parameter_bytes
-            + self.parameter_gradient_bytes
-            + self.optimizer_state_bytes
-            + self.ema_state_bytes
-            + self.input_patch_bytes
-            + self.augmentation_overhead_bytes
-            + self.loss_computation_bytes
-            + self.buffer_bytes
-        )
-
-    @property
-    def total_gb(self) -> float:
-        return self.total_bytes / float(1024**3)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -121,398 +86,6 @@ def _flatten_tensors(value: object) -> list[torch.Tensor]:
     return []
 
 
-def _build_estimation_config(  # noqa: PLR0913
-    *,
-    scale: ModelScale,
-    batch_size: int,
-    input_channels: int,
-    num_classes: int,
-    segmentation_output: bool,
-    include_stride4_output: bool,
-    prototype_masks: int,
-    data_path: Path | None = None,
-    enable_image_label_head: bool | None = None,
-    reference_config: dict[str, Any] | DefaultConfig | None = None,
-) -> DefaultConfig:
-    if isinstance(reference_config, DefaultConfig):
-        config_data = reference_config.model_dump(mode="python")
-    elif isinstance(reference_config, dict):
-        config_data = dict(reference_config)
-    else:
-        config_data = {}
-
-    image_label_head_enabled = (
-        bool(enable_image_label_head)
-        if enable_image_label_head is not None
-        else bool(config_data.get("enable_image_label_head", False))
-    )
-    # Tabular fusion is only valid when the image-label head is enabled.
-    tabular_fusion_enabled = image_label_head_enabled and bool(
-        config_data.get("enable_tabular_image_label_fusion", False)
-    )
-
-    config_data.update(
-        {
-            "input_channels": input_channels,
-            "num_classes": num_classes,
-            "model_scale": scale,
-            "data": (
-                Path(data_path).as_posix()
-                if data_path is not None
-                else config_data.get("data", ".")
-            ),
-            "fold": int(config_data.get("fold", 0)),
-            "batch_size": batch_size,
-            "patch_size": {"x": 64, "y": 64, "z": 64},
-            "normalization": config_data.get("normalization", {"type": "none"}),
-            "segmentation_output": segmentation_output,
-            "include_stride4_output": include_stride4_output,
-            "prototype_masks": prototype_masks,
-            "enable_image_label_head": image_label_head_enabled,
-            "enable_tabular_image_label_fusion": tabular_fusion_enabled,
-            "experiment_name": config_data.get("experiment_name", "memory_estimate"),
-        }
-    )
-    return DefaultConfig.model_validate(config_data)
-
-
-class ModelMemoryEstimator:
-    def __init__(self, train_config: DefaultConfig, estimated_boxes_per_image: int = 1) -> None:
-        self.train_config = train_config
-        self.estimated_boxes_per_image = max(1, estimated_boxes_per_image)
-        model = build_model_from_config(train_config).eval().to("meta")
-        model.l23.train()
-        self.model = model
-        self._feature_map_elements_cache: dict[tuple[int, int, int, int], int] = {}
-        self.parameter_bytes = sum(
-            parameter.numel() * parameter.element_size() for parameter in self.model.parameters()
-        )
-        self.buffer_bytes = sum(
-            buffer.numel() * buffer.element_size() for buffer in self.model.buffers()
-        )
-        self.optimizer_state_bytes = self._estimate_optimizer_state_bytes()
-        self.ema_state_bytes = self.parameter_bytes + self.buffer_bytes
-
-    @property
-    def activation_element_bytes(self) -> int:
-        return 2 if self.train_config.amp else 4
-
-    @property
-    def integer_element_bytes(self) -> int:
-        return torch.tensor(0, dtype=torch.int64).element_size()
-
-    @property
-    def boolean_element_bytes(self) -> int:
-        return torch.tensor(False, dtype=torch.bool).element_size()
-
-    def _estimate_optimizer_state_bytes(self) -> int:
-        optimizer_name = self.train_config.optimizer.lower()
-        state_multiplier = {
-            "sgd": 1,
-            "rmsprop": 2,
-            "adam": 2,
-            "adamax": 2,
-            "adamw": 2,
-            "nadam": 2,
-            "radam": 2,
-            "auto": 2,
-        }.get(optimizer_name, 2)
-        return self.parameter_bytes * state_multiplier
-
-    def _collect_feature_map_elements(self, patch_size_xyz: tuple[int, int, int]) -> int:
-        batch_size = self.train_config.batch_size
-        cache_key = (batch_size, *patch_size_xyz)
-        cached = self._feature_map_elements_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        unique_tensor_ids: set[int] = set()
-        feature_map_elements = 0
-
-        def record_output(
-            _module: torch.nn.Module,
-            _args: tuple[object, ...],
-            output: object,
-        ) -> None:
-            nonlocal feature_map_elements
-            for tensor in _flatten_tensors(output):
-                if id(tensor) in unique_tensor_ids:
-                    continue
-                unique_tensor_ids.add(id(tensor))
-                feature_map_elements += tensor.numel()
-
-        hooks = []
-        for name, module in self.model.named_modules():
-            if not name or "." in name:
-                continue
-            hooks.append(module.register_forward_hook(record_output))
-
-        x_size, y_size, z_size = patch_size_xyz
-        dummy_input = torch.zeros(
-            (
-                batch_size,
-                self.train_config.input_channels,
-                z_size,
-                y_size,
-                x_size,
-            ),
-            device="meta",
-        )
-
-        try:
-            with torch.no_grad():
-                model_output = self.model(dummy_input)
-            for tensor in _flatten_tensors(model_output):
-                if id(tensor) in unique_tensor_ids:
-                    continue
-                unique_tensor_ids.add(id(tensor))
-                feature_map_elements += tensor.numel()
-        finally:
-            for hook in hooks:
-                hook.remove()
-
-        self._feature_map_elements_cache[cache_key] = feature_map_elements
-        return feature_map_elements
-
-    def _estimate_augmentation_overhead_bytes(self, patch_size_xyz: tuple[int, int, int]) -> int:
-        patch_voxels = int(np.prod(np.asarray(patch_size_xyz, dtype=np.int64)))
-        image_bytes = (
-            self.train_config.batch_size
-            * patch_voxels
-            * self.train_config.input_channels
-            * self.activation_element_bytes
-        )
-        mask_bytes = 0
-        if self.train_config.segmentation_output:
-            mask_bytes = self.train_config.batch_size * patch_voxels * self.activation_element_bytes
-
-        spatial_overhead = 0
-        if self.train_config.zoom_augmentation_device == "gpu" and self.train_config.prob_zoom > 0:
-            spatial_overhead = max(spatial_overhead, image_bytes + mask_bytes)
-        if (
-            self.train_config.rotation_augmentation_device == "gpu"
-            and self.train_config.prob_rotation > 0
-        ):
-            spatial_overhead = max(spatial_overhead, image_bytes + mask_bytes)
-        if (
-            self.train_config.mirroring_augmentation_device == "gpu"
-            and self.train_config.prob_mirroring > 0
-        ):
-            spatial_overhead = max(spatial_overhead, image_bytes // 2 + mask_bytes // 2)
-        if (
-            self.train_config.cutout_augmentation_device == "gpu"
-            and self.train_config.prob_cutout > 0
-        ):
-            spatial_overhead = max(spatial_overhead, image_bytes // 2 + mask_bytes // 2)
-
-        intensity_overhead = 0
-        intensity_gpu_enabled = (
-            (
-                self.train_config.intensity_noise_augmentation_device == "gpu"
-                and self.train_config.intensity_noise_prob > 0
-            )
-            or (
-                self.train_config.intensity_blur_augmentation_device == "gpu"
-                and self.train_config.intensity_blur_prob > 0
-            )
-            or (
-                self.train_config.intensity_mult_brightness_augmentation_device == "gpu"
-                and self.train_config.intensity_mult_brightness_prob > 0
-            )
-            or (
-                self.train_config.intensity_add_brightness_augmentation_device == "gpu"
-                and self.train_config.intensity_add_brightness_prob > 0
-            )
-            or (
-                self.train_config.intensity_contrast_augmentation_device == "gpu"
-                and self.train_config.intensity_contrast_prob > 0
-            )
-            or (
-                self.train_config.intensity_lowres_augmentation_device == "gpu"
-                and self.train_config.intensity_lowres_prob > 0
-            )
-            or (
-                self.train_config.intensity_gamma_augmentation_device == "gpu"
-                and self.train_config.intensity_gamma_prob > 0
-            )
-            or (
-                self.train_config.channel_dropout_augmentation_device == "gpu"
-                and any(
-                    probability > 0
-                    for probability in self.train_config.channel_dropout_probabilities
-                )
-            )
-            or (
-                self.train_config.gin_augmentation_device == "gpu"
-                and self.train_config.gin_prob > 0
-            )
-        )
-        if intensity_gpu_enabled:
-            intensity_overhead = image_bytes
-
-        return max(spatial_overhead, intensity_overhead)
-
-    def _estimate_loss_computation_bytes(self, patch_size_xyz: tuple[int, int, int]) -> int:
-        x_size, y_size, z_size = patch_size_xyz
-        dummy_input = torch.zeros(
-            (
-                self.train_config.batch_size,
-                self.train_config.input_channels,
-                z_size,
-                y_size,
-                x_size,
-            ),
-            device="meta",
-        )
-        with torch.no_grad():
-            model_output = self.model(dummy_input)
-
-        raw_prediction_shapes = [tuple(tensor.shape) for tensor in model_output.raw_predictions]
-        total_anchors = int(
-            sum(np.prod(shape[2:], dtype=np.int64) for shape in raw_prediction_shapes)
-        )
-        batch_size = self.train_config.batch_size
-        activation_bytes = self.activation_element_bytes
-        integer_bytes = self.integer_element_bytes
-        boolean_bytes = self.boolean_element_bytes
-        detect_layer = self.model.l23
-        num_classes = int(detect_layer.nc)
-        reg_channels = int(detect_layer.reg_channels)
-        output_channels = int(detect_layer.no)
-        max_gt_boxes = self.estimated_boxes_per_image
-
-        loss_bytes = 0
-
-        loss_bytes += batch_size * total_anchors * output_channels * activation_bytes
-        loss_bytes += batch_size * total_anchors * reg_channels * activation_bytes
-        loss_bytes += batch_size * total_anchors * num_classes * activation_bytes
-        if detect_layer.separate_objectness_head:
-            loss_bytes += batch_size * total_anchors * activation_bytes
-
-        loss_bytes += total_anchors * 4 * activation_bytes
-        loss_bytes += batch_size * total_anchors * 12 * activation_bytes
-        loss_bytes += batch_size * max_gt_boxes * 7 * activation_bytes
-        loss_bytes += batch_size * max_gt_boxes * boolean_bytes
-
-        assigner_matrix_elements = batch_size * max_gt_boxes * total_anchors
-        loss_bytes += assigner_matrix_elements * activation_bytes * 4
-        loss_bytes += assigner_matrix_elements * boolean_bytes
-        loss_bytes += assigner_matrix_elements
-        loss_bytes += batch_size * total_anchors * num_classes * integer_bytes
-        loss_bytes += batch_size * total_anchors * num_classes * activation_bytes
-        loss_bytes += batch_size * total_anchors * integer_bytes
-        loss_bytes += batch_size * total_anchors * boolean_bytes
-        loss_bytes += batch_size * total_anchors * 12 * activation_bytes
-
-        if self.train_config.segmentation_output and model_output.prototype_masks is not None:
-            prototype_voxels = int(np.prod(model_output.prototype_masks.shape[1:], dtype=np.int64))
-            per_mask_anchor_count = min(self.train_config.tal_topk, total_anchors)
-            estimated_masks_per_batch = batch_size * max_gt_boxes
-            if model_output.mask_coefficients is not None:
-                loss_bytes += (
-                    int(np.prod(model_output.mask_coefficients.shape, dtype=np.int64))
-                    * activation_bytes
-                )
-            loss_bytes += estimated_masks_per_batch * prototype_voxels * activation_bytes
-            loss_bytes += (
-                estimated_masks_per_batch
-                * per_mask_anchor_count
-                * prototype_voxels
-                * activation_bytes
-                * 2
-            )
-
-        return loss_bytes
-
-    def estimate(self, patch_size_xyz: tuple[int, int, int]) -> PatchMemoryBreakdown:
-        feature_map_elements = self._collect_feature_map_elements(patch_size_xyz)
-        feature_map_bytes = feature_map_elements * self.activation_element_bytes
-        patch_voxels = int(np.prod(np.asarray(patch_size_xyz, dtype=np.int64)))
-        input_patch_bytes = (
-            self.train_config.batch_size
-            * patch_voxels
-            * self.train_config.input_channels
-            * self.activation_element_bytes
-        )
-        return PatchMemoryBreakdown(
-            feature_map_bytes=feature_map_bytes,
-            feature_gradient_bytes=feature_map_bytes,
-            parameter_bytes=self.parameter_bytes,
-            parameter_gradient_bytes=self.parameter_bytes,
-            optimizer_state_bytes=self.optimizer_state_bytes,
-            ema_state_bytes=self.ema_state_bytes,
-            input_patch_bytes=input_patch_bytes,
-            augmentation_overhead_bytes=self._estimate_augmentation_overhead_bytes(patch_size_xyz),
-            loss_computation_bytes=self._estimate_loss_computation_bytes(patch_size_xyz),
-            buffer_bytes=self.buffer_bytes,
-        )
-
-
-def estimate_patch_memory(  # noqa: PLR0913
-    patch_size_xyz: tuple[int, int, int],
-    *,
-    scale: ModelScale,
-    batch_size: int,
-    input_channels: int,
-    num_classes: int,
-    segmentation_output: bool,
-    include_stride4_output: bool,
-    prototype_masks: int,
-    estimated_boxes_per_image: int = 1,
-    data_path: Path | None = None,
-    enable_image_label_head: bool | None = None,
-    reference_config: dict[str, Any] | DefaultConfig | None = None,
-) -> PatchMemoryBreakdown:
-    estimator = ModelMemoryEstimator(
-        _build_estimation_config(
-            scale=scale,
-            batch_size=batch_size,
-            input_channels=input_channels,
-            num_classes=num_classes,
-            segmentation_output=segmentation_output,
-            include_stride4_output=include_stride4_output,
-            prototype_masks=prototype_masks,
-            data_path=data_path,
-            enable_image_label_head=enable_image_label_head,
-            reference_config=reference_config,
-        ),
-        estimated_boxes_per_image=estimated_boxes_per_image,
-    )
-    return estimator.estimate(patch_size_xyz)
-
-
-def estimate_patch_memory_gb(  # noqa: PLR0913
-    patch_size_xyz: tuple[int, int, int],
-    *,
-    scale: ModelScale,
-    batch_size: int,
-    input_channels: int,
-    num_classes: int,
-    segmentation_output: bool,
-    include_stride4_output: bool,
-    prototype_masks: int,
-    estimated_boxes_per_image: int = 1,
-    data_path: Path | None = None,
-    enable_image_label_head: bool | None = None,
-    reference_config: dict[str, Any] | DefaultConfig | None = None,
-) -> float:
-    memory_breakdown = estimate_patch_memory(
-        patch_size_xyz,
-        scale=scale,
-        batch_size=batch_size,
-        input_channels=input_channels,
-        num_classes=num_classes,
-        segmentation_output=segmentation_output,
-        include_stride4_output=include_stride4_output,
-        prototype_masks=prototype_masks,
-        estimated_boxes_per_image=estimated_boxes_per_image,
-        data_path=data_path,
-        enable_image_label_head=enable_image_label_head,
-        reference_config=reference_config,
-    )
-    return memory_breakdown.total_gb
-
-
 def _extract_channel_count(dataset_yaml: dict[str, Any], fingerprint: dict[str, Any]) -> int:
     counts = []
     normalization = dataset_yaml.get("normalization")
@@ -526,22 +99,6 @@ def _extract_channel_count(dataset_yaml: dict[str, Any], fingerprint: dict[str, 
         counts.append(len(foreground_stats))
 
     return max(counts or [1])
-
-
-def _estimate_boxes_per_image(dataset_path: Path) -> int:
-    labels_dir = dataset_path / "labels"
-    if not labels_dir.exists():
-        return 1
-
-    counts = []
-    for label_path in labels_dir.glob("*.txt"):
-        lines = label_path.read_text(encoding="utf-8").splitlines()
-        counts.append(sum(1 for line in lines if line.strip()))
-
-    if not counts:
-        return 1
-
-    return max(1, int(np.ceil(np.percentile(np.asarray(counts, dtype=np.float64), 90))))
 
 
 def _canonicalize_normalization_tag(value: str) -> NormalizationTag:
@@ -645,54 +202,19 @@ def build_runtime_normalization_config(
     return runtime_entries[0] if len(runtime_entries) == 1 else runtime_entries
 
 
-def propose_patch_size(  # noqa: PLR0913
+def propose_patch_size(
     fingerprint: dict[str, Any],
-    *,
-    scale: ModelScale,
-    batch_size: int,
-    input_channels: int,
-    num_classes: int,
-    segmentation_output: bool,
-    include_stride4_output: bool,
-    prototype_masks: int,
-    estimated_boxes_per_image: int = 1,
-    data_path: Path | None = None,
-    enable_image_label_head: bool | None = None,
-    reference_config: dict[str, Any] | DefaultConfig | None = None,
-) -> tuple[PatchSize, float]:
+) -> PatchSize:
+    """Propose a stride-aligned patch size capped by the median resampled image size."""
     median_resampled = fingerprint.get("median_resampled_imagesize")
     if not isinstance(median_resampled, list) or len(median_resampled) != 3:
         msg = "Dataset fingerprint is missing median_resampled_imagesize."
         raise ValueError(msg)
 
     median_xyz = np.maximum(np.asarray(median_resampled, dtype=np.float64), 1.0)
+    median_cap = _align_up(median_xyz)
     scale_factor = float((_TARGET_PATCH_VOLUME / np.prod(median_xyz)) ** (1.0 / 3.0))
     scaled_xyz = np.maximum(median_xyz * scale_factor, _MIN_PATCH_SIZE.astype(np.float64))
-
-    estimator = ModelMemoryEstimator(
-        _build_estimation_config(
-            scale=scale,
-            batch_size=batch_size,
-            input_channels=input_channels,
-            num_classes=num_classes,
-            segmentation_output=segmentation_output,
-            include_stride4_output=include_stride4_output,
-            prototype_masks=prototype_masks,
-            data_path=data_path,
-            enable_image_label_head=enable_image_label_head,
-            reference_config=reference_config,
-        ),
-        estimated_boxes_per_image=estimated_boxes_per_image,
-    )
-    memory_cache: dict[tuple[int, int, int], float] = {}
-
-    def estimate_candidate(candidate: tuple[int, int, int]) -> float:
-        cached = memory_cache.get(candidate)
-        if cached is not None:
-            return cached
-        estimated_memory = estimator.estimate(candidate).total_gb
-        memory_cache[candidate] = estimated_memory
-        return estimated_memory
 
     down = _align_down(scaled_xyz)
     up = _align_up(scaled_xyz)
@@ -719,7 +241,8 @@ def propose_patch_size(  # noqa: PLR0913
         unique_candidates,
         key=lambda candidate: candidate_score(np.asarray(candidate, dtype=np.int64)),
     )
-    return PatchSize.from_xyz(best_candidate), estimate_candidate(best_candidate)
+    capped_candidate = np.minimum(np.asarray(best_candidate, dtype=np.int64), median_cap)
+    return PatchSize.from_xyz(capped_candidate)
 
 
 def _default_output_path(dataset_path: Path, model_scale: ModelScale) -> Path:
@@ -767,22 +290,10 @@ def propose_model_config(
         fingerprint.get("n_images_with_masks", 0)
         or (masks_dir.exists() and any(masks_dir.iterdir()))
     )
-    estimated_boxes_per_image = _estimate_boxes_per_image(dataset_path)
 
     batch_size = int(reference_config.get("batch_size", 2))
-    patch_size, estimated_memory = propose_patch_size(
+    patch_size = propose_patch_size(
         fingerprint,
-        scale=model_scale,
-        batch_size=batch_size,
-        input_channels=input_channels,
-        num_classes=dataset_cfg.nc,
-        segmentation_output=has_masks,
-        include_stride4_output=bool(reference_config.get("include_stride4_output", False)),
-        prototype_masks=int(reference_config.get("prototype_masks", 8)),
-        estimated_boxes_per_image=estimated_boxes_per_image,
-        data_path=dataset_path,
-        enable_image_label_head=enable_image_label_head,
-        reference_config=reference_config,
     )
 
     proposed_config = dict(reference_config)
@@ -825,5 +336,4 @@ def propose_model_config(
         output_path=output_path,
         fingerprint_path=fingerprint_path,
         analysis_ran=analysis_ran,
-        estimated_memory_gb=estimated_memory,
     )

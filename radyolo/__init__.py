@@ -525,9 +525,8 @@ def propose_model_config(
             workers=workers,
         )
         LOGGER.info(
-            "Proposed config written to %s (estimated training memory %.2f GB)",
+            "Proposed config written to %s",
             result.output_path,
-            result.estimated_memory_gb,
         )
         if result.analysis_ran:
             LOGGER.info("Dataset fingerprint written to %s", result.fingerprint_path)

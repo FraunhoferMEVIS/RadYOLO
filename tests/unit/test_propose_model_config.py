@@ -5,7 +5,6 @@ import numpy as np
 
 from radyolo.config.propose_model_config import (
     build_runtime_normalization_config,
-    estimate_patch_memory_gb,
     propose_patch_size,
     resolve_dataset_normalization_tags,
 )
@@ -58,117 +57,39 @@ def test_build_runtime_normalization_config_uses_ct_stats_and_per_channel_zscore
     ]
 
 
-def test_propose_patch_size_returns_stride_aligned_estimate() -> None:
+def test_propose_patch_size_caps_by_stride_rounded_median_image_size() -> None:
     fingerprint = {
-        "median_resampled_imagesize": [224, 224, 96],
+        "median_resampled_imagesize": [150, 95, 65],
         "box_size_median_vox": {"0": [40, 40, 18]},
         "box_size_p95_vox": [40, 40, 18],
     }
 
-    patch_size, estimated_memory_gb = propose_patch_size(
-        fingerprint,
-        scale="s",
-        batch_size=2,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=True,
-        include_stride4_output=False,
-        prototype_masks=8,
-    )
+    patch_size = propose_patch_size(fingerprint)
 
+    assert patch_size.get_xyz() == (160, 96, 96)
     assert patch_size.x % 32 == 0
     assert patch_size.y % 32 == 0
     assert patch_size.z % 32 == 0
-    direct_estimate = estimate_patch_memory_gb(
-        patch_size.get_xyz(),
-        scale="s",
-        batch_size=2,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=True,
-        include_stride4_output=False,
-        prototype_masks=8,
-    )
-    assert direct_estimate == pytest.approx(estimated_memory_gb, abs=0.2)
 
 
-def test_propose_patch_size_targets_256_cubed_volume_and_median_ratios() -> None:
+def test_propose_patch_size_preserves_ratios_when_median_cap_does_not_bind() -> None:
     fingerprint = {
-        "median_resampled_imagesize": [160, 96, 64],
+        "median_resampled_imagesize": [512, 320, 192],
         "box_size_median_vox": {"0": [20, 14, 10]},
         "box_size_p95_vox": [32, 20, 14],
     }
 
-    patch_size, _ = propose_patch_size(
-        fingerprint,
-        scale="s",
-        batch_size=2,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=True,
-        include_stride4_output=False,
-        prototype_masks=8,
-    )
+    patch_size = propose_patch_size(fingerprint)
 
     candidate = np.asarray(patch_size.get_xyz(), dtype=np.float64)
     median = np.asarray(fingerprint["median_resampled_imagesize"], dtype=np.float64)
+    median_cap = np.ceil(median / 32.0) * 32.0
     candidate_ratio = candidate / np.cbrt(np.prod(candidate))
     median_ratio = median / np.cbrt(np.prod(median))
 
     assert patch_size.x % 32 == 0
     assert patch_size.y % 32 == 0
     assert patch_size.z % 32 == 0
+    assert np.all(candidate <= median_cap)
     assert np.prod(candidate) == pytest.approx(256**3, rel=0.25)
     assert np.linalg.norm(np.log(candidate_ratio / median_ratio)) < 0.2
-
-
-def test_estimate_patch_memory_gb_increases_with_patch_volume() -> None:
-    smaller = estimate_patch_memory_gb(
-        (64, 64, 64),
-        scale="n",
-        batch_size=1,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=False,
-        include_stride4_output=False,
-        prototype_masks=8,
-    )
-    larger = estimate_patch_memory_gb(
-        (96, 96, 96),
-        scale="n",
-        batch_size=1,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=False,
-        include_stride4_output=False,
-        prototype_masks=8,
-    )
-
-    assert larger > smaller
-
-
-def test_estimate_patch_memory_gb_increases_with_loss_objects() -> None:
-    fewer_objects = estimate_patch_memory_gb(
-        (96, 96, 96),
-        scale="n",
-        batch_size=1,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=True,
-        include_stride4_output=False,
-        prototype_masks=8,
-        estimated_boxes_per_image=1,
-    )
-    more_objects = estimate_patch_memory_gb(
-        (96, 96, 96),
-        scale="n",
-        batch_size=1,
-        input_channels=1,
-        num_classes=1,
-        segmentation_output=True,
-        include_stride4_output=False,
-        prototype_masks=8,
-        estimated_boxes_per_image=8,
-    )
-
-    assert more_objects > fewer_objects
