@@ -11,9 +11,10 @@ def test_dataset_config_derives_nc_from_names() -> None:
     assert config.num_classes == 2
 
 
-def test_dataset_config_rejects_legacy_nc_key() -> None:
-    with pytest.raises(ValueError, match="must not define 'nc'"):
-        DatasetConfig.model_validate({"nc": 1, "names": {0: "lesion"}})
+def test_dataset_config_accepts_legacy_nc_key_but_derives_num_classes() -> None:
+    config = DatasetConfig.model_validate({"nc": 7, "names": {0: "lesion"}})
+
+    assert config.num_classes == 1
 
 
 def test_dataset_config_requires_contiguous_class_indices() -> None:
