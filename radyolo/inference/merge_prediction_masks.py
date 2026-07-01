@@ -15,12 +15,14 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class _MaskCandidate:
+    """A mask candidate selected from one detection entry."""
     class_id: int
     mask_path: str
     box_volume: float
 
 
 def _detection_box_volume(prediction: dict[str, Any]) -> float:
+    """Return the detection box volume from an absolute or relative box."""
     for key in ("box_image_xyzxyz", "box_relative_xyzxyz"):
         raw_box = prediction.get(key)
         if isinstance(raw_box, list) and len(raw_box) == 6:
@@ -36,6 +38,7 @@ def _detection_box_volume(prediction: dict[str, Any]) -> float:
 
 
 def _resolve_mask_path(predictions_dir: Path, masks_dir: Path, raw_mask_path: str) -> Path:
+    """Resolve a mask path relative to the prediction or masks directory."""
     mask_path = Path(raw_mask_path)
     if mask_path.is_absolute():
         return mask_path
@@ -51,6 +54,7 @@ def _collect_candidates(
     prediction_entries: list[Any],
     confidence_threshold: float,
 ) -> tuple[list[_MaskCandidate], str | None]:
+    """Collect eligible mask candidates and remember the first mask path seen."""
     candidates: list[_MaskCandidate] = []
     first_mask_path: str | None = None
     for entry in prediction_entries:
@@ -89,6 +93,7 @@ def merge_prediction_masks(
     predictions_dir: Path,
     confidence_threshold: float = 0.1,
 ) -> Path:
+    """Merge per-detection masks into one labeled mask per prediction case."""
     if confidence_threshold < 0.0:
         msg = "Confidence threshold must be >= 0."
         raise ValueError(msg)
