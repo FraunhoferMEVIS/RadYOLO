@@ -58,9 +58,11 @@ class TaskAlignedAssigner(nn.Module):
         self.reset_epoch_warning_stats()
 
     def reset_epoch_warning_stats(self) -> None:
+        """Reset per-epoch assignment warning counters."""
         self._epoch_warning_stats = TaskAlignedEpochWarningStats()
 
     def pop_epoch_warning_stats(self) -> TaskAlignedEpochWarningStats:
+        """Return and clear accumulated assignment warning counters."""
         stats = self._epoch_warning_stats
         self.reset_epoch_warning_stats()
         return stats
@@ -604,6 +606,7 @@ def make_anchors(
     strides: torch.Tensor,
     grid_cell_offset: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build anchor-center coordinates and matching stride values for all feature maps."""
     anchor_points, stride_tensor = [], []
     if feats is None:
         raise ValueError

@@ -453,7 +453,7 @@ def test_trainer_accepts_non_divisible_distributed_batch_size_per_gpu(
     trainer._validate_distributed_setup()
 
 
-def test_trainer_uses_per_gpu_batch_size_without_loss_rescaling(
+def test_trainer_uses_per_gpu_batch_size_without_loss_rescaling_hook(
     minimal_train_config,
     monkeypatch,
     tmp_path,
@@ -478,12 +478,10 @@ def test_trainer_uses_per_gpu_batch_size_without_loss_rescaling(
     monkeypatch.setattr("radyolo.training.train.dist.is_initialized", lambda: False)
 
     distributed_trainer = Trainer(cfg=config_path)
-    single_process_loss = torch.tensor(3.5)
-
     assert distributed_trainer._get_per_process_batch_size() == 2
     assert distributed_trainer._get_per_process_workers() == 3
     assert distributed_trainer._get_effective_batch_size() == 4
-    assert distributed_trainer._scale_loss_for_backward(single_process_loss) is single_process_loss
+    assert not hasattr(distributed_trainer, "_scale_loss_for_backward")
 
     monkeypatch.delenv("RADYOLO_DDP_LOCAL_RANK", raising=False)
     monkeypatch.delenv("RADYOLO_DDP_RANK", raising=False)
@@ -492,7 +490,7 @@ def test_trainer_uses_per_gpu_batch_size_without_loss_rescaling(
     single_gpu_trainer = Trainer(cfg=config_path)
 
     assert single_gpu_trainer._get_effective_batch_size() == 2
-    assert single_gpu_trainer._scale_loss_for_backward(single_process_loss) is single_process_loss
+    assert not hasattr(single_gpu_trainer, "_scale_loss_for_backward")
 
 
 def test_trainer_broadcast_stop_uses_cuda_tensor_for_nccl(

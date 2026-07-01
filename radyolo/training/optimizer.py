@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 
 def _to_moun_matrix(tensor: torch.Tensor) -> torch.Tensor:
+    """Flatten non-matrix tensors to 2D while preserving the first dimension."""
     if tensor.ndim == 2:
         return tensor
     return tensor.reshape(tensor.shape[0], -1)
@@ -55,6 +56,7 @@ class MuSGD(optim.Optimizer):
         applicable_params: list[torch.nn.Parameter],
         muon_weight: float,
     ) -> None:
+        """Initialize mixed Muon/SGD optimizers over shared parameter groups."""
         if not 0.0 <= muon_weight <= 1.0:
             msg = f"muon_weight must be in [0, 1], got {muon_weight}."
             raise ValueError(msg)
@@ -108,6 +110,7 @@ class MuSGD(optim.Optimizer):
         self._muon_optimizer = torch.optim.Muon(muon_param_groups) if muon_param_groups else None
 
     def _sync_child_optimizers(self) -> None:
+        """Propagate parent group hyperparameters to child optimizers."""
         for parent_group, sgd_group in zip(
             self.param_groups, self._sgd_optimizer.param_groups, strict=True
         ):
@@ -129,6 +132,7 @@ class MuSGD(optim.Optimizer):
         self,
         closure: Callable[[], torch.Tensor] | None = None,
     ) -> torch.Tensor | None:
+        """Run SGD and Muon updates, then blend applicable parameter deltas."""
         self._sync_child_optimizers()
 
         old_values = {
@@ -162,6 +166,7 @@ class MuSGD(optim.Optimizer):
         return muon_loss if muon_loss is not None else sgd_loss
 
     def state_dict(self) -> dict[str, object]:
+        """Return combined state for parent, SGD child, and optional Muon child."""
         return {
             "parent": super().state_dict(),
             "sgd": self._sgd_optimizer.state_dict(),
@@ -169,6 +174,7 @@ class MuSGD(optim.Optimizer):
         }
 
     def load_state_dict(self, state_dict: dict[str, object]) -> None:
+        """Restore optimizer state and resynchronize child optimizer settings."""
         parent_state = state_dict.get("parent")
         if parent_state is None:
             super().load_state_dict(state_dict)
@@ -190,6 +196,7 @@ def build_optimizer(
     decay: float = 1e-5,
     muon_weight: float = 0.5,
 ) -> torch.optim.Optimizer:
+    """Create the configured optimizer and parameter groups for the model."""
     weights_with_decay, weights_without_decay, bias_weights = [], [], []
     muon_candidates: list[torch.nn.Parameter] = []
     available_normalization_layers = tuple(

@@ -24,8 +24,8 @@ from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import (
     ModelCheckpoint,
-    get_training_config,
     get_dataset_config,
+    get_training_config,
     load_model_checkpoint,
     save_model_checkpoint,
 )
@@ -88,6 +88,7 @@ LOG_FILE_ENV = "RADYOLO_LOG_FILE"
 
 
 def _find_free_port() -> int:
+    """Return an available localhost TCP port for distributed startup."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         sock.listen(1)
@@ -95,6 +96,7 @@ def _find_free_port() -> int:
 
 
 def _select_distributed_backend() -> str:
+    """Prefer NCCL when available, otherwise fall back to Gloo."""
     if dist.is_nccl_available():
         return "nccl"
     return "gloo"
@@ -107,6 +109,7 @@ def _distributed_train_worker(
     master_addr: str,
     master_port: int,
 ) -> None:
+    """Initialize worker process environment and run one trainer instance."""
     os.environ[DDP_LOCAL_RANK_ENV] = str(local_rank)
     os.environ[DDP_RANK_ENV] = str(local_rank)
     os.environ[DDP_WORLD_SIZE_ENV] = str(world_size)
@@ -127,16 +130,20 @@ def _distributed_train_worker(
 
 
 class StdoutFilter(logging.Filter):
+    """Allow only log records below warning level on stdout."""
+
     def filter(self, record: logging.LogRecord) -> bool:
         return record.levelno < logging.WARNING
 
 
 def _mark_managed_handler(handler: logging.Handler) -> logging.Handler:
+    """Tag a logging handler so this module can safely manage its lifecycle."""
     setattr(handler, MANAGED_LOGGING_HANDLER_ATTR, True)
     return handler
 
 
 def _close_managed_handlers(logger: logging.Logger) -> None:
+    """Remove and close handlers previously tagged as managed."""
     for handler in list(logger.handlers):
         if not getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False):
             continue
@@ -145,10 +152,12 @@ def _close_managed_handlers(logger: logging.Logger) -> None:
 
 
 def _has_managed_handlers(logger: logging.Logger) -> bool:
+    """Check whether the logger currently has managed handlers attached."""
     return any(getattr(handler, MANAGED_LOGGING_HANDLER_ATTR, False) for handler in logger.handlers)
 
 
 def _get_log_rank_context(rank: int | None = None, world_size: int | None = None) -> str:
+    """Build rank prefix for distributed logs, or empty string for single-process runs."""
     if rank is None:
         rank = int(os.environ.get(DDP_RANK_ENV, "0"))
     if world_size is None:
@@ -159,6 +168,7 @@ def _get_log_rank_context(rank: int | None = None, world_size: int | None = None
 
 
 def _resolve_process_log_level() -> int:
+    """Resolve effective process log level from environment settings."""
     configured_level = os.environ.get(LOG_LEVEL_ENV)
     if configured_level is None:
         return logging.INFO
@@ -168,6 +178,7 @@ def _resolve_process_log_level() -> int:
 
 
 def _configure_process_logging() -> None:
+    """Configure rank-aware stdout/stderr logging handlers for this process."""
     level = _resolve_process_log_level()
     simple_formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)-9s %(spacer)s: %(rank_context)s%(message)s",
@@ -201,7 +212,10 @@ def _configure_process_logging() -> None:
 
 
 class Trainer:
+    """Coordinate end-to-end model training, validation, checkpointing, and logging."""
+
     def __init__(self, cfg: str | Path) -> None:
+        """Load training config and initialize runtime/distributed state."""
         self.config_path = Path(cfg)
         self.config = get_training_config(cfg, {})
         self.in_distributed_worker = DDP_LOCAL_RANK_ENV in os.environ
@@ -270,6 +284,7 @@ class Trainer:
         self.epoch_peak_memory_gb = 0.0
 
     def _log_epoch_warning_summary(self) -> None:
+        """Aggregate and log per-epoch warning counters across distributed workers."""
         if self.loss is None:
             return
 
@@ -293,6 +308,7 @@ class Trainer:
             LOGGER.warning(summary)
 
     def _configure_file_logging(self) -> None:
+        """Attach a per-run file logger and store its path in the environment."""
         time_now = datetime.datetime.now(tz=datetime.UTC)
         radyolo_logger = logging.getLogger(RADYOLO_LOGGER_NAME)
         log_file_path = self._get_log_file_path(time_now)
@@ -328,12 +344,14 @@ class Trainer:
         LOGGER.info("Dataset path: %s", Path(self.config.data).resolve())
 
     def _get_log_file_path(self, time_now: datetime.datetime) -> Path:
+        """Build the log file path for this run and rank."""
         log_stem = time_now.strftime("%Y_%m_%d-%H_%M_%S")
         if self.distributed:
             log_stem = f"{log_stem}-rank{self.rank}"
         return self.save_dir / f"{log_stem}.log"
 
     def _setup_distributed_process_group(self) -> None:
+        """Initialize the torch distributed process group for this worker."""
         if dist.is_initialized():
             return
         backend = _select_distributed_backend()
@@ -359,15 +377,18 @@ class Trainer:
         LOGGER.info("Rank %d finished distributed process group initialization.", self.rank)
 
     def _teardown_distributed_process_group(self) -> None:
+        """Tear down distributed state when training ends."""
         if self.distributed and dist.is_initialized():
             dist.destroy_process_group()
 
     def _validate_distributed_setup(self) -> None:
+        """Validate that configured devices support distributed training."""
         if self.device.type != "cuda":
             msg = "DistributedDataParallel requires explicit CUDA devices, e.g. device='0,1'."
             raise ValueError(msg)
 
     def _launch_distributed_training(self) -> None:
+        """Spawn one training worker per configured CUDA device."""
         self._validate_distributed_setup()
         master_addr = "127.0.0.1"
         master_port = _find_free_port()
@@ -403,10 +424,12 @@ class Trainer:
         return self.config.batch_size * self.world_size
 
     def _barrier(self) -> None:
+        """Synchronize all workers when distributed training is active."""
         if self.distributed and dist.is_initialized():
             dist.barrier()
 
     def _get_distributed_collective_device(self) -> torch.device:
+        """Return the device used for distributed collective control tensors."""
         if not self.distributed:
             return torch.device("cpu")
         backend = dist.get_backend() if dist.is_initialized() else _select_distributed_backend()
@@ -415,6 +438,7 @@ class Trainer:
         return torch.device("cpu")
 
     def _broadcast_stop(self, stop: bool) -> bool:
+        """Broadcast stop decision from rank 0 to all workers."""
         if not self.distributed:
             return stop
         stop_tensor = torch.tensor(
@@ -425,6 +449,7 @@ class Trainer:
         return bool(stop_tensor.item())
 
     def _distributed_any(self, value: bool) -> bool:
+        """Return whether any worker reports True for the given boolean flag."""
         if not self.distributed or not dist.is_initialized():
             return value
         value_tensor = torch.tensor(
@@ -435,6 +460,7 @@ class Trainer:
         return bool(value_tensor.item())
 
     def _build_distributed_safe_zero_loss(self, model_output: ModelOutput) -> torch.Tensor:
+        """Create a zero-valued surrogate loss that preserves graph connectivity."""
         zero_loss = torch.zeros((), device=self.device)
         if model_output.raw_predictions is not None:
             for tensor in model_output.raw_predictions:
@@ -447,13 +473,12 @@ class Trainer:
                 zero_loss = zero_loss + torch.nan_to_num(tensor).sum() * 0.0
         return zero_loss
 
-    def _scale_loss_for_backward(self, loss: torch.Tensor) -> torch.Tensor:
-        return loss
-
     def copy_train_config(self) -> None:
+        """Copy the active training config into the run directory."""
         shutil.copy2(self.config_path, self.save_dir / "train_config.yaml")
 
     def _compute_validation_fitness(self, metrics: dict[str, float]) -> float:
+        """Combine validation metrics into a single weighted fitness score."""
         map_1095 = float(metrics.get("metrics/mAP10-95", 0.0))
         map_1095_agn = float(metrics.get("metrics/mAP10-95Agn", 0.0))
         dice = float(metrics.get("metrics/dice", 0.0))
@@ -479,6 +504,7 @@ class Trainer:
         return sum(weighted_metrics) / total_weight
 
     def check_resume(self) -> None:
+        """Resolve resume behavior and load checkpoint config when available."""
         resume = self.config.resume
         if resume:
             try:
@@ -502,6 +528,7 @@ class Trainer:
         self,
         num_classes: int,
     ) -> tuple[ModelCheckpoint | None, HardcodedModel]:
+        """Build model and optionally preload weights from the last checkpoint."""
         if isinstance(self.model, HardcodedModel):
             return None, self.model
 
@@ -522,6 +549,7 @@ class Trainer:
     def _setup_scheduler(
         self, optimizer: torch.optim.Optimizer
     ) -> tuple[torch.optim.lr_scheduler.LRScheduler, Callable[[int], float]]:
+        """Create learning rate scheduler and its lambda policy function."""
         def lf(x: int) -> float:
             return (
                 max(1 - x / self.epochs, 0) * (1.0 - self.config.final_learning_rate_ratio)
@@ -548,6 +576,7 @@ class Trainer:
         float | None,
         int,
     ]:
+        """Initialize all training components and resume state before looping."""
         ckpt, model = self.setup_model(
             self.data.num_classes,
         )
@@ -632,6 +661,7 @@ class Trainer:
         )
 
     def train(self) -> None:
+        """Run training entrypoint including optional distributed launch."""
         try:
             if self.should_launch_distributed:
                 self._launch_distributed_training()
@@ -689,6 +719,7 @@ class Trainer:
         best_fitness: float | None,
         start_epoch: int,
     ) -> None:
+        """Execute epoch/batch optimization loop with logging and validation."""
         num_batches = len(train_loader)
         num_warmup_iterations = (
             max(round(self.config.warmup_epochs * num_batches), 100)
@@ -829,7 +860,6 @@ class Trainer:
                         ) / (i + 1)
 
                     # Backward
-                    loss = self._scale_loss_for_backward(loss)
                     debug_log_backward_start(LOGGER, self.epoch + 1, i)
                     scaler.scale(loss).backward()
 
@@ -949,6 +979,7 @@ class Trainer:
 
     @staticmethod
     def _create_epoch_timing_values() -> dict[str, float]:
+        """Initialize timing metric accumulators for one epoch."""
         keys = (
             "timing/gpu_steps_total_s",
             "timing/post_gpu_to_next_gpu_steps_s",
@@ -957,6 +988,7 @@ class Trainer:
         return dict.fromkeys(keys, 0.0)
 
     def _prepare_training_batch(self, batch: dict, run_gpu_augmentations: bool) -> dict:
+        """Move batch tensors to target device and apply configured augmentations."""
         preprocess_batch_images(
             batch,
             device=self.device,
@@ -1005,6 +1037,7 @@ class Trainer:
         ema: ModelEMA,
         grad_clip_max_norm: float,
     ) -> None:
+        """Apply one optimizer step with grad clipping and EMA update."""
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_max_norm)
         scaler.step(optimizer)
@@ -1014,6 +1047,7 @@ class Trainer:
 
     @staticmethod
     def _has_non_finite_gradients(model: torch.nn.Module) -> bool:
+        """Return True when any floating-point gradient contains NaN or Inf."""
         parameters_with_grads = [
             parameter
             for parameter in model.parameters()
@@ -1027,6 +1061,7 @@ class Trainer:
         loss: torch.Tensor,
         loss_items: torch.Tensor,
     ) -> None:
+        """Log context for batches skipped due to non-finite training loss."""
         loss_value = (
             loss.detach().float().cpu().item() if loss.numel() == 1 else loss.detach().float().cpu()
         )
@@ -1047,6 +1082,7 @@ class Trainer:
 
     @staticmethod
     def _log_non_finite_input_batch(batch: dict) -> None:
+        """Log input tensor diagnostics for batches with non-finite image values."""
         image = batch["img"]
         case_names = batch.get("case_names")
         if isinstance(case_names, (list, tuple)):
@@ -1100,6 +1136,7 @@ class Trainer:
         fold: int = 0,
         mode: Literal["train", "val"] = "train",
     ) -> DataLoader:
+        """Build train or validation dataloader with optional distributed/sampling logic."""
         if mode not in {"train", "val"}:
             message = f"get_dataloader() only supports modes train and val, but got {mode}"
             raise ValueError(message)
@@ -1174,6 +1211,7 @@ class Trainer:
         metrics: dict[str, float],
         fitness: float,
     ) -> None:
+        """Persist latest checkpoint and optional best/periodic snapshots."""
         is_best = best_fitness == fitness
         save_paths = [self.last_model_path]
         if is_best:
@@ -1198,6 +1236,7 @@ class Trainer:
             self._save_best_validation_artifacts()
 
     def _save_best_validation_artifacts(self) -> None:
+        """Copy current validation artifacts into *_best snapshots."""
         validation_summary = self.save_dir / "validation_summary.png"
         if validation_summary.exists():
             shutil.copy2(validation_summary, self.save_dir / "validation_summary_best.png")
@@ -1224,6 +1263,7 @@ class Trainer:
         save_dir: Path,
         names: dict[int, str],
     ) -> Validator:
+        """Create the validation runner for this training session."""
         return Validator(
             test_loader,
             save_dir=save_dir,
@@ -1237,6 +1277,7 @@ class Trainer:
         ema: ModelEMA,
         best_fitness: float | None,
     ) -> tuple[dict[str, float], float, float]:
+        """Run validation, update smoothed fitness, and track best fitness."""
         metrics = validator(self, model=cast("HardcodedModel", ema.ema))
         current_fitness = self._compute_validation_fitness(metrics)
         if self.ewa_fitness is None:
@@ -1262,6 +1303,7 @@ class Trainer:
     def label_loss_items(
         self, loss_items: torch.Tensor | None = None, prefix: str = "train"
     ) -> dict[str, float] | list[str]:
+        """Return labeled loss keys or a key-to-value mapping for logging."""
         keys: list[str] = [f"{prefix}/{x}" for x in self.loss_names]
         if loss_items is not None:
             rounded_loss_items = [round(float(x.detach()), 5) for x in loss_items]
@@ -1304,6 +1346,7 @@ class Trainer:
         return best_fitness, start_epoch
 
     def save_metrics(self, metrics: dict, train_time_start: float) -> None:
+        """Append one epoch of metrics to the CSV training log."""
         keys, vals = list(metrics.keys()), list(metrics.values())
         n = len(metrics) + 2
         header = (

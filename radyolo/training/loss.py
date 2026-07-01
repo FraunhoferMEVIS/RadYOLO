@@ -90,6 +90,8 @@ class DFLoss(nn.Module):
 
 
 class DiceLoss:
+    """Soft Dice loss for volumetric segmentation masks."""
+
     def __call__(self, pred: torch.Tensor, target: torch.Tensor, eps: float = 1) -> torch.Tensor:
         pred = torch.sigmoid(pred)
         intersection = (pred * target).sum(dim=(1, 2, 3))
@@ -178,6 +180,8 @@ class BboxLoss(nn.Module):
 
 
 class ImageLabelClassificationLoss:
+    """Auxiliary loss for image-level multiclass classification tasks."""
+
     MULTICLASS_LOSS_NAME = "img_cce"
 
     def __init__(
@@ -187,6 +191,7 @@ class ImageLabelClassificationLoss:
         image_label_multiclass_cce_gain: float = 1.0,
         image_label_multiclass_cce_class_weights: dict[str, list[float]] | None = None,
     ) -> None:
+        """Configure enabled multiclass heads and optional class weights."""
         self.device = device
         self.image_label_tasks = dict(image_label_tasks or {})
         self.image_label_multiclass_cce_gain = image_label_multiclass_cce_gain
@@ -207,6 +212,7 @@ class ImageLabelClassificationLoss:
         self,
         raw_class_weights: dict[str, list[float]],
     ) -> dict[str, torch.Tensor]:
+        """Validate and tensorize per-task multiclass class weights."""
         task_class_weights: dict[str, torch.Tensor] = {}
         for task_name, class_weights in raw_class_weights.items():
             task_spec = self.image_label_tasks.get(task_name)
@@ -244,6 +250,7 @@ class ImageLabelClassificationLoss:
         model_output: ModelOutput,
         batch: Batch,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute averaged multiclass image-label loss terms for the batch."""
         loss_items = torch.zeros(self.num_loss_terms, device=self.device)
         image_label_outputs = model_output.image_label_outputs
         if image_label_outputs is None:
@@ -299,6 +306,8 @@ class ImageLabelClassificationLoss:
 
 
 class ImageLabelSurvivalLoss:
+    """Auxiliary loss for image-level survival prediction tasks."""
+
     SURVIVAL_THRESHOLD_LOSS_NAME = "img_cst"
     SURVIVAL_COX_LOSS_NAME = "img_cox"
 
@@ -309,6 +318,7 @@ class ImageLabelSurvivalLoss:
         image_label_survival_mtlr_gain: float = 1.0,
         image_label_survival_cox_gain: float = 1.0,
     ) -> None:
+        """Configure enabled survival losses and their weighting gains."""
         self.device = device
         self.image_label_tasks = dict(image_label_tasks or {})
         self.image_label_survival_mtlr_gain = image_label_survival_mtlr_gain
@@ -331,6 +341,7 @@ class ImageLabelSurvivalLoss:
         task_spec: ImageLabelTaskSpec,
         task_predictions: torch.Tensor,
     ) -> torch.Tensor:
+        """Return validated threshold tensor matching the task output width."""
         threshold_values = task_spec.survival_bin_thresholds
         if not threshold_values:
             msg = f"Survival task '{task_name}' is missing resolved bin thresholds"
@@ -372,6 +383,7 @@ class ImageLabelSurvivalLoss:
 
     @staticmethod
     def _survival_bin_widths(thresholds: torch.Tensor) -> torch.Tensor:
+        """Compute per-bin widths from survival thresholds."""
         flat_thresholds = thresholds.flatten()
         if flat_thresholds.numel() == 1:
             return torch.ones_like(flat_thresholds)
@@ -385,6 +397,7 @@ class ImageLabelSurvivalLoss:
         task_predictions: torch.Tensor,
         thresholds: torch.Tensor,
     ) -> torch.Tensor:
+        """Map threshold logits to scalar risk scores."""
         survival_probabilities = task_predictions.sigmoid()
         return -(survival_probabilities * self._survival_bin_widths(thresholds)).sum(dim=1)
 
@@ -394,6 +407,7 @@ class ImageLabelSurvivalLoss:
         survival_times: torch.Tensor,
         event_indicators: torch.Tensor,
     ) -> torch.Tensor | None:
+        """Compute Cox partial likelihood loss over observed events."""
         if not torch.any(event_indicators):
             return None
         sorted_indices = torch.argsort(survival_times, descending=True)
@@ -415,6 +429,7 @@ class ImageLabelSurvivalLoss:
         model_output: ModelOutput,
         batch: Batch,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute configured survival auxiliary losses for labeled samples."""
         loss_items = torch.zeros(self.num_loss_terms, device=self.device)
         image_label_outputs = model_output.image_label_outputs
         if image_label_outputs is None:
@@ -528,7 +543,7 @@ class DetectionSegmentationLoss:  # noqa: N801
         separate_objectness_head: bool = False,
         objectness_loss: Literal["focal", "bce"] = "bce",
         bbox_parametrization: BoxParametrization = "ltrb",
-    ) -> None:  # model must be de-paralleled
+    ) -> None:
         m = detect_layer
         self.objectness_loss = (
             nn.BCEWithLogitsLoss(reduction="sum")
@@ -542,8 +557,8 @@ class DetectionSegmentationLoss:  # noqa: N801
         self.dfl_gain = dfl
         self.mask_loss_gain = mask_loss_gain
         self.mask_loss_on_only_one_grid_cell = mask_loss_on_only_one_grid_cell
-        self.stride: torch.Tensor = m.stride  # model strides
-        self.num_classes: int = m.nc  # number of classes
+        self.stride: torch.Tensor = m.stride
+        self.num_classes: int = m.nc
         self.separate_objectness_head: bool = separate_objectness_head
         self.reg_bins: int = m.dfl_bins
         self.reg_min: float = m.dfl_min
@@ -588,10 +603,12 @@ class DetectionSegmentationLoss:  # noqa: N801
         self.reset_epoch_warning_stats()
 
     def reset_epoch_warning_stats(self) -> None:
+        """Reset accumulated warning counters for a new epoch."""
         self._epoch_warning_stats = MaskEpochWarningStats()
         self.assigner.reset_epoch_warning_stats()
 
     def pop_epoch_warning_stats(self) -> EpochWarningStats:
+        """Return and clear warning counters collected in the current epoch."""
         stats = EpochWarningStats(
             tal=self.assigner.pop_epoch_warning_stats(),
             mask=self._epoch_warning_stats,
@@ -606,6 +623,7 @@ class DetectionSegmentationLoss:  # noqa: N801
         current_epoch: int,
         final_epoch: int,
     ) -> int:
+        """Linearly interpolate TAL top-k between start and end epochs."""
         if final_epoch <= 1:
             return final_topk
         clamped_epoch = min(max(current_epoch, 1), final_epoch)
@@ -868,11 +886,14 @@ class DetectionSegmentationLoss:  # noqa: N801
 
 
 class ComposedTrainingLoss:
+    """Compose detection loss with optional auxiliary image-label losses."""
+
     def __init__(
         self,
         detection_loss: DetectionSegmentationLoss,
         *auxiliary_losses: ImageLabelClassificationLoss | ImageLabelSurvivalLoss,
     ) -> None:
+        """Register base detection loss and enabled auxiliary loss modules."""
         self.detection_loss = detection_loss
         self.auxiliary_losses = auxiliary_losses
         self.loss_names = [*self.detection_loss.loss_names]
@@ -881,9 +902,11 @@ class ComposedTrainingLoss:
         self.num_loss_terms = len(self.loss_names)
 
     def reset_epoch_warning_stats(self) -> None:
+        """Reset epoch warning counters delegated to the detection loss."""
         self.detection_loss.reset_epoch_warning_stats()
 
     def pop_epoch_warning_stats(self) -> EpochWarningStats:
+        """Pop epoch warning counters from the detection loss."""
         return self.detection_loss.pop_epoch_warning_stats()
 
     def __call__(
@@ -892,6 +915,7 @@ class ComposedTrainingLoss:
         batch: Batch,
         current_epoch: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute total training loss and concatenated per-term loss items."""
         detection_total_loss, detection_loss_items = self.detection_loss(
             model_output,
             batch,
@@ -917,6 +941,7 @@ def build_detection_loss_from_config(
     model: nn.Module,
     device: torch.device,
 ) -> TrainingLoss:
+    """Build the configured detection loss, optionally wrapped with auxiliary losses."""
     unwrapped_model = cast("HardcodedModel", unwrap_model(model))
     detection_loss = DetectionSegmentationLoss(
         box=train_config.box_loss_gain,
