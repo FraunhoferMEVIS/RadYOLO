@@ -45,6 +45,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 class Validator:
+    """Run validation, accumulate detection stats, and report metrics/plots."""
+
     def __init__(
         self,
         dataloader: DataLoader,
@@ -53,6 +55,7 @@ class Validator:
         names: dict[int, str],
         save_predictions: bool = False,
     ) -> None:
+        """Initialize validator state, metric trackers, and output paths."""
         self.config = config
         self.dataloader = dataloader
         self.data: DatasetConfig | None = None
@@ -101,6 +104,7 @@ class Validator:
         self.image_label_survival_events: dict[str, list[npt.NDArray[np.bool_]]] = {}
 
     def _get_dice_average(self) -> float:
+        """Return finite mean Dice or a safe fallback when no valid values exist."""
         if self.dice_count <= 0:
             return 0.0
         dice_avg = float(self.dice_sum / self.dice_count)
@@ -272,6 +276,7 @@ class Validator:
         self,
         model_output: ModelOutput,
     ) -> list[torch.Tensor]:
+        """Apply validation postprocessing and NMS to raw model outputs."""
         postprocess_config = DetectionPostprocessConfig(
             confidence_threshold=self.config.confidence_threshold_validation,
             nms_iou_threshold=self.config.nms_iou_threshold,
@@ -402,6 +407,7 @@ class Validator:
                 self.predictions_for_saving[case_name] = prediction_list
 
     def _prediction_to_list(self, prediction: torch.Tensor) -> list[dict[str, Any]]:
+        """Convert a prediction tensor into JSON-serializable dictionaries."""
         prediction_list = []
         for prediction_i in prediction:
             box_i = prediction_i[:6].tolist()
@@ -651,6 +657,7 @@ class Validator:
         batch: Batch,
         image_label_outputs: dict[str, torch.Tensor] | None,
     ) -> None:
+        """Accumulate image-label task outputs for aggregate metric computation."""
         if image_label_outputs is None or not self.image_label_task_specs:
             return
 
@@ -705,12 +712,14 @@ class Validator:
 
     @staticmethod
     def _softmax(logits: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Compute row-wise softmax probabilities from logits."""
         shifted_logits = logits - np.max(logits, axis=1, keepdims=True)
         exponentials = np.exp(shifted_logits)
         return exponentials / exponentials.sum(axis=1, keepdims=True)
 
     @staticmethod
     def _survival_bin_widths(thresholds: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """Compute survival-bin widths from ordered threshold boundaries."""
         if thresholds.size == 1:
             return np.ones_like(thresholds)
         trailing_width = thresholds[-1] - thresholds[-2]
@@ -724,6 +733,7 @@ class Validator:
         targets: npt.NDArray[np.int64],
         probabilities: npt.NDArray[np.float64],
     ) -> float:
+        """Compute robust multiclass ROC-AUC with safe fallbacks."""
         try:
             if probabilities.shape[1] <= 1 or np.unique(targets).size <= 1:
                 return 0.5
@@ -758,6 +768,7 @@ class Validator:
         survival_times: npt.NDArray[np.float64],
         event_indicators: npt.NDArray[np.bool_],
     ) -> float:
+        """Compute survival concordance index from discretized survival logits."""
         thresholds = task_spec.survival_bin_thresholds
         if thresholds is None:
             return 0.0
@@ -780,6 +791,7 @@ class Validator:
             return 0.0
 
     def _get_image_label_stats(self) -> dict[str, float]:
+        """Aggregate image-label task metrics across multiclass and survival heads."""
         metrics: dict[str, float] = {}
         balanced_accuracies: list[float] = []
         roc_aucs: list[float] = []
@@ -835,6 +847,7 @@ class Validator:
         return metrics
 
     def _summary_metric_labels(self) -> list[str]:
+        """Return terminal summary column labels for active validation tasks."""
         labels = ["Prec", "Rec", "mAP10", "mAP10-95", "Dice"]
         has_multiclass_tasks = any(
             task_spec.type == "multiclass" for task_spec in self.image_label_task_specs.values()
@@ -853,6 +866,7 @@ class Validator:
         image_label_stats: dict[str, float],
         dice_avg: float,
     ) -> list[float]:
+        """Return terminal summary metric values aligned with summary labels."""
         values = [*self.metrics.summary_mean_results(), dice_avg]
         has_multiclass_tasks = any(
             task_spec.type == "multiclass" for task_spec in self.image_label_task_specs.values()
@@ -982,4 +996,5 @@ class Validator:
 
     @staticmethod
     def _sanitize_case_name(case_name: str) -> str:
+        """Replace unsafe filename characters in case names for plot output."""
         return re.sub(r"[^A-Za-z0-9._-]", "_", case_name)

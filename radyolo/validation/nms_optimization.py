@@ -20,6 +20,7 @@ def compute_validation_fitness(
     metrics: dict[str, float],
     fitness_metric_weights: tuple[float, ...],
 ) -> float:
+    """Compute weighted scalar fitness from validation metric values."""
     map_1095 = float(metrics.get("metrics/mAP10-95", 0.0))
     map_1095_agn = float(metrics.get("metrics/mAP10-95Agn", 0.0))
     dice = float(metrics.get("metrics/dice", 0.0))
@@ -50,6 +51,7 @@ def run_nms_threshold_optimization(
     best_model_path: Path,
     device: str | object,
 ) -> None:
+    """Evaluate candidate NMS IoU thresholds for last/best checkpoints and save CSV."""
     candidate_thresholds = config.nms_iou_threshold_candidates
     if not candidate_thresholds:
         return
@@ -136,6 +138,7 @@ def evaluate_nms_thresholds_for_checkpoint(
     save_dir: Path,
     device: str | object,
 ) -> list[dict[str, str | float | bool]]:
+    """Run validation for each candidate NMS threshold on one checkpoint."""
     loaded_checkpoint = load_checkpoint_model(checkpoint_path, device_override=device)
     evaluation_config = config.model_copy(update={"plots": False, "verbose": False})
     result_rows: list[dict[str, str | float | bool]] = []

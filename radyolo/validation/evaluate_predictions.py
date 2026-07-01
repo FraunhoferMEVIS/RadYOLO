@@ -17,6 +17,7 @@ IOU_THRESHOLDS = torch.linspace(0.1, 0.95, 18)
 
 
 def _parse_label_line(line: str) -> tuple[int, float, float, float, float, float, float]:
+    """Parse one normalized label row into class id and xyzwhd values."""
     parts = line.strip().split()
     if len(parts) != 7:
         msg = (
@@ -37,6 +38,7 @@ def _normalized_xyzwhd_to_xyzxyz(
     h: float,
     d: float,
 ) -> list[float]:
+    """Convert normalized box center-size coordinates to corner coordinates."""
     half_w = w / 2.0
     half_h = h / 2.0
     half_d = d / 2.0
@@ -44,6 +46,7 @@ def _normalized_xyzwhd_to_xyzxyz(
 
 
 def _load_reference_case(labels_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load one reference case from TXT labels into class and box tensors."""
     classes: list[int] = []
     boxes: list[list[float]] = []
     for line in labels_path.read_text(encoding="utf-8").splitlines():
@@ -65,6 +68,7 @@ def _load_reference_case(labels_path: Path) -> tuple[torch.Tensor, torch.Tensor]
 
 
 def _load_prediction_case(prediction_path: Path) -> torch.Tensor:
+    """Load one prediction case JSON into an (N, 8) detection tensor."""
     parsed = json.loads(prediction_path.read_text(encoding="utf-8"))
     if not isinstance(parsed, list):
         msg = f"Prediction file {prediction_path} must contain a list of detections."
@@ -98,6 +102,7 @@ def _match_predictions(
     *,
     class_agnostic: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Match detections to references per IoU threshold and return TP/FP masks."""
     true_positives_np = np.zeros((pred_classes.shape[0], IOU_THRESHOLDS.shape[0]), dtype=bool)
     true_positives_missing_np = np.zeros(
         (pred_classes.shape[0], IOU_THRESHOLDS.shape[0]),
@@ -165,6 +170,7 @@ def _concat_or_default(
     shape: tuple[int, ...],
     dtype: np.dtype[Any],
 ) -> np.ndarray:
+    """Concatenate tensors or return an empty NumPy array with the requested shape."""
     if not tensors:
         return np.zeros(shape, dtype=dtype)
     return torch.cat(tensors, 0).cpu().numpy()
@@ -175,6 +181,7 @@ def _to_curve_metrics(
     fp: torch.Tensor,
     num_references: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute precision, recall, F1, and FN arrays over IoU thresholds."""
     if tp.ndim != 2 or fp.ndim != 2 or tp.shape != fp.shape:
         msg = (
             "tp/fp tensors must have shape (num_predictions, num_thresholds), "
@@ -219,6 +226,7 @@ def _to_scalar_case_metrics(
     tp_agnostic: torch.Tensor,
     fp_agnostic: torch.Tensor,
 ) -> dict[str, Any]:
+    """Build scalar per-case metrics and counts from TP/FP curves."""
     precision_curve, recall_curve, f1_curve, fn_curve = _to_curve_metrics(tp, fp, num_references)
     precision_curve_agn, recall_curve_agn, f1_curve_agn, fn_curve_agn = _to_curve_metrics(
         tp_agnostic,
@@ -261,6 +269,7 @@ def _to_scalar_case_metrics(
 
 
 def _sort_per_case_results(per_case_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort per-case metrics from worst to best using aggregate ranking keys."""
     return sorted(
         per_case_results,
         key=lambda case: (
@@ -283,6 +292,7 @@ def _evaluate_single_case(
     tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     | None,
 ]:
+    """Evaluate one case and return per-case metrics plus aggregate tensors."""
     pred_cls = detections[:, 7].to(dtype=torch.int64)
     conf = detections[:, 6]
 
@@ -330,6 +340,7 @@ def _evaluate_single_case(
 
 
 def _load_names(labels_dir: Path, observed_class_ids: set[int]) -> dict[int, str]:
+    """Resolve class names from dataset.yaml or fall back to generated names."""
     dataset_yaml = labels_dir.parent / "dataset.yaml"
     if dataset_yaml.exists():
         parsed = yaml.safe_load(dataset_yaml.read_text(encoding="utf-8"))
@@ -344,6 +355,7 @@ def _load_names(labels_dir: Path, observed_class_ids: set[int]) -> dict[int, str
 
 
 def _normalize_case_name(case_name: str) -> str:
+    """Normalize case identifiers so dots and underscores compare equally."""
     # Treat dots and underscores as equivalent delimiters when matching case IDs.
     return case_name.replace(".", "_")
 
@@ -353,6 +365,7 @@ def _index_cases_by_normalized_name(
     *,
     kind: str,
 ) -> dict[str, tuple[str, Path]]:
+    """Index case files by normalized name and raise on normalization collisions."""
     indexed: dict[str, tuple[str, Path]] = {}
     for stem, path in files.items():
         normalized = _normalize_case_name(stem)
@@ -368,6 +381,7 @@ def _index_cases_by_normalized_name(
 
 
 def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[str, Any]:
+    """Evaluate a prediction folder against references and return metrics and curves."""
     prediction_files = {path.stem: path for path in sorted(predictions_dir.glob("*.json"))}
     label_files = {path.stem: path for path in sorted(labels_dir.glob("*.txt"))}
 

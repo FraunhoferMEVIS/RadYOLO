@@ -91,15 +91,18 @@ IMAGE_LABEL_SUMMARY_FNAME = "validation_image_labels.png"
 
 
 def _hex_to_rgb(color_hex: str) -> tuple[int, int, int]:
+    """Convert a hex color string to an RGB tuple."""
     color_hex = color_hex.removeprefix("#")
     return tuple(int(color_hex[index : index + 2], 16) for index in (0, 2, 4))
 
 
 def _rgb_to_mpl(color_rgb: tuple[int, int, int]) -> tuple[float, float, float]:
+    """Convert 0-255 RGB values to matplotlib's 0-1 float range."""
     return tuple(channel / 255.0 for channel in color_rgb)
 
 
 def palette_rgb(index: int) -> tuple[int, int, int]:
+    """Return a palette color with deterministic overflow variations."""
     base_index = index % len(BASE_PLOT_HEX_COLORS)
     cycle_index = index // len(BASE_PLOT_HEX_COLORS)
     base_rgb = _hex_to_rgb(BASE_PLOT_HEX_COLORS[base_index])
@@ -120,10 +123,12 @@ def palette_rgb(index: int) -> tuple[int, int, int]:
 
 
 def palette_mpl(index: int) -> tuple[float, float, float]:
+    """Return a palette color as a matplotlib RGB triple."""
     return _rgb_to_mpl(palette_rgb(index))
 
 
 def named_plot_color(name: Literal["mean", "background", "operating", "best"]) -> str:
+    """Resolve a semantic plotting color name to its hex color."""
     return {
         "mean": MAIN_CURVE_COLOR,
         "background": BACKGROUND_CURVE_COLOR,
@@ -133,6 +138,7 @@ def named_plot_color(name: Literal["mean", "background", "operating", "best"]) -
 
 
 def confusion_matrix_cmap() -> LinearSegmentedColormap:
+    """Build the custom colormap used for confusion matrix plots."""
     base_hue, _, base_saturation = colorsys.rgb_to_hls(
         *_rgb_to_mpl(_hex_to_rgb(CONFUSION_MATRIX_BASE_COLOR))
     )
@@ -392,15 +398,12 @@ def plot_images(
     return None
 
 
-def _get_case_base_volume(image: torch.Tensor | npt.NDArray[np.float32]) -> torch.Tensor:
-    return _get_case_plot_volume(image, image_mode="default")
-
-
 def _get_case_plot_volume(
     image: torch.Tensor | npt.NDArray[np.float32],
     image_mode: Literal["default", "channel_difference"] = "default",
     difference_channels: tuple[int, int] = (2, 0),
 ) -> torch.Tensor:
+    """Select the image volume used for validation-case projections."""
     image_tensor = torch.as_tensor(image, dtype=torch.float32)
     if image_tensor.ndim != 4:
         msg = f"Expected case image with shape (C, D, H, W), got {tuple(image_tensor.shape)}"
@@ -429,6 +432,7 @@ def _project_case_volume(
     difference_channels: tuple[int, int] = (2, 0),
     upper_quantile: float = 0.995,
 ) -> npt.NDArray[np.float32]:
+    """Project a 3D case volume onto a 2D plane and normalize intensities."""
     volume = _get_case_plot_volume(
         image,
         image_mode=image_mode,
@@ -454,6 +458,7 @@ def _project_boxes_for_plane(
     boxes_xyzxyz: torch.Tensor | npt.NDArray[np.float32],
     plane: Literal["xy", "xz", "yz"],
 ) -> npt.NDArray[np.float32]:
+    """Project 3D xyzxyz boxes to 2D xyxy boxes for a selected plane."""
     if isinstance(boxes_xyzxyz, torch.Tensor):
         if boxes_xyzxyz.numel() == 0:
             return np.zeros((0, 4), dtype=np.float32)
@@ -475,6 +480,7 @@ def _annotate_projected_boxes(
     confs: torch.Tensor | npt.NDArray[np.float32] | None = None,
     conf_thres: float = 0.1,
 ) -> None:
+    """Draw projected boxes and labels on a matplotlib axis."""
     boxes_2d = _project_boxes_for_plane(boxes_xyzxyz, plane)
     if isinstance(classes, torch.Tensor):
         classes_np = classes.detach().to(torch.int64).cpu().numpy()
@@ -534,6 +540,7 @@ def plot_validation_case(
     difference_channels: tuple[int, int] = (2, 0),
     conf_thres: float = 0.1,
 ) -> None:
+    """Save a 2x3 figure comparing reference and predicted boxes per plane."""
     figure, axes = plt.subplots(2, 3, figsize=(15, 9), constrained_layout=True)
     plane_titles = ("xy", "xz", "yz")
 
@@ -623,6 +630,7 @@ def _plot_results_grid(
     shape: tuple[int, int],
     figsize: tuple[float, float],
 ) -> None:
+    """Plot selected metric columns from one or more results CSV files."""
     fig, ax = plt.subplots(*shape, figsize=figsize, tight_layout=True, sharex="col")
     axes = np.atleast_1d(ax).ravel()
     has_any_series = False
@@ -698,18 +706,21 @@ def _concat_or_empty(
     dtype: object,
     shape: tuple[int, ...],
 ) -> npt.NDArray:
+    """Concatenate arrays or return an empty array with the requested shape."""
     if not arrays:
         return np.zeros(shape, dtype=dtype)
     return np.concatenate(arrays, axis=0)
 
 
 def _softmax(logits: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Compute row-wise softmax probabilities from logits."""
     shifted_logits = logits - np.max(logits, axis=1, keepdims=True)
     exponentials = np.exp(shifted_logits)
     return exponentials / exponentials.sum(axis=1, keepdims=True)
 
 
 def _survival_bin_widths(thresholds: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Compute bin widths for survival thresholds."""
     if thresholds.size == 1:
         return np.ones_like(thresholds)
     trailing_width = thresholds[-1] - thresholds[-2]
@@ -726,6 +737,7 @@ def _plot_confusion_matrix_axis(
     normalize: bool,
     title: str,
 ) -> None:
+    """Render one confusion-matrix heatmap axis."""
     display_matrix = matrix.astype(np.float64, copy=True)
     if normalize:
         column_sums = display_matrix.sum(axis=0, keepdims=True)
@@ -760,6 +772,7 @@ def _plot_multiclass_roc_axis(
     class_names: list[str],
     title_prefix: str,
 ) -> None:
+    """Plot per-class and macro-average ROC curves on a provided axis."""
     if probabilities.size == 0 or targets.size == 0:
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
@@ -834,6 +847,7 @@ def _plot_survival_axis(
     title_prefix: str,
     unit: str | None,
 ) -> None:
+    """Plot survival probability summary curves and report c-index in the title."""
     if logits.size == 0 or survival_times.size == 0 or event_indicators.size == 0:
         ax.set_title(f"{title_prefix} Survival Metric")
         ax.text(
