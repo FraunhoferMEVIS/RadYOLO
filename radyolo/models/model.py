@@ -43,6 +43,8 @@ from radyolo.utils.util import intersect_dicts, make_divisible, select_device, u
 
 @dataclass(frozen=True)
 class LoadedCheckpointModel:
+    """Container for a loaded checkpoint, config, model instance, and runtime device."""
+
     checkpoint: ModelCheckpoint
     train_config: DefaultConfig
     model: HardcodedModel
@@ -50,6 +52,7 @@ class LoadedCheckpointModel:
 
 
 def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
+    """Return the smallest model stride or a fallback when unavailable."""
     if model is not None:
         model = unwrap_model(model)
     stride = getattr(model, "stride", None)
@@ -59,6 +62,8 @@ def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
 
 
 class GlobalImageLabelHead(nn.Module):
+    """Global multi-task image-label head with pooled feature fusion and optional tabular input."""
+
     def __init__(
         self,
         feature_channels: dict[str, int],
@@ -129,6 +134,7 @@ class GlobalImageLabelHead(nn.Module):
         tabular_values: torch.Tensor | None,
         tabular_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Validate tabular tensors and provide zero-filled defaults when inputs are missing."""
         if self.tabular_encoder is None:
             msg = "Tabular inputs can only be resolved when tabular_encoder is configured"
             raise RuntimeError(msg)
@@ -169,6 +175,7 @@ class GlobalImageLabelHead(nn.Module):
         tabular_values: torch.Tensor | None = None,
         tabular_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
+        """Pool selected feature maps and return logits for each configured label task."""
         pooled_features: list[torch.Tensor] = []
         for feature_name in self.selected_feature_maps:
             projected = self.projectors[feature_name](feature_maps[feature_name])
@@ -192,6 +199,8 @@ class GlobalImageLabelHead(nn.Module):
 
 
 class TabularTransformerEncoder(nn.Module):
+    """Transformer encoder for tabular features with feature embeddings and mask tokens."""
+
     def __init__(
         self,
         num_features: int,
@@ -233,6 +242,7 @@ class TabularTransformerEncoder(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
+        """Initialize learnable feature and mask token embeddings."""
         nn.init.normal_(self.feature_embeddings, mean=0.0, std=0.02)
         nn.init.normal_(self.mask_tokens, mean=0.0, std=0.02)
 
@@ -265,6 +275,8 @@ class TabularTransformerEncoder(nn.Module):
 
 
 class TabularTransformerEncoderV2(nn.Module):
+    """Tabular transformer variant with optional CLS token and configurable tokenization."""
+
     def __init__(
         self,
         num_features: int,
@@ -324,6 +336,7 @@ class TabularTransformerEncoderV2(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
+        """Initialize embedding, mask, and CLS token parameters."""
         nn.init.normal_(self.feature_embeddings, mean=0.0, std=0.02)
         if self.mask_tokens is not None:
             nn.init.normal_(self.mask_tokens, mean=0.0, std=0.02)
@@ -387,6 +400,7 @@ def _resolve_image_label_tasks(
     train_config: DefaultConfig,
     image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
 ) -> dict[str, ImageLabelTaskSpec]:
+    """Resolve image-label task specs from arguments or dataset metadata."""
     if image_label_tasks is not None:
         return dict(image_label_tasks)
 
@@ -403,6 +417,7 @@ def _resolve_image_label_tasks(
 
 
 def _resolve_tabular_feature_names(train_config: DefaultConfig) -> tuple[str, ...]:
+    """Load declared tabular feature names and validate fusion prerequisites."""
     feature_names = load_tabular_feature_names(Path(train_config.data))
     if train_config.enable_tabular_image_label_fusion and not feature_names:
         msg = (
@@ -416,10 +431,13 @@ def _resolve_tabular_feature_names(train_config: DefaultConfig) -> tuple[str, ..
 def _load_image_label_tasks_from_checkpoint_metadata(
     checkpoint: ModelCheckpoint,
 ) -> dict[str, ImageLabelTaskSpec]:
+    """Extract serialized image-label task definitions from checkpoint metadata."""
     return dict(checkpoint["model_metadata"]["image_label_tasks"])
 
 
 class HardcodedModel(nn.Module):
+    """Fixed YOLO-style 3D architecture with optional segmentation and image-label heads."""
+
     MODEL_SCALES: ClassVar[dict[str, tuple[float, float, int]]] = {
         "n": (0.50, 0.25, 256),
         "s": (0.50, 0.50, 512),
@@ -871,6 +889,7 @@ class HardcodedModel(nn.Module):
         return output
 
     def load(self, state_dict: dict) -> None:
+        """Load only checkpoint parameters that intersect the current model state."""
         state_dict_intersected = intersect_dicts(state_dict, self.state_dict())
         self.load_state_dict(state_dict_intersected, strict=False)
 
@@ -883,6 +902,7 @@ def build_model_from_config(
     image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
     tabular_feature_names: tuple[str, ...] | None = None,
 ) -> HardcodedModel:
+    """Instantiate a model from train config and optionally load a partial state dict."""
     resolved_image_label_tasks = _resolve_image_label_tasks(train_config, image_label_tasks)
     resolved_tabular_feature_names = (
         tabular_feature_names
@@ -939,6 +959,7 @@ def load_checkpoint_model(
     *,
     device_override: str | None = None,
 ) -> LoadedCheckpointModel:
+    """Load checkpoint artifacts and return an eval-ready model bundle on the selected device."""
     checkpoint = load_model_checkpoint(checkpoint_path)
     train_config = checkpoint["train_config"]
     device = select_device(device_override or getattr(train_config, "device", ""))

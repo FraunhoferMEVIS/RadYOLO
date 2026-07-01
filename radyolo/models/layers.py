@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class ModelOutput:
+    """Structured container for raw and post-processed model prediction tensors."""
+
     raw_predictions: list[torch.Tensor] | None = None
     decoded_boxes: torch.Tensor | None = None
     class_probabilities: torch.Tensor | None = None
@@ -24,6 +26,7 @@ class ModelOutput:
     image_label_outputs: dict[str, torch.Tensor] | None = None
 
     def to_prediction_components(self) -> tuple[torch.Tensor, ...]:
+        """Return decoded detection tensors in the expected postprocessing order."""
         if self.decoded_boxes is None or self.class_probabilities is None:
             msg = "Decoded detection outputs are not available"
             raise RuntimeError(msg)
@@ -36,6 +39,7 @@ class ModelOutput:
         return (self.decoded_boxes, self.class_probabilities)
 
     def to_export_tensors(self) -> tuple[torch.Tensor, ...]:
+        """Return prediction tensors serialized by the export pipeline."""
         output_tensors = list(self.to_prediction_components())
         if self.mask_coefficients is not None:
             output_tensors.append(self.mask_coefficients)
@@ -91,6 +95,8 @@ def autopad[
 
 
 class Conv(nn.Module):
+    """Convolution block with batch norm and configurable activation."""
+
     default_activation = nn.SiLU(inplace=True)
 
     def __init__(  # noqa: PLR0913
@@ -129,6 +135,8 @@ class Conv(nn.Module):
 
 
 class ConvTransposed(nn.Module):
+    """Transposed-convolution block with batch norm and configurable activation."""
+
     default_activation = nn.SiLU(inplace=True)
 
     def __init__(
@@ -163,6 +171,8 @@ class ConvTransposed(nn.Module):
 
 
 class DWConv(Conv):
+    """Depthwise-style convolution using GCD-based grouped convolution."""
+
     def __init__(
         self,
         in_channels: int,
@@ -172,6 +182,7 @@ class DWConv(Conv):
         dilation: int = 1,
         activation: bool | nn.Module = True,
     ) -> None:
+        """Initialize grouped convolution with depthwise-compatible channel grouping."""
         super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -197,11 +208,14 @@ class DFL(nn.Module):
         self.in_channels = in_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Convert per-bin distributions to continuous box distances."""
         b, _, a = x.shape
         return self.conv(x.view(b, 6, self.in_channels, a).transpose(2, 1).softmax(1)).view(b, 6, a)
 
 
 class Bottleneck(nn.Module):
+    """Two-convolution bottleneck block with optional residual connection."""
+
     def __init__(
         self,
         in_channels: int,
@@ -222,6 +236,8 @@ class Bottleneck(nn.Module):
 
 
 class C2f(nn.Module):
+    """C2f block that iteratively expands and concatenates hidden bottleneck paths."""
+
     def __init__(
         self,
         in_channels: int,
@@ -254,6 +270,7 @@ class C2f(nn.Module):
         return self.out_conv(torch.cat(hidden_layers, 1))
 
     def forward_split(self, x: torch.Tensor) -> torch.Tensor:
+        """Variant of forward that uses explicit split sizes instead of chunk."""
         split_output = self.in_conv(x).split((self.hidden_channels, self.hidden_channels), 1)
         hidden_layers = [split_output[0], split_output[1]]
         for m in self.m:
@@ -262,6 +279,8 @@ class C2f(nn.Module):
 
 
 class C3k2(C2f):
+    """C2f-derived block that swaps bottlenecks with optional C3k sub-blocks."""
+
     def __init__(
         self,
         in_channels: int,
@@ -282,6 +301,8 @@ class C3k2(C2f):
 
 
 class C3(nn.Module):
+    """C3 block combining transformed and bypass paths before output projection."""
+
     def __init__(
         self,
         in_channels: int,
@@ -315,6 +336,8 @@ class C3(nn.Module):
 
 
 class C3k(C3):
+    """C3 variant that uses configurable kernel size inside bottleneck stack."""
+
     def __init__(
         self,
         in_channels: int,
@@ -363,6 +386,8 @@ class SPPF(nn.Module):
 
 
 class Attention(nn.Module):
+    """Multi-head spatial attention with depthwise positional encoding."""
+
     def __init__(self, in_dim: int, num_heads: int = 8, attention_ratio: float = 0.5) -> None:
         super().__init__()
         self.num_heads = num_heads
@@ -376,6 +401,7 @@ class Attention(nn.Module):
         self.positional_encoding = Conv(in_dim, in_dim, 3, 1, n_groups=in_dim, activation=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute attention over flattened spatial tokens and reproject to feature space."""
         batch, channel, depth, height, width = x.shape
         n_pixels = depth * height * width
         query_key_value: torch.Tensor = self.query_key_value(x)
@@ -490,6 +516,8 @@ class C2PSA(nn.Module):
 
 
 class Concat(nn.Module):
+    """Concatenate tensors along a configured dimension."""
+
     def __init__(self, dimension: int = 1) -> None:
         super().__init__()
         self.d: int = dimension
@@ -504,6 +532,7 @@ def build_detection_head_layers(
     out_channels: int,
     convolution_type: Literal["regular", "separable"],
 ) -> nn.Sequential:
+    """Build a regular or depthwise-separable 3-layer detection head branch."""
     if convolution_type == "regular":
         return nn.Sequential(
             Conv(in_channels, hidden_channels, 3),
@@ -525,6 +554,7 @@ def resolve_head_hidden_channels(
     factor: float,
     head_name: str,
 ) -> int:
+    """Resolve and validate hidden channel width derived from an input-channel factor."""
     hidden_channels = int(input_channels * factor)
     if hidden_channels < 1:
         msg = (
@@ -536,6 +566,8 @@ def resolve_head_hidden_channels(
 
 
 class Detect(nn.Module):
+    """Detection head that predicts box distributions, classes, and optional objectness."""
+
     export = False
     max_det = 300
     shape = None
@@ -626,6 +658,7 @@ class Detect(nn.Module):
         self.dfl = DFL(self.dfl_bins, min_value=self.dfl_min) if self.use_dfl else nn.Identity()
 
     def forward(self, pred_raw: list[torch.Tensor]) -> ModelOutput:
+        """Apply per-scale heads and decode predictions when running in eval mode."""
         for i in range(self.nl):
             reg = self.cv_boxes[i](pred_raw[i])
             cls = self.cv_classes[i](pred_raw[i])
@@ -665,6 +698,7 @@ class Detect(nn.Module):
         return output
 
     def bias_init(self) -> None:
+        """Initialize box/class/objectness biases with stride-aware priors."""
         for idx, (box_convolutions, class_convolutions, stride) in enumerate(
             zip(self.cv_boxes, self.cv_classes, self.stride, strict=True)
         ):
@@ -706,6 +740,7 @@ class Detect(nn.Module):
     def decode_bboxes(
         self, bboxes: torch.Tensor, anchors: torch.Tensor, xyzwhd: bool = True
     ) -> torch.Tensor:
+        """Decode predicted box parameters to absolute coordinates."""
         return decode_bboxes(
             bboxes,
             anchors,
@@ -728,7 +763,6 @@ class PrototypeMasksFullResolutionV2(nn.Module):
         input_channels_sixteenth: int,
         prototypes: int = 8,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
         self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
         self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
@@ -755,7 +789,6 @@ class PrototypeMasksFullResolutionV2(nn.Module):
         x_eight: torch.Tensor,
         x_sixteenth: torch.Tensor,
     ) -> torch.Tensor:
-        """Perform a forward pass through layers using multi-scale input feature maps."""
         x = self.upsample_sixteenth(x_sixteenth)
         x = self.reshape_eigth(x_eight) + x
         x = self.cv_eigth(x)
@@ -783,7 +816,6 @@ class PrototypeMasksFullResolution(nn.Module):
         input_channels_sixteenth: int,
         prototypes: int = 8,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
         self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
         self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
@@ -809,7 +841,6 @@ class PrototypeMasksFullResolution(nn.Module):
         x_eight: torch.Tensor,
         x_sixteenth: torch.Tensor,
     ) -> torch.Tensor:
-        """Perform a forward pass through layers using multi-scale input feature maps."""
         x = self.upsample_sixteenth(x_sixteenth)
         x = self.reshape_eigth(x_eight) + x
         x = self.cv_eigth(x)
@@ -836,7 +867,6 @@ class PrototypeMasksHalfResolution(nn.Module):
         input_channels_sixteenth: int,
         prototypes: int = 8,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
         self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
         self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
@@ -858,7 +888,6 @@ class PrototypeMasksHalfResolution(nn.Module):
         x_eight: torch.Tensor,
         x_sixteenth: torch.Tensor,
     ) -> torch.Tensor:
-        """Perform a forward pass through layers using multi-scale input feature maps."""
         x = self.upsample_sixteenth(x_sixteenth)
         x = self.reshape_eigth(x_eight) + x
         x = self.cv_eigth(x)
@@ -882,7 +911,6 @@ class PrototypeMasksHalfResolutionV2(nn.Module):
         input_channels_sixteenth: int,
         prototypes: int = 8,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
         self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
         self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
@@ -904,7 +932,6 @@ class PrototypeMasksHalfResolutionV2(nn.Module):
         x_eight: torch.Tensor,
         x_sixteenth: torch.Tensor,
     ) -> torch.Tensor:
-        """Perform a forward pass through layers using multi-scale input feature maps."""
         x = self.upsample_sixteenth(x_sixteenth)
         x = torch.cat([self.reshape_eigth(x_eight), x], 1)
         x = self.cv_eigth(x)
@@ -929,7 +956,6 @@ class PrototypeMasksFullResolutionV3(nn.Module):
         input_channels_sixteenth: int,
         prototypes: int = 8,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
         self.upsample_sixteenth = ConvTransposed(input_channels_sixteenth, prototypes * 8, 2, 2)
         self.upsample_eigth = ConvTransposed(prototypes * 8, prototypes * 4, 2, 2)
@@ -956,7 +982,6 @@ class PrototypeMasksFullResolutionV3(nn.Module):
         x_eight: torch.Tensor,
         x_sixteenth: torch.Tensor,
     ) -> torch.Tensor:
-        """Perform a forward pass through layers using multi-scale input feature maps."""
         x = self.upsample_sixteenth(x_sixteenth)
         x = torch.cat([self.reshape_eigth(x_eight), x], 1)
         x = self.cv_eigth(x)
@@ -982,7 +1007,6 @@ class PrototypeMasksHighResolution(nn.Module):
         channels_eigth_resolution: int,
         prototypes: int = 32,
     ) -> None:
-        """Initialize the PrototypeMasks module with specified number of prototypes."""
         super().__init__()
         self.cv1 = Conv(channels_eigth_resolution, prototypes * 4, kernel_size=3)
         self.upsample1 = nn.ConvTranspose3d(prototypes * 4, prototypes * 4, 2, 2, 0, bias=True)
@@ -1006,7 +1030,6 @@ class PrototypeMasksHighResolution(nn.Module):
         input_quater_resolution: torch.Tensor,
         input_eigth_resolution: torch.Tensor,
     ) -> torch.Tensor:
-        """Perform a forward pass through layers using an upsampled input image."""
         x = self.cv1(input_eigth_resolution)
         x = self.upsample1(x)
 
