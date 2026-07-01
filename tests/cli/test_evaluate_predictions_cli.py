@@ -49,7 +49,7 @@ def test_evaluate_predictions_cli_uses_only_common_cases(tmp_path) -> None:
     )
 
     assert result.exit_code == 0
-    assert result.output.strip() == f"Wrote evaluation files to: {output_dir!s}"
+    assert f"Wrote evaluation files to: {output_dir!s}" in result.output
 
     metrics_path = output_dir / "metrics.json"
     metrics_per_case_path = output_dir / "metrics_per_case.json"

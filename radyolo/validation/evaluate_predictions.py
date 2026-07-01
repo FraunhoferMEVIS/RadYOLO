@@ -7,7 +7,8 @@ import numpy as np
 import torch
 import yaml
 
-from radyolo.utils.ops import box_iou
+from radyolo.data.object_labels import load_case_object_labels
+from radyolo.utils.ops import box_iou, xyzwhd2xyzxyz
 from radyolo.validation.metrics import FROC_TARGETS, DetMetrics, _compute_froc_score
 
 if TYPE_CHECKING:
@@ -16,55 +17,32 @@ if TYPE_CHECKING:
 IOU_THRESHOLDS = torch.linspace(0.1, 0.95, 18)
 
 
-def _parse_label_line(line: str) -> tuple[int, float, float, float, float, float, float]:
-    """Parse one normalized label row into class id and xyzwhd values."""
-    parts = line.strip().split()
-    if len(parts) != 7:
-        msg = (
-            "Label line must have 7 entries: class x y z w h d (normalized), "
-            f"but has {len(parts)} entries."
-        )
-        raise ValueError(msg)
-    cls = int(float(parts[0]))
-    x, y, z, w, h, d = map(float, parts[1:])
-    return cls, x, y, z, w, h, d
-
-
-def _normalized_xyzwhd_to_xyzxyz(
-    x: float,
-    y: float,
-    z: float,
-    w: float,
-    h: float,
-    d: float,
-) -> list[float]:
-    """Convert normalized box center-size coordinates to corner coordinates."""
-    half_w = w / 2.0
-    half_h = h / 2.0
-    half_d = d / 2.0
-    return [x - half_w, y - half_h, z - half_d, x + half_w, y + half_h, z + half_d]
-
-
-def _load_reference_case(labels_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
-    """Load one reference case from TXT labels into class and box tensors."""
-    classes: list[int] = []
-    boxes: list[list[float]] = []
-    for line in labels_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        cls, x, y, z, w, h, d = _parse_label_line(line)
-        classes.append(cls)
-        boxes.append(_normalized_xyzwhd_to_xyzxyz(x, y, z, w, h, d))
-
-    if not classes:
+def _load_reference_case(labels_dir: Path, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load one reference case into class and xyzxyz box tensors."""
+    entries = load_case_object_labels(labels_dir, case_name)
+    if not entries:
         return (
             torch.zeros((0,), dtype=torch.int64),
             torch.zeros((0, 6), dtype=torch.float32),
         )
+
+    classes = [entry["class_"] for entry in entries]
+    boxes_xyzwhd = torch.tensor(
+        [entry["box_relative_xyzwhd"] for entry in entries],
+        dtype=torch.float32,
+    )
     return (
         torch.tensor(classes, dtype=torch.int64),
-        torch.tensor(boxes, dtype=torch.float32),
+        xyzwhd2xyzxyz(boxes_xyzwhd),
     )
+
+
+def _collect_label_files(labels_dir: Path) -> dict[str, Path]:
+    """Collect reference label files by case, preferring JSON over TXT for each stem."""
+    label_files = {path.stem: path for path in sorted(labels_dir.glob("*.txt"))}
+    for path in sorted(labels_dir.glob("*.json")):
+        label_files[path.stem] = path
+    return label_files
 
 
 def _load_prediction_case(prediction_path: Path) -> torch.Tensor:
@@ -383,7 +361,7 @@ def _index_cases_by_normalized_name(
 def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[str, Any]:
     """Evaluate a prediction folder against references and return metrics and curves."""
     prediction_files = {path.stem: path for path in sorted(predictions_dir.glob("*.json"))}
-    label_files = {path.stem: path for path in sorted(labels_dir.glob("*.txt"))}
+    label_files = _collect_label_files(labels_dir)
 
     prediction_index = _index_cases_by_normalized_name(prediction_files, kind="prediction")
     label_index = _index_cases_by_normalized_name(label_files, kind="reference")
@@ -422,9 +400,9 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
     total_references = 0
     per_case_results: list[dict[str, Any]] = []
 
-    for prediction_case_name, label_case_name, prediction_path, label_path in common_cases:
+    for prediction_case_name, label_case_name, prediction_path, _label_path in common_cases:
         detections = _load_prediction_case(prediction_path)
-        gt_cls, gt_boxes = _load_reference_case(label_path)
+        gt_cls, gt_boxes = _load_reference_case(labels_dir, label_case_name)
 
         total_predictions += int(detections.shape[0])
         total_references += int(gt_cls.shape[0])
