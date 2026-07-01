@@ -27,7 +27,7 @@ from radyolo.inference.merge_prediction_masks import (
     merge_prediction_masks as merge_prediction_masks_fn,
 )
 from radyolo.inference.predict import PredictionConfig, run_prediction
-from radyolo.models.model import build_model_from_config
+from radyolo.models.model import load_checkpoint_model
 from radyolo.training.train import LOG_LEVEL_ENV, Trainer
 from radyolo.utils.logging_utils import configure_tqdm_logging
 from radyolo.validation.evaluate_predictions import evaluate_prediction_folder
@@ -209,12 +209,9 @@ def onnx_export(
     """
     try:
         LOGGER.info(f"Exporting model {model_path} to onnx...")
-        checkpoint = load_model_checkpoint(model_path)
-        train_config = checkpoint["train_config"]
-        model = build_model_from_config(
-            train_config,
-            state_dict=checkpoint["model_state_dict"],
-        )
+        loaded_checkpoint = load_checkpoint_model(model_path, device_override="cpu")
+        train_config = loaded_checkpoint.train_config
+        model = loaded_checkpoint.model
 
         input_shape = (train_config.input_channels, *train_config.patch_size.get_zyx())
         metadata = build_export_metadata(
