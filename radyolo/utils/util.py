@@ -37,6 +37,7 @@ def make_divisible(x: float, divisor: int | torch.Tensor) -> int:
 def intersect_dicts(
     a: dict[str, Any], b: dict[str, Any], exclude: tuple[str, ...] = ()
 ) -> dict[str, Any]:
+    """Return keys shared by both dicts with matching tensor shapes."""
     return {
         key: value
         for key, value in a.items()
@@ -45,6 +46,7 @@ def intersect_dicts(
 
 
 def _normalize_device_string(device: str) -> str:
+    """Normalize device strings to a compact lowercase identifier."""
     normalized = str(device).lower()
     for remove in ("cuda:", "none", "(", ")", "[", "]", "'", '"', " "):
         normalized = normalized.replace(remove, "")
@@ -52,6 +54,7 @@ def _normalize_device_string(device: str) -> str:
 
 
 def parse_cuda_device_ids(device: str | torch.device = "") -> list[int]:
+    """Parse user device input into a list of CUDA device indices."""
     if isinstance(device, torch.device):
         if device.type != "cuda":
             return []
@@ -99,6 +102,7 @@ def unwrap_model(model: nn.Module) -> nn.Module:
 def select_device(
     device: str | torch.device = "",
 ) -> torch.device:
+    """Resolve and validate the requested compute device for runtime use."""
     if isinstance(device, torch.device):
         return device
 
@@ -148,11 +152,13 @@ def select_device(
 
 
 def get_gpu_info(index: torch.device | int | str) -> str:
+    """Return a short name and memory summary for a CUDA device."""
     properties = torch.cuda.get_device_properties(index)
     return f"{properties.name}, {properties.total_memory / (1 << 20):.0f}MiB"
 
 
 def init_seeds(seed: int = 0) -> None:
+    """Initialize Python, NumPy, and PyTorch random seeds."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

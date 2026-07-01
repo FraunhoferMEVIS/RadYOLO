@@ -90,6 +90,7 @@ def bbox_iou(
 def prepare_model_output_for_nms(
     model_output: ModelOutput,
 ) -> torch.Tensor:
+    """Convert structured model output into the tensor layout expected by NMS."""
     if model_output.objectness_probabilities is not None:
         class_scores = model_output.class_probabilities * model_output.objectness_probabilities
     else:
@@ -119,6 +120,7 @@ def postprocess_model_output(
     *,
     labels: Sequence[torch.Tensor] | None = None,
 ) -> list[torch.Tensor]:
+    """Apply configured confidence filtering and NMS to model predictions."""
     return non_max_suppression(
         model_output,
         postprocess_config.confidence_threshold,
@@ -213,6 +215,7 @@ def scale_boxes(
 def nms(
     boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float, max_detections: int
 ) -> torch.Tensor:
+    """Run class-agnostic greedy NMS and return selected box indices."""
     sorted_indices = torch.argsort(-scores)
     keep = []
     while len(sorted_indices) > 0:
