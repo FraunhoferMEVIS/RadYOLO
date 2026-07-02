@@ -84,6 +84,23 @@ def test_model_output_export_tensors_include_masks_when_available() -> None:
     assert torch.equal(export_tensors[3], model_output.prototype_masks)
 
 
+def test_model_output_export_tensors_include_image_label_outputs_in_sorted_order() -> None:
+    model_output = ModelOutput(
+        decoded_boxes=torch.ones((1, 6, 2), dtype=torch.float32),
+        class_probabilities=torch.ones((1, 2, 2), dtype=torch.float32),
+        image_label_outputs={
+            "survival": torch.tensor([[0.2, 0.8]], dtype=torch.float32),
+            "classification": torch.tensor([[0.6, 0.4]], dtype=torch.float32),
+        },
+    )
+
+    export_tensors = model_output.to_export_tensors()
+
+    assert len(export_tensors) == 4
+    assert torch.equal(export_tensors[2], model_output.image_label_outputs["classification"])
+    assert torch.equal(export_tensors[3], model_output.image_label_outputs["survival"])
+
+
 def test_non_max_suppression_accepts_model_output(monkeypatch) -> None:
     model_output = ModelOutput(
         decoded_boxes=torch.arange(12, dtype=torch.float32).reshape(1, 6, 2),
