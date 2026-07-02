@@ -40,3 +40,19 @@ def test_train_cli(minimal_train_config: Path, tmp_path: Path) -> None:
     assert any("best,weights_best.pt,0.2" in row for row in nms_rows[1:])
     checkpoint = load_model_checkpoint(best_path)
     assert checkpoint["train_config"].separate_objectness_head is True
+
+
+def test_train_cli_exits_nonzero_on_training_error(
+    minimal_train_config: Path,
+    monkeypatch,
+) -> None:
+    def _raise_training_error(self) -> None:
+        raise RuntimeError("simulated training failure")
+
+    monkeypatch.setattr("radyolo.Trainer.train", _raise_training_error)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["train", str(minimal_train_config)])
+
+    assert result.exit_code == 1
+    assert "Error: Training failed. See logs for details." in result.output

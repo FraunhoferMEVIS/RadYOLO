@@ -159,7 +159,8 @@ def train(config: Path) -> int:
         trainer.train()
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
-        return 1
+        msg = "Training failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
