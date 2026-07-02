@@ -334,7 +334,7 @@ def _compute_froc_curve(
     if tp.size == 0 or fp.size == 0 or conf.size == 0:
         zeros = np.zeros((1,), dtype=np.float32)
         ones = np.ones((1,), dtype=np.float32)
-        return zeros, zeros, ones, zeros, zeros
+        return zeros, zeros, ones
 
     indices_sorted: npt.NDArray[np.intp] = np.argsort(-conf)
     tp_sorted = tp[indices_sorted, 0].astype(np.float32)
