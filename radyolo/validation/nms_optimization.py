@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from radyolo.models.model import load_checkpoint_model
+from radyolo.validation.metrics import _select_froc_target_indices
 from radyolo.validation.validate import Validator
 
 if TYPE_CHECKING:
@@ -14,6 +15,44 @@ if TYPE_CHECKING:
 
 
 LOGGER = logging.getLogger(__name__)
+
+OPERATING_POINT_FPPI_TARGETS: tuple[float, ...] = (0.1, 0.5, 1.0)
+
+
+def _fppi_target_suffix(target: float) -> str:
+    """Return a stable decimal suffix for FP/image target column names."""
+    return f"{target:.1f}"
+
+
+def _collect_operating_point_metrics(validator: Validator) -> dict[str, float]:
+    """Collect confidence/sensitivity values for standard operating points."""
+    metrics_state = validator.metrics.metrics
+    target_indices = _select_froc_target_indices(
+        metrics_state.froc_avg_fp,
+        targets=OPERATING_POINT_FPPI_TARGETS,
+    )
+    operating_point_metrics: dict[str, float] = {}
+    for target, index in target_indices.items():
+        suffix = _fppi_target_suffix(target)
+        operating_point_metrics[f"metrics/sensitivity_at_{suffix}_fppi"] = round(
+            float(metrics_state.froc_sensitivity[index]),
+            5,
+        )
+        operating_point_metrics[f"metrics/confidence_at_{suffix}_fppi"] = round(
+            float(metrics_state.froc_confidence[index]),
+            5,
+        )
+
+    operating_point_metrics["metrics/confidence_at_max_f1"] = round(
+        float(metrics_state.best_confidence),
+        5,
+    )
+    if hasattr(metrics_state.f1, "size") and metrics_state.f1.size:
+        operating_point_metrics["metrics/f1"] = round(float(metrics_state.f1.mean()), 5)
+    else:
+        operating_point_metrics["metrics/f1"] = 0.0
+
+    return operating_point_metrics
 
 
 def compute_validation_fitness(
@@ -119,6 +158,14 @@ def run_nms_threshold_optimization(
         "metrics/mAP10-95",
         "metrics/mAP10-95Agn",
         "metrics/dice",
+        "metrics/f1",
+        "metrics/sensitivity_at_0.1_fppi",
+        "metrics/confidence_at_0.1_fppi",
+        "metrics/sensitivity_at_0.5_fppi",
+        "metrics/confidence_at_0.5_fppi",
+        "metrics/sensitivity_at_1.0_fppi",
+        "metrics/confidence_at_1.0_fppi",
+        "metrics/confidence_at_max_f1",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -154,6 +201,7 @@ def evaluate_nms_thresholds_for_checkpoint(
             trainer=None,
             model=loaded_checkpoint.model,
         )
+        operating_point_metrics = _collect_operating_point_metrics(nms_validator)
         fitness = compute_validation_fitness(metrics, config.fitness_metric_weights)
         result_rows.append(
             {
@@ -169,6 +217,7 @@ def evaluate_nms_thresholds_for_checkpoint(
                 "metrics/mAP10-95": round(float(metrics.get("metrics/mAP10-95", 0.0)), 5),
                 "metrics/mAP10-95Agn": round(float(metrics.get("metrics/mAP10-95Agn", 0.0)), 5),
                 "metrics/dice": round(float(metrics.get("metrics/dice", 0.0)), 5),
+                **operating_point_metrics,
             }
         )
     return result_rows

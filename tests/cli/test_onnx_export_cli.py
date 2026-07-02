@@ -205,6 +205,99 @@ def test_onnx_export_cli_uses_suggested_best_nms_threshold_when_available(
     assert metadata["best_nms_iou_threshold"] == "0.6"
 
 
+def test_onnx_export_cli_exports_operating_point_confidences_from_nms_csv(
+    trained_run: Path,
+) -> None:
+    model_path = trained_run / "weights_best.pt"
+    csv_path = trained_run / "nms_optimization.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "checkpoint",
+                "checkpoint_path",
+                "nms_iou_threshold",
+                "suggested",
+                "fitness",
+                "metrics/precision",
+                "metrics/recall",
+                "metrics/mAP10",
+                "metrics/mAP10Agn",
+                "metrics/mAP10-95",
+                "metrics/mAP10-95Agn",
+                "metrics/dice",
+                "metrics/f1",
+                "metrics/sensitivity_at_0.1_fppi",
+                "metrics/confidence_at_0.1_fppi",
+                "metrics/sensitivity_at_0.5_fppi",
+                "metrics/confidence_at_0.5_fppi",
+                "metrics/sensitivity_at_1.0_fppi",
+                "metrics/confidence_at_1.0_fppi",
+                "metrics/confidence_at_max_f1",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "checkpoint": "best",
+                "checkpoint_path": "weights_best.pt",
+                "nms_iou_threshold": 0.2,
+                "suggested": True,
+                "fitness": 0.9,
+                "metrics/precision": 0.0,
+                "metrics/recall": 0.0,
+                "metrics/mAP10": 0.0,
+                "metrics/mAP10Agn": 0.0,
+                "metrics/mAP10-95": 0.0,
+                "metrics/mAP10-95Agn": 0.0,
+                "metrics/dice": 0.0,
+                "metrics/f1": 0.71,
+                "metrics/sensitivity_at_0.1_fppi": 0.60,
+                "metrics/confidence_at_0.1_fppi": 0.11,
+                "metrics/sensitivity_at_0.5_fppi": 0.84,
+                "metrics/confidence_at_0.5_fppi": 0.22,
+                "metrics/sensitivity_at_1.0_fppi": 0.80,
+                "metrics/confidence_at_1.0_fppi": 0.33,
+                "metrics/confidence_at_max_f1": 0.44,
+            }
+        )
+        writer.writerow(
+            {
+                "checkpoint": "best",
+                "checkpoint_path": "weights_best.pt",
+                "nms_iou_threshold": 0.6,
+                "suggested": False,
+                "fitness": 0.8,
+                "metrics/precision": 0.0,
+                "metrics/recall": 0.0,
+                "metrics/mAP10": 0.0,
+                "metrics/mAP10Agn": 0.0,
+                "metrics/mAP10-95": 0.0,
+                "metrics/mAP10-95Agn": 0.0,
+                "metrics/dice": 0.0,
+                "metrics/f1": 0.79,
+                "metrics/sensitivity_at_0.1_fppi": 0.76,
+                "metrics/confidence_at_0.1_fppi": 0.15,
+                "metrics/sensitivity_at_0.5_fppi": 0.81,
+                "metrics/confidence_at_0.5_fppi": 0.25,
+                "metrics/sensitivity_at_1.0_fppi": 0.92,
+                "metrics/confidence_at_1.0_fppi": 0.35,
+                "metrics/confidence_at_max_f1": 0.55,
+            }
+        )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["onnx-export", str(model_path), "--internal-dtype", "float32"])
+
+    assert result.exit_code == 0
+    metadata = _metadata_dict(_load_onnx_model(model_path.with_suffix(".onnx")))
+    assert metadata["best_nms_iou_threshold"] == "0.2"
+    assert metadata["confidence_threshold_at_0.1_fp_per_image"] == "0.15"
+    assert metadata["confidence_threshold_at_0.5_fp_per_image"] == "0.22"
+    assert metadata["confidence_threshold_at_1.0_fp_per_image"] == "0.35"
+    assert metadata["confidence_threshold_at_max_f1"] == "0.55"
+
+
 def test_onnx_export_cli_allows_metadata_overwrite_options(trained_run: Path) -> None:
     model_path = trained_run / "weights_last.pt"
     runner = CliRunner()

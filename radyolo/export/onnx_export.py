@@ -69,33 +69,81 @@ def _checkpoint_kind_from_path(checkpoint_path: Path) -> str | None:
     return None
 
 
+def _read_nms_optimization_rows(checkpoint_path: Path) -> list[dict[str, str]]:
+    """Read sibling NMS optimization CSV rows, returning an empty list on failures."""
+    csv_path = checkpoint_path.parent / "nms_optimization.csv"
+    if not csv_path.exists():
+        return []
+
+    try:
+        with csv_path.open(encoding="utf-8", newline="") as handle:
+            return list(csv.DictReader(handle))
+    except (OSError, csv.Error):
+        LOGGER.warning("Failed to read NMS optimization CSV at %s", csv_path, exc_info=True)
+        return []
+
+
+def _filter_rows_for_checkpoint(
+    rows: list[dict[str, str]],
+    checkpoint_path: Path,
+) -> list[dict[str, str]]:
+    """Filter optimization rows to the checkpoint kind inferred from filename."""
+    checkpoint_kind = _checkpoint_kind_from_path(checkpoint_path)
+    if checkpoint_kind is None:
+        return rows
+    return [
+        row for row in rows if str(row.get("checkpoint", "")).strip().lower() == checkpoint_kind
+    ]
+
+
+def _parse_float_from_row(row: dict[str, str], key: str) -> float | None:
+    """Parse a float from a CSV row key, returning None for missing/invalid values."""
+    raw_value = row.get(key)
+    if raw_value is None:
+        return None
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _select_best_row_by_metric(
+    rows: list[dict[str, str]],
+    metric_key: str,
+) -> dict[str, str] | None:
+    """Select the row with the best metric value, tie-breaking by fitness."""
+    ranked_rows: list[tuple[float, float, dict[str, str]]] = []
+    for row in rows:
+        metric_value = _parse_float_from_row(row, metric_key)
+        if metric_value is None:
+            continue
+        fitness_value = _parse_float_from_row(row, "fitness")
+        ranked_rows.append(
+            (
+                metric_value,
+                float("-inf") if fitness_value is None else fitness_value,
+                row,
+            )
+        )
+
+    if not ranked_rows:
+        return None
+    ranked_rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return ranked_rows[0][2]
+
+
 def _read_best_nms_iou_threshold(
     checkpoint_path: Path,
     *,
     default_threshold: float = 0.1,
 ) -> float:
     """Read the best suggested NMS IoU threshold from sibling optimization CSV."""
-    csv_path = checkpoint_path.parent / "nms_optimization.csv"
-    if not csv_path.exists():
-        return default_threshold
-
-    try:
-        with csv_path.open(encoding="utf-8", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-    except (OSError, csv.Error):
-        LOGGER.warning("Failed to read NMS optimization CSV at %s", csv_path, exc_info=True)
-        return default_threshold
+    rows = _read_nms_optimization_rows(checkpoint_path)
 
     if not rows:
         return default_threshold
 
-    checkpoint_kind = _checkpoint_kind_from_path(checkpoint_path)
-    if checkpoint_kind is not None:
-        checkpoint_rows = [
-            row for row in rows if str(row.get("checkpoint", "")).strip().lower() == checkpoint_kind
-        ]
-    else:
-        checkpoint_rows = rows
+    checkpoint_rows = _filter_rows_for_checkpoint(rows, checkpoint_path)
 
     if not checkpoint_rows:
         return default_threshold
@@ -107,8 +155,58 @@ def _read_best_nms_iou_threshold(
         best_row = max(candidate_rows, key=lambda row: float(row.get("fitness", "-inf")))
         return float(best_row["nms_iou_threshold"])
     except (KeyError, ValueError):
-        LOGGER.warning("Failed to parse best NMS IoU threshold from %s", csv_path, exc_info=True)
+        LOGGER.warning(
+            "Failed to parse best NMS IoU threshold for checkpoint %s",
+            checkpoint_path,
+            exc_info=True,
+        )
         return default_threshold
+
+
+def _read_operating_point_confidence_metadata(checkpoint_path: Path) -> dict[str, float]:
+    """Read confidence thresholds for selected operating points from optimization CSV."""
+    rows = _read_nms_optimization_rows(checkpoint_path)
+    if not rows:
+        return {}
+
+    checkpoint_rows = _filter_rows_for_checkpoint(rows, checkpoint_path)
+    if not checkpoint_rows:
+        return {}
+
+    operating_points = (
+        (
+            "metrics/sensitivity_at_0.1_fppi",
+            "metrics/confidence_at_0.1_fppi",
+            "confidence_threshold_at_0.1_fp_per_image",
+        ),
+        (
+            "metrics/sensitivity_at_0.5_fppi",
+            "metrics/confidence_at_0.5_fppi",
+            "confidence_threshold_at_0.5_fp_per_image",
+        ),
+        (
+            "metrics/sensitivity_at_1.0_fppi",
+            "metrics/confidence_at_1.0_fppi",
+            "confidence_threshold_at_1.0_fp_per_image",
+        ),
+        (
+            "metrics/f1",
+            "metrics/confidence_at_max_f1",
+            "confidence_threshold_at_max_f1",
+        ),
+    )
+
+    metadata: dict[str, float] = {}
+    for metric_key, confidence_key, metadata_key in operating_points:
+        best_row = _select_best_row_by_metric(checkpoint_rows, metric_key)
+        if best_row is None:
+            continue
+        confidence_value = _parse_float_from_row(best_row, confidence_key)
+        if confidence_value is None:
+            continue
+        metadata[metadata_key] = confidence_value
+
+    return metadata
 
 
 def _to_metadata_string(value: object) -> str:
@@ -129,6 +227,7 @@ def build_export_metadata(
 ) -> dict[str, str]:
     """Build ONNX metadata from training config and export-time overrides."""
     model_config = train_config.model_dump(mode="json")
+    operating_point_metadata = _read_operating_point_confidence_metadata(checkpoint_path)
     metadata = {
         "training_mode": _to_metadata_string(model_config.get("training_mode")),
         "patch_size": _to_metadata_string(model_config.get("patch_size")),
@@ -143,6 +242,7 @@ def build_export_metadata(
                 default_threshold=default_nms_iou_threshold,
             )
         ),
+        **{key: _to_metadata_string(value) for key, value in operating_point_metadata.items()},
     }
 
     for key, value in (metadata_overrides or {}).items():
