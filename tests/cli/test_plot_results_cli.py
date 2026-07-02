@@ -52,5 +52,7 @@ def test_plot_results_cli_returns_error_on_failure(
 
         result = runner.invoke(main, ["plot-results", str(result_path)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
+    assert "Traceback (most recent call last):" in result.output
+    assert "Error: Plotting results failed. See logs for details." in result.output
     assert "An unexpected error occurred" in caplog.text

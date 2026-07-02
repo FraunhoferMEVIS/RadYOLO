@@ -301,3 +301,31 @@ def test_evaluate_predictions_cli_fails_on_ambiguous_normalized_case_names(tmp_p
 
     assert result.exit_code == 1
     assert "Ambiguous prediction case names after normalization" in result.output
+
+
+def test_evaluate_predictions_cli_logs_traceback_for_value_error(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    predictions_dir = tmp_path / "predictions"
+    labels_dir = tmp_path / "labels"
+    predictions_dir.mkdir()
+    labels_dir.mkdir()
+
+    def _raise_value_error(*_args, **_kwargs):
+        raise ValueError("too many values to unpack (expected 3)")
+
+    monkeypatch.setattr("radyolo.evaluate_prediction_folder", _raise_value_error)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "evaluate-predictions",
+            str(predictions_dir),
+            str(labels_dir),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Traceback (most recent call last):" in result.output
+    assert "too many values to unpack (expected 3)" in result.output

@@ -229,7 +229,8 @@ def onnx_export(
         )
     except Exception as e:  # pragma: no cover
         LOGGER.exception("An unexpected error occurred", exc_info=e)
-        return 1
+        msg = "ONNX export failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -256,7 +257,8 @@ def plot_results(result_path: Path) -> int:
         plot_results_(result_path)
     except Exception as e:
         LOGGER.exception("An unexpected error occurred", exc_info=e)
-        return 1
+        msg = "Plotting results failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -331,7 +333,8 @@ def create_data_splits(
         LOGGER.info("Data splits written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to create data splits", exc_info=e)
-        return 1
+        msg = "Creating data splits failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -417,7 +420,8 @@ def create_train_val_test_split(  # noqa: PLR0913
         LOGGER.info("Data splits written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to create train/val/test split", exc_info=e)
-        return 1
+        msg = "Creating train/val/test split failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -467,7 +471,8 @@ def analyze_dataset(dataset_path: Path, workers: int, output_file: Path | None) 
         LOGGER.info("Dataset fingerprint written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to analyze dataset", exc_info=e)
-        return 1
+        msg = "Dataset analysis failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -559,7 +564,8 @@ def propose_model_config(
             )
     except Exception as e:
         LOGGER.exception("Failed to propose model config", exc_info=e)
-        return 1
+        msg = "Model config proposal failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -671,7 +677,8 @@ def preprocess_data(  # noqa: PLR0913
         LOGGER.info("Preprocessed dataset written to %s", out_path)
     except Exception as e:
         LOGGER.exception("Failed to preprocess dataset", exc_info=e)
-        return 1
+        msg = "Dataset preprocessing failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -762,7 +769,8 @@ def convert_to_nndetection(
         LOGGER.info("Created %s", task_dir)
     except Exception as e:
         LOGGER.exception("Failed to convert dataset", exc_info=e)
-        return 1
+        msg = "nnDetection conversion failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -885,7 +893,8 @@ def convert_to_nnunet(  # noqa: PLR0913
         LOGGER.info("Created %s", dataset_dir)
     except Exception as e:
         LOGGER.exception("Failed to convert dataset", exc_info=e)
-        return 1
+        msg = "nnU-Net conversion failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -910,7 +919,8 @@ def convert_to_integer_encoded_masks(dataset_path: Path) -> int:
         LOGGER.info("Created %s", output_dir)
     except Exception as e:
         LOGGER.exception("Failed to convert dataset", exc_info=e)
-        return 1
+        msg = "Integer-encoded mask conversion failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -935,7 +945,8 @@ def create_json_labels_from_txt_command(labels_dir: Path) -> int:
         LOGGER.info("Created %d JSON label files in %s", len(created_paths), labels_dir)
     except Exception as e:
         LOGGER.exception("Failed to create JSON labels from TXT", exc_info=e)
-        return 1
+        msg = "Creating JSON labels from TXT failed. See logs for details."
+        raise click.ClickException(msg) from e
     else:
         return 0
 
@@ -1222,7 +1233,8 @@ def predict(
         )
     except Exception as e:  # pragma: no cover
         LOGGER.exception("Prediction failed", exc_info=e)
-        return 1
+        msg = "Prediction failed. See logs for details."
+        raise click.ClickException(msg) from e
 
 
 @main.command("evaluate-predictions")
@@ -1290,6 +1302,7 @@ def evaluate_predictions(predictions_dir: Path, labels_dir: Path, output: Path) 
             encoding="utf-8",
         )
     except ValueError as exc:
+        LOGGER.exception("Prediction evaluation failed", exc_info=exc)
         raise click.ClickException(str(exc)) from exc
     except Exception as e:  # pragma: no cover
         LOGGER.exception("Prediction evaluation failed", exc_info=e)
@@ -1329,7 +1342,8 @@ def merge_prediction_masks(predictions_dir: Path, confidence_threshold: float) -
         )
     except Exception as e:  # pragma: no cover
         LOGGER.exception("Merging prediction masks failed", exc_info=e)
-        return 1
+        msg = "Merging prediction masks failed. See logs for details."
+        raise click.ClickException(msg) from e
 
     click.echo(f"Wrote merged masks to: {output_dir!s}")
     return 0
