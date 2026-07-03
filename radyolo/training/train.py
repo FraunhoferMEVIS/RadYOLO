@@ -1355,6 +1355,9 @@ class Trainer:
             else (("%s," * n % ("epoch", "time", *keys)).rstrip(",") + "\n")
         )
         t = time.time() - train_time_start
-        with self.csv_path.open("a", encoding="utf-8") as file:
-            line = ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",")
-            file.write(header + line + "\n")
+        try:
+            with self.csv_path.open("a", encoding="utf-8") as file:
+                line = ("%.6g," * n % (self.epoch + 1, t, *vals)).rstrip(",")
+                file.write(header + line + "\n")
+        except OSError as exc:
+            LOGGER.warning("Could not save metrics CSV %s: %s", self.csv_path, exc)

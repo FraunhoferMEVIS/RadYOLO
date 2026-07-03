@@ -7,6 +7,7 @@ import pytest
 import seaborn as sns
 import torch
 from matplotlib import pyplot as plt
+from matplotlib.figure import Figure
 
 from radyolo.data.image_labels import ImageLabelTaskSpec
 from radyolo.validation.metrics import (
@@ -159,6 +160,29 @@ def test_detmetrics_plot_summary_handles_unprocessed_metrics(tmp_path: Path) -> 
     output_path = tmp_path / "validation_summary.png"
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_detmetrics_plot_summary_warns_when_validation_summary_is_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    metrics = DetMetrics(save_dir=tmp_path, names={0: "lesion"})
+    confusion_matrix = ConfusionMatrix(nc=1, conf=0.5)
+    output_path = tmp_path / "validation_summary.png"
+
+    original_savefig = Figure.savefig
+
+    def savefig_with_busy(self: Figure, fname: str | Path, *args: object, **kwargs: object) -> None:
+        if Path(fname) == output_path:
+            raise OSError("Device or resource busy")
+        original_savefig(self, fname, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", savefig_with_busy)
+
+    caplog.set_level("WARNING", logger="radyolo.validation.plotting")
+    metrics.plot_summary(confusion_matrix=confusion_matrix)
+
+    assert not output_path.exists()
+    assert "Could not save plot" in caplog.text
 
 
 def test_validator_reports_image_label_metrics(tmp_path: Path) -> None:

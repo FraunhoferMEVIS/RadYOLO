@@ -67,6 +67,14 @@ IMAGE_LABEL_LOSS_COLUMNS = tuple(
     if column_name.startswith(("train/", "val/"))
 )
 
+
+def save_figure_with_warning(figure: plt.Figure, output_path: Path | str, *, dpi: int) -> None:
+    """Save a figure and warn instead of failing if the destination is busy."""
+    try:
+        figure.savefig(output_path, dpi=dpi)
+    except OSError as exc:
+        LOGGER.warning("Could not save plot %s: %s", output_path, exc)
+
 BASE_PLOT_HEX_COLORS = (
     "#005b7f",
     "#179c7d",
@@ -585,8 +593,10 @@ def plot_validation_case(
         elif image_mode != "default":
             image_mode_suffix = f", {image_mode}"
         figure.suptitle(f"{case_name} ({projection_mode} projection{image_mode_suffix})")
-    figure.savefig(fname, dpi=120)
-    plt.close(figure)
+    try:
+        save_figure_with_warning(figure, fname, dpi=120)
+    finally:
+        plt.close(figure)
 
 
 def plot_results(
@@ -694,10 +704,9 @@ def _plot_results_grid(
         handles, labels = fitness_axis.get_legend_handles_labels()
         fitness_axis.legend(handles, labels, loc="best")
     try:
-        fig.savefig(save_path, dpi=200)
-    except OSError as e:
-        LOGGER.warning("Could not save plot %s: %s", save_path, e)
-    plt.close(fig)
+        save_figure_with_warning(fig, save_path, dpi=200)
+    finally:
+        plt.close(fig)
 
 
 def _concat_or_empty(
@@ -1039,5 +1048,7 @@ def plot_image_label_validation_summary(
         current_row += 1
 
     output_path = save_dir / IMAGE_LABEL_SUMMARY_FNAME
-    figure.savefig(output_path, dpi=250)
-    plt.close(figure)
+    try:
+        save_figure_with_warning(figure, output_path, dpi=250)
+    finally:
+        plt.close(figure)

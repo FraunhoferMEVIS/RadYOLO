@@ -15,7 +15,12 @@ from matplotlib import patheffects
 from matplotlib import pyplot as plt
 
 from radyolo.utils.ops import box_iou
-from radyolo.validation.plotting import confusion_matrix_cmap, named_plot_color, palette_mpl
+from radyolo.validation.plotting import (
+    confusion_matrix_cmap,
+    named_plot_color,
+    palette_mpl,
+    save_figure_with_warning,
+)
 
 plt.switch_backend("Agg")
 
@@ -1083,8 +1088,10 @@ class DetMetrics:
         )
 
         plot_fname = self.save_dir / "validation_summary.png"
-        fig.savefig(plot_fname, dpi=250)
-        plt.close(fig)
+        try:
+            save_figure_with_warning(fig, plot_fname, dpi=250)
+        finally:
+            plt.close(fig)
 
     @property
     def keys(self) -> list[str]:

@@ -83,6 +83,32 @@ def test_trainer_uses_patchwise_dataset_for_training_and_validation(
     assert val_loader.dataset.min_box_crop_fraction == 0.5
 
 
+def test_trainer_save_metrics_warns_when_results_csv_is_busy(
+    minimal_train_config: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    trainer = _make_trainer_for_dataloader(minimal_train_config)
+    trainer.csv_path = tmp_path / "results.csv"
+    trainer.epoch = 0
+
+    original_open = Path.open
+
+    def open_with_busy(self: Path, *args: object, **kwargs: object):
+        if self == trainer.csv_path:
+            raise OSError("Device or resource busy")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_with_busy)
+
+    caplog.set_level("WARNING", logger="radyolo.training.train")
+    trainer.save_metrics({"metrics/fitness": 0.5}, train_time_start=0.0)
+
+    assert not trainer.csv_path.exists()
+    assert "Could not save metrics CSV" in caplog.text
+
+
 def test_trainer_keeps_wholeimage_validation_without_patch_oversampling(
     minimal_train_config: Path,
     tmp_path: Path,
