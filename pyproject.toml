@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "radyolo"
 version = "0.2.0"
 authors = [
-  { name = "Laurens Müller-Groh", email = "laurens.mueller-groh@mevis.fraunhofer.de" },
+  { name = "Laurens Müller-Groh", email = "github@laurendus.de" },
   { name = "Kai Geissler", email = "kai.geissler@mevis.fraunhofer.de" },
 ]
 description = "A library to train RadYOLO, a 3D YOLO11-based deep learning model for object detection, classification and segmentation in medical images."
