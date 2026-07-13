@@ -94,7 +94,7 @@ objectness_loss: "bce"            # (literal) can be either "bce" (binary cross 
 gamma: 2.0                        # (float) quality focal loss gamma (used when objectness_loss="focal")
 class_loss_gain: 0.5              # (float) classification / objectness loss gain
 class_separate_loss_gain: 0.5     # (float) class loss gain for separate softmax classification
-mask_loss_gain: 5                 # (float) mask loss gain
+mask_loss_gain: 0.5               # (float) mask loss gain
 mask_loss_on_only_one_grid_cell: False # (bool) if True, compute each GT mask loss on one randomly selected assigned grid cell
 box_loss_gain: 7.5                # (float) box loss gain (based on complete IoU (CIoU) loss)
 dfl_loss_gain: 100                # (float) DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
