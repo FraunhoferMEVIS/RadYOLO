@@ -17,6 +17,20 @@ if TYPE_CHECKING:
 IOU_THRESHOLDS = torch.linspace(0.1, 0.95, 18)
 
 
+def _mean_ap_at_iou(metrics: DetMetrics, iou_threshold: float) -> float:
+    """Return the mean AP at a specific IoU threshold from the stored AP table."""
+    if not isinstance(metrics.metrics.all_ap, np.ndarray) or metrics.metrics.all_ap.size == 0:
+        return 0.0
+
+    threshold_matches = torch.isclose(IOU_THRESHOLDS, torch.tensor(iou_threshold)).nonzero()
+    if threshold_matches.numel() == 0:
+        msg = f"Unsupported IoU threshold {iou_threshold}."
+        raise ValueError(msg)
+
+    threshold_index = int(threshold_matches[0].item())
+    return float(metrics.metrics.all_ap[:, threshold_index].mean())
+
+
 def _load_reference_case(labels_dir: Path, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
     """Load one reference case into class and xyzxyz box tensors."""
     entries = load_case_object_labels(labels_dir, case_name)
@@ -462,6 +476,8 @@ def evaluate_prediction_folder(predictions_dir: Path, labels_dir: Path) -> dict[
         "metrics/precision": float(metrics.metrics.mp),
         "metrics/recall": float(metrics.metrics.mr),
         "metrics/mAP10": float(metrics.metrics.map10),
+        "metrics/mAP30": _mean_ap_at_iou(metrics, 0.3),
+        "metrics/mAP50": _mean_ap_at_iou(metrics, 0.5),
         "metrics/mAP10_agnostic": float(metrics.metrics.map10_agnostic),
         "metrics/mAP10_95": float(metrics.metrics.map),
         "metrics/mAP10_95_agnostic": float(metrics.metrics.map_agnostic),

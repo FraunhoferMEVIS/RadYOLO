@@ -69,6 +69,8 @@ def test_evaluate_predictions_cli_uses_only_common_cases(tmp_path) -> None:
     assert metrics_summary["metrics/precision"] == pytest.approx(1.0)
     assert metrics_summary["metrics/recall"] == pytest.approx(1.0)
     assert metrics_summary["metrics/mAP10"] == pytest.approx(0.995, abs=1e-6)
+    assert metrics_summary["metrics/mAP30"] == pytest.approx(0.995, abs=1e-6)
+    assert metrics_summary["metrics/mAP50"] == pytest.approx(0.995, abs=1e-6)
     assert metrics_summary["metrics/mAP10_agnostic"] == pytest.approx(0.995, abs=1e-6)
     assert metrics_summary["metrics/mAP10_95"] == pytest.approx(0.995, abs=1e-6)
     assert metrics_summary["metrics/mAP10_95_agnostic"] == pytest.approx(0.995, abs=1e-6)
