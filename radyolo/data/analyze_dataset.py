@@ -104,6 +104,14 @@ def _infer_image_label_task_type(values: list[int | float]) -> str:
     return "continuous"
 
 
+def _class_id_sort_key(class_id: str) -> tuple[int, int | str]:
+    """Sort class ids numerically when possible, otherwise lexicographically."""
+    try:
+        return (0, int(class_id))
+    except ValueError:
+        return (1, class_id)
+
+
 def _summarize_image_labels(
     dataset_path: Path,
     case_ids: list[str],
@@ -589,7 +597,8 @@ def analyze_dataset(
 
     box_size_median_vox: dict[str, VoxelSize] = {}
     all_box_sizes: list[tuple[float, float, float]] = []
-    for cls, lst in all_sizes_by_class.items():
+    for cls in sorted(all_sizes_by_class, key=_class_id_sort_key):
+        lst = all_sizes_by_class[cls]
         arr = np.array([size.get_xyz() for size in lst], dtype=np.float64)
         if arr.size == 0:
             continue
@@ -618,6 +627,10 @@ def analyze_dataset(
             z=float(p95[2]),
         )
 
+    boxes_per_class = {
+        cls: total_by_class[cls] for cls in sorted(total_by_class, key=_class_id_sort_key)
+    }
+
     finger_print = DatasetFingerprint(
         foreground_channel_stats=foreground_channel_stats,
         median_image_size=median_image_size,
@@ -627,7 +640,7 @@ def analyze_dataset(
         median_resampled_imagesize=median_resampled_imagesize,
         resampled_imagesize_p10_vox=resampled_imagesize_p10,
         resampled_imagesize_p90_vox=resampled_imagesize_p90,
-        boxes_per_class=total_by_class,
+        boxes_per_class=boxes_per_class,
         box_size_median_vox=box_size_median_vox,
         box_size_p05_vox=box_size_p05_vox,
         box_size_p95_vox=box_size_p95_vox,
