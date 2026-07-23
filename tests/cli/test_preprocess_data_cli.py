@@ -279,3 +279,108 @@ def test_preprocess_data_cli_resamples_to_fixed_voxel_size_and_normalizes(tmp_pa
     assert converted_image.dtype == np.float16
     assert converted_image.shape == (4, 10, 24)
     assert abs(float(converted_image.astype(np.float32).mean())) < 0.05
+
+
+def test_preprocess_data_cli_skips_completed_cases_and_resumes_missing_outputs(
+    synthetic_dataset,
+    tmp_path,
+) -> None:
+    output_dataset = tmp_path / "preprocessed_resume"
+    runner = CliRunner()
+
+    first_result = runner.invoke(
+        main,
+        [
+            "preprocess-data",
+            str(synthetic_dataset),
+            str(output_dataset),
+            "--workers",
+            "0",
+        ],
+    )
+    assert first_result.exit_code == 0
+
+    # Corrupt one completed case output so a non-overwrite rerun must skip it.
+    (output_dataset / "images" / "case1.b2nd").unlink()
+    blosc2.asarray(
+        np.zeros((1, 1, 1), dtype=np.float32),
+        urlpath=str(output_dataset / "images" / "case1.b2nd"),
+    )
+    (output_dataset / "masks" / "case1.b2nd").unlink()
+    blosc2.asarray(
+        np.zeros((1, 1, 1), dtype=np.uint8),
+        urlpath=str(output_dataset / "masks" / "case1.b2nd"),
+    )
+
+    # Simulate a crashed run that left another case incomplete.
+    (output_dataset / "images" / "case2.b2nd").unlink()
+    (output_dataset / "masks" / "case2.b2nd").unlink()
+
+    second_result = runner.invoke(
+        main,
+        [
+            "preprocess-data",
+            str(synthetic_dataset),
+            str(output_dataset),
+            "--workers",
+            "0",
+        ],
+    )
+
+    assert second_result.exit_code == 0
+    skipped_case_image = np.asarray(
+        blosc2.open(str(output_dataset / "images" / "case1.b2nd"), mode="r")[:]
+    )
+    assert skipped_case_image.shape == (1, 1, 1)
+    resumed_case_image = np.asarray(
+        blosc2.open(str(output_dataset / "images" / "case2.b2nd"), mode="r")[:]
+    )
+    resumed_case_mask = np.asarray(
+        blosc2.open(str(output_dataset / "masks" / "case2.b2nd"), mode="r")[:]
+    )
+    assert resumed_case_image.shape == (32, 32, 64)
+    assert resumed_case_mask.shape == (32, 32, 64)
+
+
+def test_preprocess_data_cli_overwrite_reprocesses_completed_cases(
+    synthetic_dataset,
+    tmp_path,
+) -> None:
+    output_dataset = tmp_path / "preprocessed_overwrite"
+    runner = CliRunner()
+
+    first_result = runner.invoke(
+        main,
+        [
+            "preprocess-data",
+            str(synthetic_dataset),
+            str(output_dataset),
+            "--workers",
+            "0",
+        ],
+    )
+    assert first_result.exit_code == 0
+
+    (output_dataset / "images" / "case1.b2nd").unlink()
+    blosc2.asarray(
+        np.zeros((1, 1, 1), dtype=np.float32),
+        urlpath=str(output_dataset / "images" / "case1.b2nd"),
+    )
+
+    second_result = runner.invoke(
+        main,
+        [
+            "preprocess-data",
+            str(synthetic_dataset),
+            str(output_dataset),
+            "--workers",
+            "0",
+            "--overwrite",
+        ],
+    )
+
+    assert second_result.exit_code == 0
+    reprocessed_case_image = np.asarray(
+        blosc2.open(str(output_dataset / "images" / "case1.b2nd"), mode="r")[:]
+    )
+    assert reprocessed_case_image.shape == (32, 32, 64)

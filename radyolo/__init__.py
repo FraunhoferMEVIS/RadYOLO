@@ -605,7 +605,7 @@ def propose_model_config(
     "--overwrite/--no-overwrite",
     default=False,
     show_default=True,
-    help="Allow writing into an output folder that already contains preprocessed images.",
+    help="Reprocess and replace existing per-case outputs instead of skipping already preprocessed cases.",
 )
 @click.option(
     "--image-extent",

@@ -277,9 +277,28 @@ def _save_preprocessed_mask(
     )
 
 
-def _has_preprocessed_image_outputs(out_images_dir: Path) -> bool:
-    """Return whether preprocessed image files already exist in a directory."""
-    return any(out_images_dir.glob("*.npy")) or any(out_images_dir.glob("*.b2nd"))
+def _case_output_exists(out_dir: Path, case_id: str, suffixes: tuple[str, ...]) -> bool:
+    """Return whether at least one output file exists for a case and suffix set."""
+    return any((out_dir / f"{case_id}{suffix}").exists() for suffix in suffixes)
+
+
+def _is_case_preprocessed(
+    case_id: str,
+    masks_dir: Path,
+    out_images_dir: Path,
+    out_masks_dir: Path | None,
+) -> bool:
+    """Return whether a case has all required preprocessed outputs on disk."""
+    has_image_output = _case_output_exists(out_images_dir, case_id, (".npy", ".b2nd"))
+    if not has_image_output:
+        return False
+
+    mask_path = masks_dir / f"{case_id}.nii.gz"
+    if not mask_path.exists():
+        return True
+    if out_masks_dir is None:
+        return False
+    return _case_output_exists(out_masks_dir, case_id, (".npz", ".b2nd"))
 
 
 def _validate_image_output_options(
@@ -292,33 +311,25 @@ def _validate_image_output_options(
         raise ValueError(msg)
 
 
-def _validate_existing_outputs(
+def _filter_cases_to_preprocess(
+    cases: list[tuple[str, Path]],
+    masks_dir: Path,
     out_images_dir: Path,
     out_masks_dir: Path | None,
     overwrite: bool,
-) -> None:
-    """Validate output directories against overwrite behavior."""
-    if (
-        out_images_dir.exists()
-        and _has_preprocessed_image_outputs(out_images_dir)
-        and not overwrite
-    ):
-        msg = (
-            "Output images directory already contains preprocessed image files at "
-            f"{out_images_dir}. Use overwrite=True to allow replacing files."
-        )
-        raise FileExistsError(msg)
-    if (
-        out_masks_dir
-        and out_masks_dir.exists()
-        and (any(out_masks_dir.glob("*.npz")) or any(out_masks_dir.glob("*.b2nd")))
-        and not overwrite
-    ):
-        msg = (
-            f"Output masks directory already contains preprocessed mask files at {out_masks_dir}. "
-            "Use overwrite=True to allow replacing files."
-        )
-        raise FileExistsError(msg)
+) -> tuple[list[tuple[str, Path]], int]:
+    """Filter cases based on already existing per-case outputs."""
+    if overwrite:
+        return cases, 0
+
+    cases_to_preprocess: list[tuple[str, Path]] = []
+    skipped_count = 0
+    for case_id, image_path in cases:
+        if _is_case_preprocessed(case_id, masks_dir, out_images_dir, out_masks_dir):
+            skipped_count += 1
+            continue
+        cases_to_preprocess.append((case_id, image_path))
+    return cases_to_preprocess, skipped_count
 
 
 def _convert_case_to_blosc2(
@@ -519,11 +530,6 @@ def preprocess_dataset(  # noqa: PLR0913
 
     out_images_dir = output_path / "images"
     out_masks_dir = output_path / "masks" if masks_dir.exists() else None
-    _validate_existing_outputs(
-        out_images_dir=out_images_dir,
-        out_masks_dir=out_masks_dir,
-        overwrite=overwrite,
-    )
 
     output_path.mkdir(parents=True, exist_ok=True)
     out_images_dir.mkdir(parents=True, exist_ok=True)
@@ -540,6 +546,22 @@ def preprocess_dataset(  # noqa: PLR0913
         get_split_file_path(output_path, split_file_name),
     )
 
+    cases_to_preprocess, skipped_cases = _filter_cases_to_preprocess(
+        cases,
+        masks_dir,
+        out_images_dir,
+        out_masks_dir,
+        overwrite,
+    )
+
+    if not cases_to_preprocess:
+        LOGGER.info(
+            "All %d cases already preprocessed at %s; nothing to do.",
+            len(cases),
+            output_path,
+        )
+        return output_path
+
     max_workers = os.cpu_count() or 1
     if workers > 0:
         max_workers = workers
@@ -552,15 +574,17 @@ def preprocess_dataset(  # noqa: PLR0913
     )
 
     LOGGER.info(
-        "Preprocessing %d cases from %s to %s using %d workers",
+        "Preprocessing %d of %d cases from %s to %s using %d workers (%d skipped)",
+        len(cases_to_preprocess),
         len(cases),
         dataset_path,
         output_path,
         max_workers,
+        skipped_cases,
     )
 
     _preprocess_cases(
-        cases,
+        cases_to_preprocess,
         masks_dir,
         out_images_dir,
         out_masks_dir,
