@@ -34,33 +34,13 @@ def _run_torch_and_onnx_inference(
     model = loaded_model.model
     model.eval()
 
-    has_tabular_inputs = (
-        model.enable_tabular_image_label_fusion and len(model.tabular_feature_names) > 0
-    )
-    if has_tabular_inputs:
-        num_features = len(model.tabular_feature_names)
-        tabular_values = torch.zeros((1, num_features), dtype=torch.float32)
-        tabular_mask = torch.zeros((1, num_features), dtype=torch.bool)
-        with torch.inference_mode():
-            torch_outputs = [
-                tensor.detach().cpu().numpy()
-                for tensor in model(
-                    input_tensor,
-                    tabular_values=tabular_values,
-                    tabular_mask=tabular_mask,
-                ).to_export_tensors()
-            ]
-    else:
-        with torch.inference_mode():
-            torch_outputs = [
-                tensor.detach().cpu().numpy() for tensor in model(input_tensor).to_export_tensors()
-            ]
+    with torch.inference_mode():
+        torch_outputs = [
+            tensor.detach().cpu().numpy() for tensor in model(input_tensor).to_export_tensors()
+        ]
 
     session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     onnx_inputs = {"images": input_tensor.cpu().numpy()}
-    if has_tabular_inputs:
-        onnx_inputs["tabularValues"] = tabular_values.cpu().numpy()
-        onnx_inputs["tabularMask"] = tabular_mask.cpu().numpy()
     onnx_outputs = session.run(None, onnx_inputs)
     return torch_outputs, onnx_outputs
 

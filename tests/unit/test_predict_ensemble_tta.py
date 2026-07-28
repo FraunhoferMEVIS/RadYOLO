@@ -21,14 +21,12 @@ def test_aggregate_detection_clusters_weights_confidence_by_pass_support() -> No
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.8, 1.0]]),
             masks=[torch.ones((2, 2, 2), dtype=torch.float32)],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=0,
         ),
         _PassPrediction(
             detections=torch.tensor([[1.0, 1.0, 1.0, 11.0, 11.0, 11.0, 0.6, 1.0]]),
             masks=[torch.full((2, 2, 2), 0.5, dtype=torch.float32)],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=1,
         ),
@@ -56,14 +54,12 @@ def test_aggregate_detection_clusters_keeps_classes_separate_by_default() -> Non
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.8, 1.0]]),
             masks=[None],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=0,
         ),
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.6, 2.0]]),
             masks=[None],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=1,
         ),
@@ -95,21 +91,18 @@ def test_aggregate_detection_clusters_selects_class_by_summed_confidence() -> No
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.9, 1.0]]),
             masks=[None],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=0,
         ),
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.6, 2.0]]),
             masks=[None],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=1,
         ),
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.5, 2.0]]),
             masks=[None],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=2,
         ),
@@ -133,14 +126,12 @@ def test_aggregate_detection_clusters_filters_low_weighted_confidence() -> None:
         _PassPrediction(
             detections=torch.tensor([[0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.2, 1.0]]),
             masks=[torch.ones((2, 2, 2), dtype=torch.float32)],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=0,
         ),
         _PassPrediction(
             detections=torch.tensor([[20.0, 20.0, 20.0, 30.0, 30.0, 30.0, 0.9, 1.0]]),
             masks=[torch.zeros((2, 2, 2), dtype=torch.float32)],
-            image_label_results=None,
             original_shape=(20, 20, 20),
             pass_index=1,
         ),
@@ -184,8 +175,6 @@ def test_predict_loaded_image_ensemble_tta_uses_pass_original_shape(
         model=object(),
         train_config=SimpleNamespace(max_det=10),
         names={0: "class_0"},
-        image_label_task_specs={},
-        tabular_feature_names=(),
         prediction_config=prediction_config,
     )
     loaded_image = LoadedImageTask(
@@ -222,8 +211,6 @@ def test_predict_loaded_image_ensemble_tta_uses_pass_original_shape(
         loaded_image,
         loaded_models=[loaded_model],
         prediction_config=prediction_config,
-        tabular_values=None,
-        tabular_mask=None,
     )
 
     assert write_task.original_shape == (5, 6, 7)

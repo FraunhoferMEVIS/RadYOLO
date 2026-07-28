@@ -157,7 +157,7 @@ def test_wholeimage_dataset_can_apply_preprocessing(
         apply_preprocessing=True,
     )
 
-    sample = dataset.load_image_label_and_mask(0)
+    sample = dataset.load_sample(0)
 
     assert sample["image"].shape == (1, 32, 16, 16)
     assert sample["shape"] == (32, 16, 16)
@@ -177,7 +177,7 @@ def test_wholeimage_dataset_can_defer_preprocessing_to_gpu(
         preprocessing_device="gpu",
     )
 
-    sample = dataset.load_image_label_and_mask(0)
+    sample = dataset.load_sample(0)
 
     assert sample["image"].shape == (64, 32, 32)
     assert sample["shape"] == (64, 32, 32)
@@ -230,7 +230,6 @@ def test_trainer_prepares_variable_shape_batch_with_gpu_preprocessing(
         "batch_idx": torch.zeros((0,), dtype=torch.int64),
         "masks": (None, None),
         "case_names": ("case1", "case2"),
-        "image_labels": ({}, {}),
     }
 
     prepared = trainer._prepare_training_batch(batch, run_gpu_augmentations=False)

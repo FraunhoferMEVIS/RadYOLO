@@ -23,7 +23,6 @@ def _is_muon_applicable_parameter(fullname: str, param: torch.nn.Parameter) -> b
     if fullname.startswith(
         (
             "l0.",
-            "image_label_head.task_heads.",
             "prototype_layer.reshape_full.",
             "prototype_layer.reshape_full_1.",
             "prototype_layer.cv_final_2.",

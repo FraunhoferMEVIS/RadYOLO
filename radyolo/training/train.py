@@ -29,7 +29,6 @@ from radyolo.config.config import (
     load_model_checkpoint,
     save_model_checkpoint,
 )
-from radyolo.data.augmentations import apply_tabular_mask_augmentation
 from radyolo.data.data import (
     BackgroundUndersamplingSampler,
     PatchWiseDataset,
@@ -73,7 +72,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
     from radyolo.models.layers import ModelOutput
-    from radyolo.training.loss import TrainingLoss
+    from radyolo.training.loss import DetectionSegmentationLoss
 
 
 LOGGER = logging.getLogger(__name__)
@@ -267,7 +266,7 @@ class Trainer:
             self.config.workers = 0
 
         self.model: torch.nn.Module | None = None
-        self.loss: TrainingLoss | None = None
+        self.loss: DetectionSegmentationLoss | None = None
         self.data = get_dataset_config(self.config.data)
 
         self.lf: Callable[[int], float] | None = None
@@ -468,9 +467,6 @@ class Trainer:
         for tensor in (model_output.mask_coefficients, model_output.prototype_masks):
             if tensor is not None:
                 zero_loss = zero_loss + torch.nan_to_num(tensor).sum() * 0.0
-        if model_output.image_label_outputs is not None:
-            for tensor in model_output.image_label_outputs.values():
-                zero_loss = zero_loss + torch.nan_to_num(tensor).sum() * 0.0
         return zero_loss
 
     def copy_train_config(self) -> None:
@@ -482,24 +478,12 @@ class Trainer:
         map_1095 = float(metrics.get("metrics/mAP10-95", 0.0))
         map_1095_agn = float(metrics.get("metrics/mAP10-95Agn", 0.0))
         dice = float(metrics.get("metrics/dice", 0.0))
-        image_label_balanced_accuracy = float(
-            metrics.get("metrics/image_label_balanced_accuracy", 0.0)
-        )
-        image_label_multiclass_roc_auc = float(
-            metrics.get("metrics/image_label_multiclass_roc_auc", 0.0)
-        )
-        image_label_c_index = float(metrics.get("metrics/image_label_c_index", 0.0))
         weights = self.config.fitness_metric_weights
-        if len(weights) == 3:
-            weights = (*weights, 0.0, 0.0, 0.0)
         total_weight = sum(weights)
         weighted_metrics = (
             weights[0] * map_1095,
             weights[1] * map_1095_agn,
             weights[2] * dice,
-            weights[3] * image_label_balanced_accuracy,
-            weights[4] * image_label_multiclass_roc_auc,
-            weights[5] * image_label_c_index,
         )
         return sum(weighted_metrics) / total_weight
 
@@ -819,11 +803,7 @@ class Trainer:
                             self._log_non_finite_input_batch(prepared_batch)
                         if self._distributed_any(skip_due_to_non_finite_input):
                             continue
-                        raw_predictions = model(
-                            prepared_batch["img"],
-                            tabular_values=prepared_batch.get("tabular_values"),
-                            tabular_mask=prepared_batch.get("tabular_mask"),
-                        )
+                        raw_predictions = model(prepared_batch["img"])
                         if isinstance(raw_predictions, torch.Tensor):
                             raise TypeError(raw_predictions)
 
@@ -1011,21 +991,6 @@ class Trainer:
                 self.config,
                 self.config.patch_size,
                 placement="gpu",
-            )
-        if "tabular_values" in batch:
-            batch["tabular_values"] = batch["tabular_values"].to(
-                self.device,
-                non_blocking=True,
-            )
-        if "tabular_mask" in batch:
-            batch["tabular_mask"] = batch["tabular_mask"].to(
-                self.device,
-                non_blocking=True,
-            )
-        if self.config.enable_tabular_image_label_fusion:
-            apply_tabular_mask_augmentation(
-                batch,
-                self.config.tabular_feature_mask_augmentation_prob,
             )
         return batch
 
@@ -1240,13 +1205,6 @@ class Trainer:
         validation_summary = self.save_dir / "validation_summary.png"
         if validation_summary.exists():
             shutil.copy2(validation_summary, self.save_dir / "validation_summary_best.png")
-
-        validation_image_labels = self.save_dir / "validation_image_labels.png"
-        if validation_image_labels.exists():
-            shutil.copy2(
-                validation_image_labels,
-                self.save_dir / "validation_image_labels_best.png",
-            )
 
         validation_samples = self.save_dir / "validation_samples"
         validation_samples_best = self.save_dir / "validation_samples_best"

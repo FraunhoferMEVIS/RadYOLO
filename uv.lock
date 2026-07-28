@@ -594,21 +594,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ecos"
-version = "2.0.14"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "scipy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/5f/17716c533da95ed110815b159efa22b1064c8c41fd5c862f21aff7a7fec0/ecos-2.0.14.tar.gz", hash = "sha256:64b3201c0e0a7f0129050557c4ac50b00031e80a10534506dba1200c8dc1efe4", size = 142430, upload-time = "2024-06-18T03:48:34.809Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/af/c3/84e392f2410f51fa557198937cc52a2e80f887c517ef4e3fb6d46e3bb008/ecos-2.0.14-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:4a7e2704a3ef9acfb8146d594deff9942d3a0f0d0399de8fe2e0bd95e8b0855c", size = 92545, upload-time = "2024-06-18T03:47:50.589Z" },
-    { url = "https://files.pythonhosted.org/packages/82/12/42f4d953f9284571726b085f99e13bfa84522bf63bf2e7a81460013b09e6/ecos-2.0.14-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f3cbb1a66ecf10955a1a4bcd6b99db55148000cb79fd176bfac26d98b21a4814", size = 222132, upload-time = "2024-06-18T03:47:47.498Z" },
-    { url = "https://files.pythonhosted.org/packages/56/9a/ca30572f3e3ff3cef6a0ea8aa6cdc12c36f9fefe559f65c7d6265713196a/ecos-2.0.14-cp312-cp312-win_amd64.whl", hash = "sha256:718eb62afb8e45426bcc365ebaf3ca9f610afcbb754de6073ef5f104da8fca1f", size = 72248, upload-time = "2024-06-18T03:48:51.504Z" },
-]
-
-[[package]]
 name = "executing"
 version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1998,36 +1983,6 @@ wheels = [
 ]
 
 [[package]]
-name = "osqp"
-version = "1.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jinja2" },
-    { name = "joblib" },
-    { name = "numpy" },
-    { name = "scipy" },
-    { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/df/09/fb28f57d6eba067fbb6c941c9136f8d2e41b3d4fd4ddac643cf734210085/osqp-1.1.1.tar.gz", hash = "sha256:1719e6a88f2ec2bd5dab06131331d1433152fb222372832727d9eb5604d7acf4", size = 57059, upload-time = "2026-02-11T18:15:45.329Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/49/0ac80ef771eeb985b12a0c7fad86279a59269bce192110dc499890013b9f/osqp-1.1.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:ca4e41477852f725293c666ffa5f795413151c9a14155a7750dff25d3107b851", size = 321455, upload-time = "2026-02-11T18:07:29.258Z" },
-    { url = "https://files.pythonhosted.org/packages/4c/7f/39437ab1c73ea432c6510741f954ccec87bda9a2b9b3233439384363cd92/osqp-1.1.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:25cd4e8995d18b65c54d1163769797665b9ca5a8a0009f1c4adf4dafe30e33be", size = 302230, upload-time = "2026-02-11T18:07:30.365Z" },
-    { url = "https://files.pythonhosted.org/packages/d3/1f/83d45a3a194e7f58eec3bdfc2879390c56b18351936d569f3f6a79e5ca39/osqp-1.1.1-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ed006d74017578fe98a2afad77f4bbeb096f2d64aa00f50809bb394a7bbd98bf", size = 322626, upload-time = "2026-02-11T18:07:31.508Z" },
-    { url = "https://files.pythonhosted.org/packages/03/13/45db581134dab5942e723622bf994f30a79fe00029b90127625f3464bb3f/osqp-1.1.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:61aca4a356d1555d13c26166c282b9b7985c6c715baf093f839e338e6b49aca0", size = 345768, upload-time = "2026-02-11T18:07:32.938Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/c7/4beccbd5993b3d92956d450eb24edd4055b66475d9802166160bc8dfd1ad/osqp-1.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:cd4ac30fd125e12ef5b67836442ebd3bb90925828816e0253e96a203197f5dc7", size = 310738, upload-time = "2026-02-11T18:08:54.392Z" },
-    { url = "https://files.pythonhosted.org/packages/17/ea/4717391fc0a611913895ca8cf585ebbdcb989ddd2018663c8398b303428c/osqp-1.1.1-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:4da548997e7187b1b55358ef291fbb3f9d29b6103917bedbbe77ab8d2307a43a", size = 321447, upload-time = "2026-02-11T18:08:55.612Z" },
-    { url = "https://files.pythonhosted.org/packages/16/45/efd9e1233468778040748b3675a51ef17f227eb353f749a455d38f9b1ffb/osqp-1.1.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e33d9de8e6d68a77ef5ca3fee77d42fac89fb5c3fbac3ab5df452176009d28be", size = 302215, upload-time = "2026-02-11T18:08:56.734Z" },
-    { url = "https://files.pythonhosted.org/packages/bd/6a/a4f27e087f9ab46eb8171272f31d6c01477fe895e56038cb6550387c1787/osqp-1.1.1-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:64c45eb7a2ef39751417d964c792f3bfe396642b8bc1ae6eca7b28aaa7398ca5", size = 322726, upload-time = "2026-02-11T18:08:58.3Z" },
-    { url = "https://files.pythonhosted.org/packages/70/97/6e1a593f0292f31e8abd6a1b8d8bd87443635b56064fb60bd6a71ae5e207/osqp-1.1.1-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b3c726d8516d90b2d6acb47acf0bef248188119c52692cca307e418f0f2d8fad", size = 345685, upload-time = "2026-02-11T18:08:59.938Z" },
-    { url = "https://files.pythonhosted.org/packages/e3/f1/1bc9acd0183177c5a3cb7e729f0543513f58d3edd5ec24198144b39df218/osqp-1.1.1-cp313-cp313-win_amd64.whl", hash = "sha256:b1bd86a9fb19f484705acdff47ec89d68af5c12fba9def921df503bc6bca8e39", size = 310834, upload-time = "2026-02-11T18:09:01.049Z" },
-    { url = "https://files.pythonhosted.org/packages/5f/bd/3ed5180c89c35da4a5de5e468a47df217572ec529ce07fcbc1f6a0bad21b/osqp-1.1.1-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:42315f8047708c7a2ae184df2255a2b5d323164e67a20df5c03ecd9b4208f2f7", size = 321887, upload-time = "2026-02-11T18:09:02.379Z" },
-    { url = "https://files.pythonhosted.org/packages/ae/9e/8e2215ef3755ac728dcaa32e3a9fab7e9900dcd6dfd2ddcc5893551681b4/osqp-1.1.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:610a4ecba7a274348f95eeb3c6d56d131207482b6ad95bd20e2a5e4f87111887", size = 302669, upload-time = "2026-02-11T18:09:03.362Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/17/53eebc2493c81c240def661dfa1b9feeaa0dc88989f7055467aee77420b4/osqp-1.1.1-cp314-cp314-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a1532b0ade13cb10d8875e121e6131448528fb79e931ffb5dccef555b26b464e", size = 323424, upload-time = "2026-02-11T18:09:04.491Z" },
-    { url = "https://files.pythonhosted.org/packages/ea/05/dd94a55c32a9fc72aa0e4fbea33b9894414bb422c285a23729a02ea2a3f4/osqp-1.1.1-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a1ee59dbda22d283de001e7948f7523f509279f7131d5abf0e53fc5ab66b8bb0", size = 345972, upload-time = "2026-02-11T18:09:06.07Z" },
-    { url = "https://files.pythonhosted.org/packages/8a/c4/d6c1d030b6df9233ee5b50d32fcb6a8c720891d88f674810f934a380bc93/osqp-1.1.1-cp314-cp314-win_amd64.whl", hash = "sha256:514b2e1d14b5bad9a91ff4dbcbad8da75ef4fb5eee18864e0bbbb620fc6dbcd7", size = 316454, upload-time = "2026-02-11T18:09:07.723Z" },
-]
-
-[[package]]
 name = "overrides"
 version = "7.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2543,7 +2498,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "scikit-learn" },
-    { name = "scikit-survival" },
     { name = "seaborn" },
     { name = "torch" },
     { name = "tqdm" },
@@ -2578,7 +2532,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
-    { name = "scikit-survival", specifier = ">=0.27.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "torch", specifier = ">=2.12.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "tqdm", specifier = ">=4.67.1" },
@@ -2824,36 +2777,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/57/51f2384575bdec454f4fe4e7a919d696c9ebce914590abf3e52d47607ab8/scikit_learn-1.8.0-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:15fc3b5d19cc2be65404786857f2e13c70c83dd4782676dd6814e3b89dc8f5b9", size = 8922467, upload-time = "2025-12-10T07:08:47.408Z" },
     { url = "https://files.pythonhosted.org/packages/35/4d/748c9e2872637a57981a04adc038dacaa16ba8ca887b23e34953f0b3f742/scikit_learn-1.8.0-cp314-cp314t-win_amd64.whl", hash = "sha256:00d6f1d66fbcf4eba6e356e1420d33cc06c70a45bb1363cd6f6a8e4ebbbdece2", size = 8774395, upload-time = "2025-12-10T07:08:49.337Z" },
     { url = "https://files.pythonhosted.org/packages/60/22/d7b2ebe4704a5e50790ba089d5c2ae308ab6bb852719e6c3bd4f04c3a363/scikit_learn-1.8.0-cp314-cp314t-win_arm64.whl", hash = "sha256:f28dd15c6bb0b66ba09728cf09fd8736c304be29409bd8445a080c1280619e8c", size = 8002647, upload-time = "2025-12-10T07:08:51.601Z" },
-]
-
-[[package]]
-name = "scikit-survival"
-version = "0.27.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "ecos" },
-    { name = "joblib" },
-    { name = "numexpr" },
-    { name = "numpy" },
-    { name = "osqp" },
-    { name = "pandas" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/99/2c/835bac49869a08e47a302433e0a1e3b4780576fd6d5ce975c19f59a3b535/scikit_survival-0.27.0.tar.gz", hash = "sha256:5ee6677688f358107209a705c2cdf6f0ac5f711a3784b8c60376383b9e0f2bc3", size = 2863372, upload-time = "2026-02-02T19:23:50.172Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/b1/d2aa453ce74777f09591d82e9e93ed2dc02d7464f807f3715c8d4abfdd64/scikit_survival-0.27.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:68e49eb4819040e751b3f5111a963985618e88fbb59cb5296e1d0eeb1b963813", size = 858696, upload-time = "2026-02-02T19:23:31.23Z" },
-    { url = "https://files.pythonhosted.org/packages/89/b9/e88f68bb214d9c690e7f29fbe5885bc1e12f5a5406eb12af9ad9b438d884/scikit_survival-0.27.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0801533e67b896955a62b4872950156f8b0568257774a019d8d6053a4bb25870", size = 850493, upload-time = "2026-02-02T19:23:32.497Z" },
-    { url = "https://files.pythonhosted.org/packages/68/d5/b92a5770a0029bd824cc8de92411388d09bbdc5c48cc2df3820fe2b3a223/scikit_survival-0.27.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5041fdfdb4c7f0d76622ba8fccac7819e5639c8831376801a497b3639c9dcccf", size = 3962313, upload-time = "2026-02-02T19:23:33.727Z" },
-    { url = "https://files.pythonhosted.org/packages/84/76/cf9dcc2ce16d2a4c10fdf44793e861de4ed462e5d92a8c16aa868a1ccd66/scikit_survival-0.27.0-cp312-cp312-win_amd64.whl", hash = "sha256:d15a8eef5c09e78e07827ddb88f14fd62f11d7b9c138cba730f7c61e7b6fec1e", size = 808281, upload-time = "2026-02-02T19:23:35.104Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/15/32c9400a31a3471ed07feee6a918df4fce334d6baf57fcfb5a8f39f5f502/scikit_survival-0.27.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:2f01f0f51ca8d342b9637c6beddae7b25e0ec70aeff6e1a78723f45f7b76603e", size = 854235, upload-time = "2026-02-02T19:23:38.071Z" },
-    { url = "https://files.pythonhosted.org/packages/a6/89/06009a4f68ee1357d44cc9ab37fe18a32807698295addefef6a152d96b55/scikit_survival-0.27.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5cc96bed3b2fab54d7d4ae204d47fb569daf073d0c2d847ecd76f3701aa96bb9", size = 846666, upload-time = "2026-02-02T19:23:39.503Z" },
-    { url = "https://files.pythonhosted.org/packages/a2/1c/862293a1104b639ac0c21fc58052b966246ed7182c2bd8a243fa8132ecaf/scikit_survival-0.27.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fc0e5ab5da937769104078b57496e88e3e5d9ddee51ec7723231fbe89fac8591", size = 3947656, upload-time = "2026-02-02T19:23:40.776Z" },
-    { url = "https://files.pythonhosted.org/packages/cb/ee/f46729b981da7c47b190a4f2c51a2cff4a67307d300420635feddd5cc33c/scikit_survival-0.27.0-cp313-cp313-win_amd64.whl", hash = "sha256:3ff8628f824fa64ba771bb6fac89c78e1e576528d065788e47d46b6aa8af825a", size = 806434, upload-time = "2026-02-02T19:23:42.527Z" },
-    { url = "https://files.pythonhosted.org/packages/93/d5/3dbb6494e44789134e93cfbc9f229d463d023fa400b6dd73a91faa13b967/scikit_survival-0.27.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:846907bae9c4c64f4fb784dfe3161cb0e21e32e3bc8040c630aaf18c2ba4af7c", size = 855993, upload-time = "2026-02-02T19:23:43.94Z" },
-    { url = "https://files.pythonhosted.org/packages/df/1c/996b9da04111096d6ad25d37bf327ff3d0afad266d9d4bdfc2a1be68ea1f/scikit_survival-0.27.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:dc4a42f43276deb46411cc4467ed2c3c84ff649a74aa0b8cff1e9f895f75d8f5", size = 850935, upload-time = "2026-02-02T19:23:45.287Z" },
-    { url = "https://files.pythonhosted.org/packages/61/38/072a31674528ad8f8d25bf372f29b38d5f1b00b574497fdaadcc5ca5eace/scikit_survival-0.27.0-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:12bb0a6f51df87963282b99353920af8843d0b86f189090f81ccf520077b137d", size = 3923684, upload-time = "2026-02-02T19:23:46.822Z" },
-    { url = "https://files.pythonhosted.org/packages/28/b9/fc7c40751f982d76f15a0aa8d2538b1c5f557642aba23714d037edfdf3a5/scikit_survival-0.27.0-cp314-cp314-win_amd64.whl", hash = "sha256:36a6b11a77d957632ff48c5bc6f1d380af3bc940e28b124a64c64f9487fd00ad", size = 822014, upload-time = "2026-02-02T19:23:48.163Z" },
 ]
 
 [[package]]

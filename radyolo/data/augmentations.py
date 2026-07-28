@@ -53,51 +53,6 @@ def bbox_iov(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch
     return inter_vol.div(box2_vol)
 
 
-def apply_tabular_mask_augmentation(
-    batch: dict[str, torch.Tensor | object],
-    drop_probability: float,
-) -> dict[str, torch.Tensor | object]:
-    """Randomly mask tabular features in-place for regularization.
-
-    This augmentation requires ``batch`` to contain both ``"tabular_values"`` and
-    ``"tabular_mask"`` tensors of equal shape. A Bernoulli mask is sampled per
-    element with probability ``drop_probability`` and combined with the existing
-    tabular mask. Newly masked values are set to ``0.0``.
-
-    Args:
-        batch (dict[str, torch.Tensor | object]): Batch dictionary that may include
-            tabular tensors.
-        drop_probability (float): Element-wise masking probability in ``[0, 1]``.
-
-    Returns:
-        dict[str, torch.Tensor | object]: The updated batch dictionary.
-    """
-    if drop_probability <= 0.0:
-        return batch
-    if "tabular_values" not in batch or "tabular_mask" not in batch:
-        return batch
-
-    tabular_values = batch["tabular_values"]
-    tabular_mask = batch["tabular_mask"]
-    if not isinstance(tabular_values, torch.Tensor) or not isinstance(tabular_mask, torch.Tensor):
-        return batch
-
-    tabular_mask = tabular_mask.to(dtype=torch.bool)
-    if tabular_mask.numel() == 0:
-        batch["tabular_mask"] = tabular_mask
-        return batch
-
-    drop_samples = torch.rand(
-        tabular_mask.shape,
-        device=tabular_mask.device,
-        dtype=torch.float32,
-    ) < float(drop_probability)
-    augmented_mask = tabular_mask & (~drop_samples)
-    batch["tabular_mask"] = augmented_mask
-    batch["tabular_values"] = tabular_values.masked_fill(~augmented_mask, 0.0)
-    return batch
-
-
 def tensor_cutout(
     image: torch.Tensor,
     labels: torch.Tensor,

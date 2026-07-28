@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from radyolo.config.config import DefaultConfig
-    from radyolo.data.image_labels import ImageLabelTaskSpec
     from radyolo.inference.predict import PredictionConfig
     from radyolo.models.model import HardcodedModel
 
@@ -34,8 +33,6 @@ class _LoadedEnsembleModel:
     model: HardcodedModel
     train_config: DefaultConfig
     names: dict[int, str]
-    image_label_task_specs: dict[str, ImageLabelTaskSpec]
-    tabular_feature_names: tuple[str, ...]
     prediction_config: PredictionConfig
 
 
@@ -45,7 +42,6 @@ class _PassPrediction:
 
     detections: torch.Tensor
     masks: list[torch.Tensor | None]
-    image_label_results: dict[str, object] | None
     original_shape: tuple[int, int, int]
     pass_index: int
 
@@ -182,61 +178,9 @@ def _write_task_to_pass_prediction(
     return _PassPrediction(
         detections=detections,
         masks=masks,
-        image_label_results=write_task.image_label_results,
         original_shape=write_task.original_shape,
         pass_index=pass_index,
     )
-
-
-def _average_numeric_lists(values: list[list[object]]) -> list[object]:
-    """Average same-length numeric lists while preserving nonnumeric entries."""
-    width = min(len(value) for value in values)
-    averaged: list[object] = []
-    for index in range(width):
-        column = [value[index] for value in values]
-        if all(isinstance(value, (int, float)) for value in column):
-            averaged.append(round(float(sum(column)) / len(column), 6))
-        else:
-            averaged.append(column[0])
-    return averaged
-
-
-def _average_image_label_values(values: list[object]) -> object:
-    """Average compatible serialized image-label values across passes."""
-    if all(isinstance(value, (int, float)) for value in values):
-        return round(float(sum(values)) / len(values), 6)
-    if all(isinstance(value, list) for value in values):
-        return _average_numeric_lists(values)  # type: ignore[arg-type]
-    if all(isinstance(value, dict) for value in values):
-        dict_values = [value for value in values if isinstance(value, dict)]
-        keys = set.intersection(*(set(value) for value in dict_values))
-        averaged = {
-            key: _average_image_label_values([value[key] for value in dict_values])
-            for key in keys
-        }
-        probabilities = averaged.get("probabilities")
-        if isinstance(probabilities, list) and probabilities:
-            predicted_class = int(np.argmax(np.asarray(probabilities, dtype=np.float32)))
-            averaged["predicted_class"] = predicted_class
-            if "predicted_class_name" in averaged:
-                averaged["predicted_class_name"] = str(predicted_class)
-        return averaged
-    return values[0]
-
-
-def _average_image_label_results(
-    pass_predictions: list[_PassPrediction],
-) -> dict[str, object] | None:
-    """Average serialized global image-label outputs across ensemble/TTA passes."""
-    results = [prediction.image_label_results for prediction in pass_predictions]
-    dict_results = [result for result in results if isinstance(result, dict)]
-    if not dict_results:
-        return None
-    keys = set.intersection(*(set(result) for result in dict_results))
-    return {
-        key: _average_image_label_values([result[key] for result in dict_results])
-        for key in keys
-    }
 
 
 def _flatten_pass_detections(
@@ -365,17 +309,13 @@ def _load_ensemble_models(prediction_cfg: PredictionConfig) -> list[_LoadedEnsem
     loaded_models: list[_LoadedEnsembleModel] = []
     for model_path in _model_paths(prediction_cfg):
         model_prediction_cfg = replace(prediction_cfg, model_path=model_path)
-        model, train_config, names, image_label_task_specs, tabular_feature_names = _load_model(
-            model_prediction_cfg
-        )
+        model, train_config, names = _load_model(model_prediction_cfg)
         _validate_loaded_model_prediction_config(train_config, model_prediction_cfg)
         loaded_models.append(
             _LoadedEnsembleModel(
                 model=model,
                 train_config=train_config,
                 names=names,
-                image_label_task_specs=image_label_task_specs,
-                tabular_feature_names=tabular_feature_names,
                 prediction_config=model_prediction_cfg,
             )
         )
@@ -387,8 +327,6 @@ def predict_loaded_image_ensemble_tta(
     *,
     loaded_models: list[_LoadedEnsembleModel],
     prediction_config: PredictionConfig,
-    tabular_values: torch.Tensor | None,
-    tabular_mask: torch.Tensor | None,
 ) -> WriteTask:
     """Run all model/TTA passes for one image and return aggregated predictions."""
     from radyolo.inference.predict import _predict_loaded_image  # noqa: PLC0415
@@ -403,10 +341,7 @@ def predict_loaded_image_ensemble_tta(
                 model=loaded_model.model,
                 train_config=loaded_model.train_config,
                 names=loaded_model.names,
-                image_label_task_specs=loaded_model.image_label_task_specs,
                 prediction_config=loaded_model.prediction_config,
-                tabular_values=tabular_values,
-                tabular_mask=tabular_mask,
             )
             pass_predictions.append(
                 _write_task_to_pass_prediction(
@@ -438,7 +373,6 @@ def predict_loaded_image_ensemble_tta(
     return WriteTask(
         case_name=loaded_image.case_name,
         image_results=image_results,
-        image_label_results=_average_image_label_results(pass_predictions),
         affine=loaded_image.affine,
         original_shape=output_original_shape,
         prototype_masks=None,

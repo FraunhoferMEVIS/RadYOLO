@@ -140,8 +140,6 @@ def test_save_model_copies_best_validation_artifacts(
 
     validation_summary = trainer.save_dir / "validation_summary.png"
     validation_summary.write_bytes(b"summary")
-    validation_image_labels = trainer.save_dir / "validation_image_labels.png"
-    validation_image_labels.write_bytes(b"image-label-summary")
     validation_samples = trainer.save_dir / "validation_samples"
     validation_samples.mkdir(exist_ok=True)
     (validation_samples / "sample.txt").write_text("best sample", encoding="utf-8")
@@ -179,9 +177,6 @@ def test_save_model_copies_best_validation_artifacts(
 
     assert saved_paths == [[trainer.last_model_path, trainer.best_model_path]]
     assert (trainer.save_dir / "validation_summary_best.png").read_bytes() == b"summary"
-    assert (
-        trainer.save_dir / "validation_image_labels_best.png"
-    ).read_bytes() == b"image-label-summary"
     assert (trainer.save_dir / "validation_samples_best" / "sample.txt").read_text(
         encoding="utf-8"
     ) == "best sample"
@@ -250,88 +245,6 @@ def test_default_config_uses_epoch_based_ema_tau_default(minimal_train_config: P
     config = get_training_config(minimal_train_config, {})
 
     assert config.ema_tau == 400.0
-
-
-def test_load_checkpoint_model_uses_saved_metadata_when_dataset_yaml_omits_image_tasks(
-    synthetic_dataset: Path,
-    tmp_path: Path,
-) -> None:
-    dataset_yaml_path = synthetic_dataset / "dataset.yaml"
-    original_dataset_yaml = yaml.safe_load(dataset_yaml_path.read_text(encoding="utf-8"))
-    dataset_yaml_with_image_tasks = {
-        **original_dataset_yaml,
-        "image_label_tasks": {
-            "tumor_site": {
-                "type": "multiclass",
-                "classes": {0: "other", 1: "oropharynx", 2: "larynx"},
-            }
-        },
-    }
-    dataset_yaml_path.write_text(
-        yaml.safe_dump(dataset_yaml_with_image_tasks, sort_keys=False),
-        encoding="utf-8",
-    )
-
-    config_path = tmp_path / "image_label_head_train.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "input_channels: 1",
-                "model_scale: n",
-                f"data: {synthetic_dataset.as_posix()}",
-                "fold: 0",
-                "epochs: 1",
-                "nominal_batch_size: 1",
-                "warmup_epochs: 0.0",
-                "patience: 1",
-                "batch_size: 1",
-                "patch_size: {x: 32, y: 32, z: 64}",
-                "normalization: {type: 'none'}",
-                "device: cpu",
-                "workers: 0",
-                f"output_folder_base: {(tmp_path / 'runs').as_posix()}",
-                "experiment_name: image_label_checkpoint_load",
-                "exist_ok: True",
-                "optimizer: Adam",
-                "seed: 0",
-                "resume: False",
-                "amp: False",
-                "use_cudnn_benchmark: False",
-                "val: False",
-                "plots: False",
-                "enable_image_label_head: True",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    config = get_training_config(config_path, {})
-    model = build_model_from_config(config)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    scaler = torch.GradScaler("cpu", enabled=False)
-    checkpoint_path = tmp_path / "image_label_head_checkpoint.pt"
-    save_model_checkpoint(
-        paths=[checkpoint_path],
-        epoch=1,
-        best_fitness=0.0,
-        model=model,
-        ema_updates=0,
-        optimizer=optimizer,
-        scaler=scaler,
-        train_config=config,
-        train_metrics={"metrics/fitness": 0.0},
-    )
-    saved_checkpoint = load_model_checkpoint(checkpoint_path)
-    assert "tumor_site" in saved_checkpoint["model_metadata"]["image_label_tasks"]
-
-    dataset_yaml_path.write_text(
-        yaml.safe_dump(original_dataset_yaml, sort_keys=False),
-        encoding="utf-8",
-    )
-
-    loaded = load_checkpoint_model(checkpoint_path, device_override="cpu")
-    assert "tumor_site" in loaded.model.image_label_task_specs
-    assert len(loaded.model.image_label_task_specs["tumor_site"].classes or {}) == 3
 
 
 def test_get_cfg_infers_num_classes_from_dataset_names(minimal_train_config: Path) -> None:
@@ -639,26 +552,6 @@ def test_validation_fitness_uses_configured_weights(minimal_train_config: Path) 
     )
 
     assert fitness == pytest.approx(0.45)
-
-
-def test_validation_fitness_uses_image_label_metric_weights(minimal_train_config: Path) -> None:
-    trainer = Trainer(cfg=minimal_train_config)
-    trainer.config = trainer.config.model_copy(
-        update={"fitness_metric_weights": (0.4, 0.1, 0.1, 0.1, 0.2, 0.1)}
-    )
-
-    fitness = trainer._compute_validation_fitness(
-        {
-            "metrics/mAP10-95": 0.5,
-            "metrics/mAP10-95Agn": 0.2,
-            "metrics/dice": 0.4,
-            "metrics/image_label_balanced_accuracy": 0.8,
-            "metrics/image_label_multiclass_roc_auc": 0.7,
-            "metrics/image_label_c_index": 0.6,
-        }
-    )
-
-    assert fitness == pytest.approx(0.54)
 
 
 def test_default_config_defaults_tal_topk_schedule_to_static_value(

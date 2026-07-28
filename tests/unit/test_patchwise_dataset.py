@@ -351,7 +351,7 @@ def test_patchwise_training_load_uses_enlarged_extraction_patch(
     )
     monkeypatch.setattr(dataset, "_sample_patch_center", lambda _shape, _patch_shape: (16, 16, 32))
 
-    sample = dataset.load_image_label_and_mask(0)
+    sample = dataset.load_sample(0)
 
     assert sample["image"].shape == (1, 39, 20, 20)
     assert sample["shape"] == (39, 20, 20)

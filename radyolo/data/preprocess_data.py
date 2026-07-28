@@ -537,8 +537,6 @@ def preprocess_dataset(  # noqa: PLR0913
         out_masks_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(labels_dir, output_path / "labels", dirs_exist_ok=True)
-    _copy_tree_if_exists(dataset_path / "labels_image", output_path / "labels_image")
-    _copy_tree_if_exists(dataset_path / "inputs_tabular", output_path / "inputs_tabular")
 
     _copy_file_if_exists(dataset_path / "dataset.yaml", output_path / "dataset.yaml")
     _copy_file_if_exists(

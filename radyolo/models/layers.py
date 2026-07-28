@@ -23,7 +23,6 @@ class ModelOutput:
     objectness_probabilities: torch.Tensor | None = None
     mask_coefficients: torch.Tensor | None = None
     prototype_masks: torch.Tensor | None = None
-    image_label_outputs: dict[str, torch.Tensor] | None = None
 
     def to_prediction_components(self) -> tuple[torch.Tensor, ...]:
         """Return decoded detection tensors in the expected postprocessing order."""
@@ -38,25 +37,13 @@ class ModelOutput:
             )
         return (self.decoded_boxes, self.class_probabilities)
 
-    def to_export_tensors(
-        self,
-        *,
-        include_image_label_outputs: bool = True,
-        image_label_task_order: Sequence[str] | None = None,
-    ) -> tuple[torch.Tensor, ...]:
+    def to_export_tensors(self) -> tuple[torch.Tensor, ...]:
         """Return prediction tensors serialized by the export pipeline."""
         output_tensors = list(self.to_prediction_components())
         if self.mask_coefficients is not None:
             output_tensors.append(self.mask_coefficients)
         if self.prototype_masks is not None:
             output_tensors.append(self.prototype_masks)
-        if include_image_label_outputs and self.image_label_outputs:
-            ordered_task_names = list(image_label_task_order or sorted(self.image_label_outputs))
-            for task_name in sorted(self.image_label_outputs):
-                if task_name not in ordered_task_names:
-                    ordered_task_names.append(task_name)
-            for task_name in ordered_task_names:
-                output_tensors.append(self.image_label_outputs[task_name])
         return tuple(output_tensors)
 
 

@@ -25,9 +25,6 @@ metrics:
   tracked_columns:
     - metrics/mAP10-95
     - metrics/dice
-    - metrics/image_label_balanced_accuracy
-    - metrics/image_label_multiclass_roc_auc
-    - metrics/image_label_c_index
   # Rolling window size used for all tracked metric extraction.
   rolling_window_epochs: 20
   # How to aggregate per-dataset training metrics into the objective reported to Ray Tune.

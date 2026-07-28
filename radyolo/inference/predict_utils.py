@@ -34,7 +34,6 @@ class WriteTask:
     original_shape: tuple[int, int, int]
     prototype_masks: np.ndarray | None
     mask_detections: list[np.ndarray]
-    image_label_results: dict[str, object] | None = None
     merged_mask_probabilities: list[np.ndarray] = field(default_factory=list)
 
 

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import torch
 from torch import nn
@@ -10,17 +9,10 @@ from torch import nn
 from radyolo.config.config import (
     DefaultConfig,
     HeadConvolutionType,
-    ImageLabelHeadFeature,
     ModelCheckpoint,
     PrototypeLayer,
     load_model_checkpoint,
 )
-from radyolo.data.image_labels import (
-    ImageLabelTaskSpec,
-    load_image_label_task_specs,
-    resolve_survival_task_specs,
-)
-from radyolo.data.tabular import load_tabular_feature_names
 from radyolo.models.layers import (
     C2PSA,
     SPPF,
@@ -39,6 +31,9 @@ from radyolo.models.layers import (
     resolve_head_hidden_channels,
 )
 from radyolo.utils.util import intersect_dicts, make_divisible, select_device, unwrap_model
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -61,382 +56,8 @@ def get_model_min_stride(model: nn.Module | None, default: int = 8) -> int:
     return default
 
 
-class GlobalImageLabelHead(nn.Module):
-    """Global multi-task image-label head with pooled feature fusion and optional tabular input."""
-
-    def __init__(
-        self,
-        feature_channels: dict[str, int],
-        task_specs: dict[str, ImageLabelTaskSpec],
-        selected_feature_maps: list[ImageLabelHeadFeature],
-        projection_channels: int,
-        mlp_hidden_layers: int,
-        mlp_hidden_channels: int,
-        dropout: float,
-        tabular_encoder: TabularTransformerEncoder | TabularTransformerEncoderV2 | None = None,
-    ) -> None:
-        super().__init__()
-        if not task_specs:
-            msg = "Global image-label head requires at least one declared image label task"
-            raise ValueError(msg)
-        if not selected_feature_maps:
-            msg = "Global image-label head requires at least one selected feature map"
-            raise ValueError(msg)
-
-        self.selected_feature_maps = tuple(selected_feature_maps)
-        self.projectors = nn.ModuleDict(
-            {
-                feature_name: Conv(feature_channels[feature_name], projection_channels, 1)
-                for feature_name in self.selected_feature_maps
-            }
-        )
-        pooled_feature_width = len(self.selected_feature_maps) * projection_channels * 2
-        self.tabular_encoder = tabular_encoder
-        mlp_input_width = pooled_feature_width
-        if self.tabular_encoder is not None:
-            mlp_input_width += self.tabular_encoder.output_width
-
-        mlp_layers: list[nn.Module] = []
-        for _ in range(mlp_hidden_layers):
-            mlp_layers.extend(
-                [
-                    nn.Linear(mlp_input_width, mlp_hidden_channels),
-                    nn.SiLU(),
-                    nn.Dropout(p=dropout),
-                ]
-            )
-            mlp_input_width = mlp_hidden_channels
-        self.shared_mlp = nn.Sequential(*mlp_layers) if mlp_layers else nn.Identity()
-
-        self.avg_pool = nn.AdaptiveAvgPool3d(1)
-        self.max_pool = nn.AdaptiveMaxPool3d(1)
-        self.task_heads = nn.ModuleDict()
-        for task_name, task_spec in task_specs.items():
-            if task_spec.type == "multiclass":
-                if task_spec.classes is None:
-                    msg = f"Multiclass task '{task_name}' requires declared class names"
-                    raise ValueError(msg)
-                output_width = len(task_spec.classes)
-            elif task_spec.type == "survival":
-                if not task_spec.survival_bin_thresholds:
-                    msg = f"Survival task '{task_name}' requires resolved bin thresholds"
-                    raise ValueError(msg)
-                output_width = len(task_spec.survival_bin_thresholds)
-            else:
-                msg = f"Unsupported image-label task type '{task_spec.type}' for '{task_name}'"
-                raise ValueError(msg)
-            self.task_heads[task_name] = nn.Linear(mlp_input_width, output_width)
-
-    def _resolve_tabular_inputs(
-        self,
-        batch_size: int,
-        device: torch.device,
-        tabular_values: torch.Tensor | None,
-        tabular_mask: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Validate tabular tensors and provide zero-filled defaults when inputs are missing."""
-        if self.tabular_encoder is None:
-            msg = "Tabular inputs can only be resolved when tabular_encoder is configured"
-            raise RuntimeError(msg)
-        num_features = self.tabular_encoder.num_features
-        default_values = torch.zeros(
-            (batch_size, num_features),
-            dtype=torch.float32,
-            device=device,
-        )
-        default_mask = torch.zeros(
-            (batch_size, num_features),
-            dtype=torch.bool,
-            device=device,
-        )
-        if tabular_values is None or tabular_mask is None:
-            return default_values, default_mask
-
-        if tabular_values.shape != default_values.shape:
-            msg = (
-                "tabular_values has incompatible shape. Expected "
-                f"{tuple(default_values.shape)}, got {tuple(tabular_values.shape)}."
-            )
-            raise ValueError(msg)
-        if tabular_mask.shape != default_mask.shape:
-            msg = (
-                "tabular_mask has incompatible shape. Expected "
-                f"{tuple(default_mask.shape)}, got {tuple(tabular_mask.shape)}."
-            )
-            raise ValueError(msg)
-        return (
-            tabular_values.to(device=device, dtype=torch.float32),
-            tabular_mask.to(device=device, dtype=torch.bool),
-        )
-
-    def forward(
-        self,
-        feature_maps: dict[str, torch.Tensor],
-        tabular_values: torch.Tensor | None = None,
-        tabular_mask: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Pool selected feature maps and return logits for each configured label task."""
-        pooled_features: list[torch.Tensor] = []
-        for feature_name in self.selected_feature_maps:
-            projected = self.projectors[feature_name](feature_maps[feature_name])
-            pooled_features.append(self.avg_pool(projected).flatten(1))
-            pooled_features.append(self.max_pool(projected).flatten(1))
-        shared_feature_inputs = [torch.cat(pooled_features, dim=1)]
-        if self.tabular_encoder is not None:
-            feature_device = pooled_features[0].device
-            resolved_values, resolved_mask = self._resolve_tabular_inputs(
-                batch_size=pooled_features[0].shape[0],
-                device=feature_device,
-                tabular_values=tabular_values,
-                tabular_mask=tabular_mask,
-            )
-            shared_feature_inputs.append(self.tabular_encoder(resolved_values, resolved_mask))
-        shared_features = self.shared_mlp(torch.cat(shared_feature_inputs, dim=1))
-        return {
-            task_name: task_head(shared_features)
-            for task_name, task_head in self.task_heads.items()
-        }
-
-
-class TabularTransformerEncoder(nn.Module):
-    """Transformer encoder for tabular features with feature embeddings and mask tokens."""
-
-    def __init__(
-        self,
-        num_features: int,
-        d_model: int,
-        num_heads: int,
-        num_layers: int,
-        feedforward_channels: int,
-        dropout: float,
-    ) -> None:
-        super().__init__()
-        if num_features < 1:
-            msg = "Tabular transformer encoder requires at least one feature"
-            raise ValueError(msg)
-        if d_model % num_heads != 0:
-            msg = (
-                "Tabular transformer encoder requires d_model divisible by num_heads, got "
-                f"d_model={d_model}, num_heads={num_heads}."
-            )
-            raise ValueError(msg)
-        self.num_features = num_features
-        self.output_width = d_model
-        self.feature_value_projection = nn.Linear(1, d_model)
-        self.feature_embeddings = nn.Parameter(torch.empty(num_features, d_model))
-        self.mask_tokens = nn.Parameter(torch.empty(num_features, d_model))
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=num_heads,
-            dim_feedforward=feedforward_channels,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=False,
-        )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=num_layers,
-        )
-        self.output_norm = nn.LayerNorm(d_model)
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        """Initialize learnable feature and mask token embeddings."""
-        nn.init.normal_(self.feature_embeddings, mean=0.0, std=0.02)
-        nn.init.normal_(self.mask_tokens, mean=0.0, std=0.02)
-
-    def forward(self, values: torch.Tensor, observed_mask: torch.Tensor) -> torch.Tensor:
-        if values.ndim != 2 or values.shape[1] != self.num_features:
-            msg = (
-                "Tabular values must have shape (batch_size, num_features) with "
-                f"num_features={self.num_features}, got {tuple(values.shape)}."
-            )
-            raise ValueError(msg)
-        if observed_mask.shape != values.shape:
-            msg = (
-                "Tabular observed_mask must match values shape, got "
-                f"values={tuple(values.shape)} and mask={tuple(observed_mask.shape)}."
-            )
-            raise ValueError(msg)
-
-        projected_values = self.feature_value_projection(values.unsqueeze(-1))
-        expanded_feature_embeddings = self.feature_embeddings.unsqueeze(0).expand(
-            values.shape[0],
-            -1,
-            -1,
-        )
-        expanded_mask_tokens = self.mask_tokens.unsqueeze(0).expand(values.shape[0], -1, -1)
-        observed_mask_expanded = observed_mask.unsqueeze(-1)
-        feature_tokens = torch.where(observed_mask_expanded, projected_values, expanded_mask_tokens)
-        feature_tokens = feature_tokens + expanded_feature_embeddings
-        encoded_tokens = self.transformer(feature_tokens)
-        return self.output_norm(encoded_tokens.mean(dim=1))
-
-
-class TabularTransformerEncoderV2(nn.Module):
-    """Tabular transformer variant with optional CLS token and configurable tokenization."""
-
-    def __init__(
-        self,
-        num_features: int,
-        d_model: int,
-        num_heads: int,
-        num_layers: int,
-        feedforward_channels: int,
-        dropout: float,
-        per_feature_value_projection: bool = False,
-        shared_mask_token: bool = False,
-    ) -> None:
-        super().__init__()
-        if num_features < 1:
-            msg = "Tabular transformer encoder requires at least one feature"
-            raise ValueError(msg)
-        if d_model % num_heads != 0:
-            msg = (
-                "Tabular transformer encoder requires d_model divisible by num_heads, got "
-                f"d_model={d_model}, num_heads={num_heads}."
-            )
-            raise ValueError(msg)
-        self.num_features = num_features
-        self.output_width = d_model
-        self.per_feature_value_projection = per_feature_value_projection
-        if self.per_feature_value_projection:
-            self.feature_value_projections = nn.ModuleList(
-                nn.Linear(1, d_model) for _ in range(num_features)
-            )
-            self.feature_value_projection = None
-        else:
-            self.feature_value_projection = nn.Linear(1, d_model)
-            self.feature_value_projections = None
-        self.feature_embeddings = nn.Parameter(torch.empty(num_features, d_model))
-        self.shared_mask_token = shared_mask_token
-        if self.shared_mask_token:
-            self.mask_token = nn.Parameter(torch.empty(1, d_model))
-            self.mask_tokens = None
-        else:
-            self.mask_tokens = nn.Parameter(torch.empty(num_features, d_model))
-            self.mask_token = None
-        self.cls_token = nn.Parameter(torch.empty(1, 1, d_model))
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=num_heads,
-            dim_feedforward=feedforward_channels,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
-        )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=num_layers,
-            enable_nested_tensor=False,
-        )
-        self.output_norm = nn.LayerNorm(d_model)
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        """Initialize embedding, mask, and CLS token parameters."""
-        nn.init.normal_(self.feature_embeddings, mean=0.0, std=0.02)
-        if self.mask_tokens is not None:
-            nn.init.normal_(self.mask_tokens, mean=0.0, std=0.02)
-        if self.mask_token is not None:
-            nn.init.normal_(self.mask_token, mean=0.0, std=0.02)
-        nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
-
-    def forward(self, values: torch.Tensor, observed_mask: torch.Tensor) -> torch.Tensor:
-        if values.ndim != 2 or values.shape[1] != self.num_features:
-            msg = (
-                "Tabular values must have shape (batch_size, num_features) with "
-                f"num_features={self.num_features}, got {tuple(values.shape)}."
-            )
-            raise ValueError(msg)
-        if observed_mask.shape != values.shape:
-            msg = (
-                "Tabular observed_mask must match values shape, got "
-                f"values={tuple(values.shape)} and mask={tuple(observed_mask.shape)}."
-            )
-            raise ValueError(msg)
-
-        if self.feature_value_projections is not None:
-            projected_values = torch.stack(
-                [
-                    projection(values[:, feature_index : feature_index + 1])
-                    for feature_index, projection in enumerate(self.feature_value_projections)
-                ],
-                dim=1,
-            )
-        else:
-            if self.feature_value_projection is None:
-                msg = "feature_value_projection is not initialized"
-                raise RuntimeError(msg)
-            projected_values = self.feature_value_projection(values.unsqueeze(-1))
-        expanded_feature_embeddings = self.feature_embeddings.unsqueeze(0).expand(
-            values.shape[0],
-            -1,
-            -1,
-        )
-        if self.mask_tokens is not None:
-            expanded_mask_tokens = self.mask_tokens.unsqueeze(0).expand(values.shape[0], -1, -1)
-        else:
-            if self.mask_token is None:
-                msg = "mask_token is not initialized"
-                raise RuntimeError(msg)
-            expanded_mask_tokens = self.mask_token.unsqueeze(0).expand(
-                values.shape[0],
-                self.num_features,
-                -1,
-            )
-        observed_mask_expanded = observed_mask.unsqueeze(-1)
-        feature_tokens = torch.where(observed_mask_expanded, projected_values, expanded_mask_tokens)
-        feature_tokens = feature_tokens + expanded_feature_embeddings
-        cls_tokens = self.cls_token.expand(values.shape[0], -1, -1)
-        feature_tokens = torch.cat([cls_tokens, feature_tokens], dim=1)
-        encoded_tokens = self.transformer(feature_tokens)
-        return self.output_norm(encoded_tokens[:, 0])
-
-
-def _resolve_image_label_tasks(
-    train_config: DefaultConfig,
-    image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
-) -> dict[str, ImageLabelTaskSpec]:
-    """Resolve image-label task specs from arguments or dataset metadata."""
-    if image_label_tasks is not None:
-        return dict(image_label_tasks)
-
-    task_specs = load_image_label_task_specs(Path(train_config.data))
-    task_specs = resolve_survival_task_specs(
-        Path(train_config.data),
-        task_specs,
-        num_bins=train_config.image_label_survival_num_bins,
-    )
-    if train_config.enable_image_label_head and not task_specs:
-        msg = "enable_image_label_head=True requires dataset.yaml to declare image_label_tasks"
-        raise ValueError(msg)
-    return task_specs
-
-
-def _resolve_tabular_feature_names(train_config: DefaultConfig) -> tuple[str, ...]:
-    """Load declared tabular feature names and validate fusion prerequisites."""
-    feature_names = load_tabular_feature_names(Path(train_config.data))
-    if train_config.enable_tabular_image_label_fusion and not feature_names:
-        msg = (
-            "enable_tabular_image_label_fusion=True requires dataset.yaml to declare "
-            "tabular_feature_names"
-        )
-        raise ValueError(msg)
-    return feature_names
-
-
-def _load_image_label_tasks_from_checkpoint_metadata(
-    checkpoint: ModelCheckpoint,
-) -> dict[str, ImageLabelTaskSpec]:
-    """Extract serialized image-label task definitions from checkpoint metadata."""
-    return dict(checkpoint["model_metadata"]["image_label_tasks"])
-
-
 class HardcodedModel(nn.Module):
-    """Fixed YOLO-style 3D architecture with optional segmentation and image-label heads."""
+    """Fixed YOLO-style 3D architecture with optional segmentation head."""
 
     MODEL_SCALES: ClassVar[dict[str, tuple[float, float, int]]] = {
         "n": (0.50, 0.25, 256),
@@ -467,34 +88,12 @@ class HardcodedModel(nn.Module):
         classification_head_channel_factor: float = 1.0,
         objectness_head_channel_factor: float = 1.0,
         box_head_channel_factor: float = 0.25,
-        image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
-        enable_image_label_head: bool = False,
-        image_label_head_feature_maps: list[ImageLabelHeadFeature] | None = None,
-        image_label_head_projection_channels: int = 128,
-        image_label_head_mlp_hidden_layers: int = 1,
-        image_label_head_mlp_hidden_channels: int = 256,
-        image_label_head_dropout: float = 0.1,
-        enable_tabular_image_label_fusion: bool = False,
-        tabular_transformer_variant: Literal["v1", "v2"] = "v1",
-        tabular_feature_names: tuple[str, ...] = (),
-        tabular_transformer_d_model: int = 64,
-        tabular_transformer_num_heads: int = 4,
-        tabular_transformer_num_layers: int = 2,
-        tabular_transformer_feedforward_channels: int = 256,
-        tabular_transformer_dropout: float = 0.1,
-        tabular_transformer_v2_per_feature_value_projection: bool = False,
-        tabular_transformer_v2_shared_mask_token: bool = False,
     ) -> None:
         super().__init__()
         self.input_channels = input_channels
         self.num_classes = num_classes
         self.bbox_parametrization = bbox_parametrization
         self.bbox_center_offset_limit = bbox_center_offset_limit
-        self.image_label_task_specs = dict(image_label_tasks or {})
-        self.image_label_head_feature_maps = tuple(
-            image_label_head_feature_maps or ["o10", "o16", "o19", "o22"]
-        )
-        self.tabular_feature_names = tuple(tabular_feature_names)
 
         depth_multiplier, width_multiplier, max_channels = HardcodedModel.MODEL_SCALES[scale]
 
@@ -509,12 +108,6 @@ class HardcodedModel(nn.Module):
         self.prototype_layer_mode = prototype_layer
         self.separate_objectness_head = separate_objectness_head
         self.include_stride4_output = include_stride4_output
-        self.enable_image_label_head = enable_image_label_head and bool(self.image_label_task_specs)
-        self.enable_tabular_image_label_fusion = (
-            enable_tabular_image_label_fusion
-            and self.enable_image_label_head
-            and len(self.tabular_feature_names) > 0
-        )
 
         c3k2_use_c3k = scale in ("m", "l", "x")
 
@@ -652,51 +245,6 @@ class HardcodedModel(nn.Module):
         self.l22 = C3k2(in_channels, out_channels, num_repeats, True)
         output_channels.append(out_channels)
 
-        if enable_image_label_head and not self.image_label_task_specs:
-            msg = "Global image-label head was enabled but no image label tasks were provided"
-            raise ValueError(msg)
-
-        if self.enable_image_label_head:
-            tabular_encoder = None
-            if self.enable_tabular_image_label_fusion:
-                if tabular_transformer_variant == "v2":
-                    tabular_encoder = TabularTransformerEncoderV2(
-                        num_features=len(self.tabular_feature_names),
-                        d_model=tabular_transformer_d_model,
-                        num_heads=tabular_transformer_num_heads,
-                        num_layers=tabular_transformer_num_layers,
-                        feedforward_channels=tabular_transformer_feedforward_channels,
-                        dropout=tabular_transformer_dropout,
-                        per_feature_value_projection=(
-                            tabular_transformer_v2_per_feature_value_projection
-                        ),
-                        shared_mask_token=tabular_transformer_v2_shared_mask_token,
-                    )
-                else:
-                    tabular_encoder = TabularTransformerEncoder(
-                        num_features=len(self.tabular_feature_names),
-                        d_model=tabular_transformer_d_model,
-                        num_heads=tabular_transformer_num_heads,
-                        num_layers=tabular_transformer_num_layers,
-                        feedforward_channels=tabular_transformer_feedforward_channels,
-                        dropout=tabular_transformer_dropout,
-                    )
-            self.image_label_head = GlobalImageLabelHead(
-                feature_channels={
-                    "o10": output_channels[10],
-                    "o16": output_channels[16],
-                    "o19": output_channels[19],
-                    "o22": output_channels[22],
-                },
-                task_specs=self.image_label_task_specs,
-                selected_feature_maps=list(self.image_label_head_feature_maps),
-                projection_channels=image_label_head_projection_channels,
-                mlp_hidden_layers=image_label_head_mlp_hidden_layers,
-                mlp_hidden_channels=image_label_head_mlp_hidden_channels,
-                dropout=image_label_head_dropout,
-                tabular_encoder=tabular_encoder,
-            )
-
         detect_chs: list[int] = (
             [c_p2, c_p3, c_p4, c_p5] if self.include_stride4_output else [c_p3, c_p4, c_p5]
         )
@@ -789,9 +337,6 @@ class HardcodedModel(nn.Module):
     def forward(
         self,
         x_input: torch.Tensor,
-        *,
-        tabular_values: torch.Tensor | None = None,
-        tabular_mask: torch.Tensor | None = None,
     ) -> ModelOutput:
         # BACKBONE
         x = o0 = self.l0(x_input)
@@ -880,12 +425,6 @@ class HardcodedModel(nn.Module):
                     ],
                     2,
                 )
-        if self.enable_image_label_head:
-            output.image_label_outputs = self.image_label_head(
-                {"o10": o10, "o16": o16, "o19": o19, "o22": o22},
-                tabular_values=tabular_values,
-                tabular_mask=tabular_mask,
-            )
         return output
 
     def load(self, state_dict: dict) -> None:
@@ -899,16 +438,8 @@ def build_model_from_config(
     *,
     num_classes: int | None = None,
     state_dict: dict | None = None,
-    image_label_tasks: dict[str, ImageLabelTaskSpec] | None = None,
-    tabular_feature_names: tuple[str, ...] | None = None,
 ) -> HardcodedModel:
     """Instantiate a model from train config and optionally load a partial state dict."""
-    resolved_image_label_tasks = _resolve_image_label_tasks(train_config, image_label_tasks)
-    resolved_tabular_feature_names = (
-        tabular_feature_names
-        if tabular_feature_names is not None
-        else _resolve_tabular_feature_names(train_config)
-    )
     model = HardcodedModel(
         input_channels=train_config.input_channels,
         num_classes=num_classes or train_config.num_classes,
@@ -929,25 +460,6 @@ def build_model_from_config(
         classification_head_channel_factor=train_config.classification_head_channel_factor,
         objectness_head_channel_factor=train_config.objectness_head_channel_factor,
         box_head_channel_factor=train_config.box_head_channel_factor,
-        image_label_tasks=resolved_image_label_tasks,
-        enable_image_label_head=train_config.enable_image_label_head,
-        image_label_head_feature_maps=train_config.image_label_head_feature_maps,
-        image_label_head_projection_channels=train_config.image_label_head_projection_channels,
-        image_label_head_mlp_hidden_layers=train_config.image_label_head_mlp_hidden_layers,
-        image_label_head_mlp_hidden_channels=train_config.image_label_head_mlp_hidden_channels,
-        image_label_head_dropout=train_config.image_label_head_dropout,
-        enable_tabular_image_label_fusion=train_config.enable_tabular_image_label_fusion,
-        tabular_transformer_variant=train_config.tabular_transformer_variant,
-        tabular_feature_names=resolved_tabular_feature_names,
-        tabular_transformer_d_model=train_config.tabular_transformer_d_model,
-        tabular_transformer_num_heads=train_config.tabular_transformer_num_heads,
-        tabular_transformer_num_layers=train_config.tabular_transformer_num_layers,
-        tabular_transformer_feedforward_channels=train_config.tabular_transformer_feedforward_channels,
-        tabular_transformer_dropout=train_config.tabular_transformer_dropout,
-        tabular_transformer_v2_per_feature_value_projection=(
-            train_config.tabular_transformer_v2_per_feature_value_projection
-        ),
-        tabular_transformer_v2_shared_mask_token=train_config.tabular_transformer_v2_shared_mask_token,
     )
     if state_dict is not None:
         model.load(state_dict)
@@ -963,12 +475,9 @@ def load_checkpoint_model(
     checkpoint = load_model_checkpoint(checkpoint_path)
     train_config = checkpoint["train_config"]
     device = select_device(device_override or getattr(train_config, "device", ""))
-    model_metadata = checkpoint["model_metadata"]
     model = build_model_from_config(
         train_config,
         state_dict=checkpoint["model_state_dict"],
-        image_label_tasks=_load_image_label_tasks_from_checkpoint_metadata(checkpoint),
-        tabular_feature_names=tuple(model_metadata["tabular_feature_names"]),
     )
     model.eval().to(device)
     model.device = device  # type: ignore[attr-defined]

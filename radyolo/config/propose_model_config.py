@@ -279,12 +279,6 @@ def propose_model_config(
     input_channels = input_channels_from_dataset(dataset_cfg) or 1
     normalization_tags = resolve_dataset_normalization_tags(dataset_cfg, input_channels)
     runtime_normalization = build_runtime_normalization_config(normalization_tags, fingerprint)
-    enable_image_label_head = bool(dataset_cfg.image_label_tasks) and bool(
-        reference_config.get("enable_image_label_head", False)
-    )
-    enable_tabular_image_label_fusion = enable_image_label_head and bool(
-        reference_config.get("enable_tabular_image_label_fusion", False)
-    )
 
     masks_dir = dataset_path / "masks"
     has_masks = bool(
@@ -314,8 +308,6 @@ def propose_model_config(
             "voxel_size": None if proposed_voxel_size is None else proposed_voxel_size.model_dump(),
             "normalization": runtime_normalization,
             "segmentation_output": has_masks,
-            "enable_image_label_head": enable_image_label_head,
-            "enable_tabular_image_label_fusion": enable_tabular_image_label_fusion,
             "experiment_name": (
                 f"{dataset_path.name}_{model_scale}_{patch_size.x}x{patch_size.y}x{patch_size.z}"
             ),

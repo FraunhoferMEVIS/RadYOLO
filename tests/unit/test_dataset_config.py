@@ -22,16 +22,12 @@ def test_dataset_config_requires_contiguous_class_indices() -> None:
         DatasetConfig.model_validate({"names": {0: "lesion", 2: "organ"}})
 
 
-def test_dataset_config_preserves_normalization_and_image_label_tasks() -> None:
+def test_dataset_config_preserves_normalization() -> None:
     config = DatasetConfig.model_validate(
         {
             "names": {0: "lesion"},
             "normalization": {0: "CT"},
-            "image_label_tasks": {
-                "tumor_stage": {"type": "multiclass", "classes": {0: "i", 1: "ii"}}
-            },
         }
     )
 
     assert config.normalization == {0: "CT"}
-    assert config.image_label_tasks["tumor_stage"]["type"] == "multiclass"

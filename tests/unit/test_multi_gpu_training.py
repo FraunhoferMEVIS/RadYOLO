@@ -409,7 +409,6 @@ def test_distributed_zero_loss_surrogate_keeps_model_output_graph_connected(
             super().__init__()
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
             self.mask_weight = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32))
-            self.label_weight = torch.nn.Parameter(torch.tensor(3.0, dtype=torch.float32))
 
         def forward(self) -> ModelOutput:
             raw_prediction = self.weight.unsqueeze(0)
@@ -419,7 +418,6 @@ def test_distributed_zero_loss_surrogate_keeps_model_output_graph_connected(
                 raw_predictions=[raw_prediction],
                 mask_coefficients=mask_coefficients,
                 prototype_masks=prototype_masks,
-                image_label_outputs={"label": self.label_weight.view(1, 1)},
             )
 
     model = FakeModel()
@@ -428,7 +426,6 @@ def test_distributed_zero_loss_surrogate_keeps_model_output_graph_connected(
 
     assert torch.equal(model.weight.grad, torch.zeros_like(model.weight))
     assert torch.equal(model.mask_weight.grad, torch.zeros_like(model.mask_weight))
-    assert torch.equal(model.label_weight.grad, torch.zeros_like(model.label_weight))
 
 
 def test_trainer_accepts_non_divisible_distributed_batch_size_per_gpu(
@@ -626,13 +623,7 @@ def test_trainer_updates_ema_once_per_epoch(minimal_train_config, monkeypatch) -
             super().__init__()
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
 
-        def forward(
-            self,
-            _img: torch.Tensor,
-            tabular_values: torch.Tensor | None = None,
-            tabular_mask: torch.Tensor | None = None,
-        ) -> tuple[torch.Tensor]:
-            del tabular_values, tabular_mask
+        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
             return (self.weight.unsqueeze(0),)
 
     class RecordingEMA:
@@ -747,13 +738,7 @@ def test_trainer_skips_non_finite_loss_batch(minimal_train_config, monkeypatch) 
             super().__init__()
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
 
-        def forward(
-            self,
-            _img: torch.Tensor,
-            tabular_values: torch.Tensor | None = None,
-            tabular_mask: torch.Tensor | None = None,
-        ) -> tuple[torch.Tensor]:
-            del tabular_values, tabular_mask
+        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
             return (self.weight.unsqueeze(0),)
 
     class RecordingEMA:
@@ -873,13 +858,7 @@ def test_trainer_skips_non_finite_input_batch(
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
             self.forward_calls = 0
 
-        def forward(
-            self,
-            _img: torch.Tensor,
-            tabular_values: torch.Tensor | None = None,
-            tabular_mask: torch.Tensor | None = None,
-        ) -> tuple[torch.Tensor]:
-            del tabular_values, tabular_mask
+        def forward(self, _img: torch.Tensor) -> tuple[torch.Tensor]:
             self.forward_calls += 1
             return (self.weight.unsqueeze(0),)
 
@@ -1008,13 +987,7 @@ def test_distributed_non_finite_loss_uses_zero_backward_surrogate(
             self.weight = torch.nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
             self.mask_weight = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.float32))
 
-        def forward(
-            self,
-            _img: torch.Tensor,
-            tabular_values: torch.Tensor | None = None,
-            tabular_mask: torch.Tensor | None = None,
-        ) -> ModelOutput:
-            del tabular_values, tabular_mask
+        def forward(self, _img: torch.Tensor) -> ModelOutput:
             raw_prediction = self.weight.unsqueeze(0)
             mask_coefficients = self.mask_weight.view(1, 1, 1)
             prototype_masks = self.mask_weight.view(1, 1, 1, 1, 1)

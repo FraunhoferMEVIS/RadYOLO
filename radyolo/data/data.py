@@ -6,7 +6,7 @@ import math
 import os
 import random
 from collections.abc import Iterator, Sized
-from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import blosc2
 import nibabel as nib
@@ -26,14 +26,8 @@ from radyolo.data.augmentations import (
     tensor_cutout,
 )
 from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME, get_split_file_path
-from radyolo.data.image_labels import (
-    ImageLabelValue,
-    load_case_image_labels,
-    load_image_label_task_specs,
-)
 from radyolo.data.object_labels import load_case_object_labels
 from radyolo.data.preprocessing import preprocess_image, resample_mask
-from radyolo.data.tabular import load_case_tabular_inputs, load_tabular_feature_names
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 if TYPE_CHECKING:
@@ -456,9 +450,6 @@ class Sample(TypedDict):
     bboxes: torch.Tensor
     masks: torch.Tensor | None
     case_name: str
-    image_labels: dict[str, ImageLabelValue]
-    tabular_values: torch.Tensor
-    tabular_mask: torch.Tensor
 
 
 class Batch(TypedDict):
@@ -475,9 +466,6 @@ class Batch(TypedDict):
     batch_idx: torch.Tensor
     masks: tuple[torch.Tensor | None, ...]
     case_names: tuple[str, ...]
-    image_labels: tuple[dict[str, ImageLabelValue], ...]
-    tabular_values: NotRequired[torch.Tensor]
-    tabular_mask: NotRequired[torch.Tensor]
 
 
 def _get_spatial_axis_offset(array_shape: tuple[int, ...]) -> int:
@@ -1063,9 +1051,6 @@ def _collate_samples(batch: list[Sample]) -> Batch:
             ),
             "masks": tuple(sample["masks"] for sample in batch),
             "case_names": tuple(sample["case_name"] for sample in batch),
-            "image_labels": tuple(sample["image_labels"] for sample in batch),
-            "tabular_values": torch.stack([sample["tabular_values"] for sample in batch]),
-            "tabular_mask": torch.stack([sample["tabular_mask"] for sample in batch]),
         }
 
 
@@ -1347,8 +1332,6 @@ class WholeImageDataset(Dataset[Sample], Sized):
             group,
             self.split_file_name,
         )
-        self.image_label_tasks = load_image_label_task_specs(self.src_path)
-        self.tabular_feature_names = load_tabular_feature_names(self.src_path)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_case_indices = tuple(
@@ -1418,14 +1401,6 @@ class WholeImageDataset(Dataset[Sample], Sized):
             load_masks=self.load_masks,
         )
 
-    def _load_image_labels(self, case_name: str) -> dict[str, ImageLabelValue]:
-        """Load image-level labels for a case."""
-        return load_case_image_labels(self.src_path, case_name, self.image_label_tasks)
-
-    def _load_tabular_inputs(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
-        """Load tabular values and mask for a case."""
-        return load_case_tabular_inputs(self.src_path, case_name, self.tabular_feature_names)
-
     def _detect_image_format(self) -> Literal["nifti", "blosc2"]:
         """Detect the active image storage format for this dataset."""
         return _detect_image_format(self.src_path, self.cases)
@@ -1450,7 +1425,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
     def __getitem__(self, index: int) -> Sample:
         """Load and augment a sample for the given index."""
         with torch.no_grad():
-            return self.augmentation(self.load_image_label_and_mask(index))
+            return self.augmentation(self.load_sample(index))
 
     def augmentation(self, sample: Sample) -> Sample:
         """Apply configured augmentation pipeline to a sample."""
@@ -1461,7 +1436,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
             patch_size=self.patch_size,
         )
 
-    def load_image_label_and_mask(self, index: int) -> Sample:
+    def load_sample(self, index: int) -> Sample:
         """Load image, labels, masks, and metadata for a dataset index."""
         case_name = self._resolve_case_name(index)
 
@@ -1474,8 +1449,6 @@ class WholeImageDataset(Dataset[Sample], Sized):
         )
         pad = (0, 0, 0)
         classes, bboxes, masks = self.load_labels_and_masks(case_name)
-        image_labels = self._load_image_labels(case_name)
-        tabular_values, tabular_mask = self._load_tabular_inputs(case_name)
 
         return Sample(
             image=image,
@@ -1486,9 +1459,6 @@ class WholeImageDataset(Dataset[Sample], Sized):
             bboxes=bboxes,
             masks=masks,
             case_name=case_name,
-            image_labels=image_labels,
-            tabular_values=tabular_values,
-            tabular_mask=tabular_mask,
         )
 
     def load_image(self, case_name: str) -> torch.Tensor:
@@ -1594,8 +1564,6 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             group,
             self.split_file_name,
         )
-        self.image_label_tasks = load_image_label_task_specs(self.src_path)
-        self.tabular_feature_names = load_tabular_feature_names(self.src_path)
         self.foreground_case_bboxes = _load_foreground_case_bboxes(self.src_path, self.cases)
         self.foreground_cases = tuple(self.foreground_case_bboxes)
         self.foreground_case_indices = tuple(
@@ -1626,7 +1594,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
     def __getitem__(self, index: int) -> Sample:
         """Load and augment one patch sample for an index."""
         with torch.no_grad():
-            return self.augmentation(self.load_image_label_and_mask(index))
+            return self.augmentation(self.load_sample(index))
 
     def augmentation(self, sample: Sample) -> Sample:
         """Apply configured augmentation pipeline to a sample."""
@@ -1641,14 +1609,6 @@ class PatchWiseDataset(Dataset[Sample], Sized):
     def collate_fn(batch: list[Sample]) -> Batch:
         """Collate sample dictionaries into a batch dictionary."""
         return _collate_samples(batch)
-
-    def _load_image_labels(self, case_name: str) -> dict[str, ImageLabelValue]:
-        """Load image-level labels for a case."""
-        return load_case_image_labels(self.src_path, case_name, self.image_label_tasks)
-
-    def _load_tabular_inputs(self, case_name: str) -> tuple[torch.Tensor, torch.Tensor]:
-        """Load tabular values and mask for a case."""
-        return load_case_tabular_inputs(self.src_path, case_name, self.tabular_feature_names)
 
     def _sample_patch_center(
         self,
@@ -1840,7 +1800,7 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             load_masks=self.load_masks,
         )
 
-    def load_image_label_and_mask(self, index: int) -> Sample:
+    def load_sample(self, index: int) -> Sample:
         """Load one patch sample with image data, labels, masks, and metadata."""
         rng = self._get_index_rng(index)
         case_name, foreground_bbox = self._resolve_sampling_target(index, rng)
@@ -1912,7 +1872,6 @@ class PatchWiseDataset(Dataset[Sample], Sized):
         original_shape = tuple(reversed(image_shape_xyz))
         ratio = (1.0, 1.0, 1.0)
         pad = tuple(-int(origin) for origin in patch_origin_xyz)
-        tabular_values, tabular_mask = self._load_tabular_inputs(case_name)
 
         return Sample(
             image=image_tensor,
@@ -1923,9 +1882,6 @@ class PatchWiseDataset(Dataset[Sample], Sized):
             bboxes=bboxes,
             masks=masks,
             case_name=case_name,
-            image_labels=self._load_image_labels(case_name),
-            tabular_values=tabular_values,
-            tabular_mask=tabular_mask,
         )
 
 

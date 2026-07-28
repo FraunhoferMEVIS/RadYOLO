@@ -22,7 +22,6 @@ from radyolo.config.spatial import (  # noqa: TC001, needs to be imported for py
     PatchSize,
     VoxelSize,
 )
-from radyolo.data.image_labels import ImageLabelTaskSpec
 
 if TYPE_CHECKING:
     from radyolo.models.model import HardcodedModel
@@ -44,7 +43,6 @@ PrototypeLayer = Literal[
     "half_resolution",
     "half_resolution_v2",
 ]
-ImageLabelHeadFeature = Literal["o10", "o16", "o19", "o22"]
 HeadConvolutionType = Literal["regular", "separable"]
 
 
@@ -129,31 +127,6 @@ class DefaultConfig(BaseModel):
     classification_head_channel_factor: float = Field(1.0, gt=0.0)
     objectness_head_channel_factor: float = Field(1.0, gt=0.0)
     box_head_channel_factor: float = Field(0.25, gt=0.0)
-
-    # Global image-label head
-    enable_image_label_head: bool = False
-    image_label_head_feature_maps: list[ImageLabelHeadFeature] = Field(
-        default_factory=lambda: ["o10", "o16", "o19", "o22"]
-    )
-    image_label_head_projection_channels: int = Field(128, ge=1)
-    image_label_head_mlp_hidden_layers: int = Field(1, ge=0)
-    image_label_head_mlp_hidden_channels: int = Field(256, ge=1)
-    image_label_head_dropout: float = Field(0.1, ge=0.0, lt=1.0)
-    image_label_multiclass_cce_gain: float = Field(1.0, ge=0.0)
-    image_label_multiclass_cce_class_weights: dict[str, list[float]] = Field(default_factory=dict)
-    image_label_survival_num_bins: int = Field(32, ge=1)
-    image_label_survival_mtlr_gain: float = Field(1.0, ge=0.0)
-    image_label_survival_cox_gain: float = Field(1.0, ge=0.0)
-    enable_tabular_image_label_fusion: bool = False
-    tabular_transformer_variant: Literal["v1", "v2"] = "v1"
-    tabular_transformer_d_model: int = Field(64, ge=1)
-    tabular_transformer_num_heads: int = Field(4, ge=1)
-    tabular_transformer_num_layers: int = Field(2, ge=1)
-    tabular_transformer_feedforward_channels: int = Field(256, ge=1)
-    tabular_transformer_dropout: float = Field(0.1, ge=0.0, lt=1.0)
-    tabular_transformer_v2_per_feature_value_projection: bool = False
-    tabular_transformer_v2_shared_mask_token: bool = False
-    tabular_feature_mask_augmentation_prob: float = Field(0.1, ge=0.0, le=1.0)
 
     # Hyperparameters
     epochs: int = 1000  # number of epochs to train for
@@ -261,10 +234,7 @@ class DefaultConfig(BaseModel):
         0.4,
         0.4,
         0.2,
-        0.0,
-        0.0,
-        0.0,
-    )  # weights for [mAP10-95, mAP10-95Agn, dice, image_label_balanced_accuracy, image_label_multiclass_roc_auc, image_label_c_index] when computing validation fitness
+    )  # weights for [mAP10-95, mAP10-95Agn, dice] when computing validation fitness
 
     # Plot settings
     plots: bool = True  # save plots and images during train/val
@@ -447,8 +417,8 @@ class DefaultConfig(BaseModel):
             self.tal_topk_final = self.tal_topk
         if self.tal_topk_final_epoch is None:
             self.tal_topk_final_epoch = self.epochs
-        if len(self.fitness_metric_weights) not in {3, 6}:
-            msg = "fitness_metric_weights must contain exactly three legacy entries or six extended entries"
+        if len(self.fitness_metric_weights) != 3:
+            msg = "fitness_metric_weights must contain exactly three entries"
             raise ValueError(msg)
         if any(weight < 0 for weight in self.fitness_metric_weights):
             msg = "fitness_metric_weights entries must be non-negative"
@@ -456,50 +426,6 @@ class DefaultConfig(BaseModel):
         if sum(self.fitness_metric_weights) <= 0:
             msg = "fitness_metric_weights must sum to a positive value"
             raise ValueError(msg)
-        if self.enable_image_label_head and not self.image_label_head_feature_maps:
-            msg = "image_label_head_feature_maps must contain at least one feature map when enabled"
-            raise ValueError(msg)
-        if self.enable_tabular_image_label_fusion and not self.enable_image_label_head:
-            msg = "enable_tabular_image_label_fusion=True requires enable_image_label_head=True"
-            raise ValueError(msg)
-        if self.tabular_transformer_d_model % self.tabular_transformer_num_heads != 0:
-            msg = "tabular_transformer_d_model must be divisible by tabular_transformer_num_heads"
-            raise ValueError(msg)
-        if not np.isfinite(self.image_label_survival_mtlr_gain):
-            msg = "image_label_survival_mtlr_gain must be finite"
-            raise ValueError(msg)
-        if not np.isfinite(self.image_label_survival_cox_gain):
-            msg = "image_label_survival_cox_gain must be finite"
-            raise ValueError(msg)
-        for task_name, class_weights in self.image_label_multiclass_cce_class_weights.items():
-            if not task_name:
-                msg = "image_label_multiclass_cce_class_weights keys must be non-empty"
-                raise ValueError(msg)
-            if not class_weights:
-                msg = (
-                    "image_label_multiclass_cce_class_weights entries must contain at least "
-                    f"one weight, but '{task_name}' is empty"
-                )
-                raise ValueError(msg)
-            if any(not np.isfinite(weight) for weight in class_weights):
-                msg = (
-                    "image_label_multiclass_cce_class_weights entries must be finite, but "
-                    f"'{task_name}' contains {class_weights}"
-                )
-                raise ValueError(msg)
-            if any(weight < 0.0 for weight in class_weights):
-                msg = (
-                    "image_label_multiclass_cce_class_weights entries must be non-negative, "
-                    f"but '{task_name}' contains {class_weights}"
-                )
-                raise ValueError(msg)
-            if not any(weight > 0.0 for weight in class_weights):
-                msg = (
-                    "image_label_multiclass_cce_class_weights entries must contain at least "
-                    f"one positive weight, but '{task_name}' contains {class_weights}"
-                )
-                raise ValueError(msg)
-        self.image_label_head_feature_maps = list(dict.fromkeys(self.image_label_head_feature_maps))
         return self
 
     def uses_gpu_augmentations(self) -> bool:
@@ -548,7 +474,6 @@ class DatasetConfig(BaseModel):
     normalization: (
         dict[str, Any] | list[dict[str, Any]] | dict[int, str] | list[str] | str | None
     ) = None
-    image_label_tasks: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_classes(self) -> Self:
@@ -572,10 +497,8 @@ class DatasetConfig(BaseModel):
 
 
 class ModelMetadataCheckpoint(TypedDict):
-    """Metadata from dataset yaml, tabular features and image-level tasks for checkpoints."""
+    """Metadata from dataset yaml for checkpoints."""
 
-    image_label_tasks: dict[str, ImageLabelTaskSpec]
-    tabular_feature_names: tuple[str, ...]
     dataset_yaml: dict[str, Any]
 
 
@@ -598,21 +521,6 @@ def _load_dataset_yaml_for_checkpoint(dataset_path: Path) -> dict[str, Any]:
     dataset_yaml_path = dataset_path / "dataset.yaml"
     with dataset_yaml_path.open(encoding="utf-8") as file:
         return yaml.safe_load(file) or {}
-
-
-def _serialize_image_label_task_specs_for_checkpoint(
-    model: HardcodedModel,
-) -> dict[str, ImageLabelTaskSpec]:
-    serialized: dict[str, ImageLabelTaskSpec] = {}
-    for task_name, task_spec in model.image_label_task_specs.items():
-        serialized[task_name] = ImageLabelTaskSpec(
-            type=task_spec.type,
-            classes=task_spec.classes,
-            unit=task_spec.unit,
-            masking=task_spec.masking,
-            survival_bin_thresholds=task_spec.survival_bin_thresholds,
-        )
-    return serialized
 
 
 def _sanitize_checkpoint_value(value: Any) -> Any:
@@ -650,14 +558,6 @@ def load_model_checkpoint(checkpoint: Path) -> ModelCheckpoint:
         train_metrics=checkpoint["train_metrics"],
         date=datetime.datetime.fromisoformat(checkpoint["date"]),
         model_metadata=ModelMetadataCheckpoint(
-            image_label_tasks={
-                task_name: ImageLabelTaskSpec.from_checkpoint_payload(
-                    task_spec,
-                    task_name=task_name,
-                )
-                for task_name, task_spec in model_metadata["image_label_tasks"].items()
-            },
-            tabular_feature_names=tuple(model_metadata["tabular_feature_names"]),
             dataset_yaml=model_metadata["dataset_yaml"],
         ),
     )
@@ -687,8 +587,6 @@ def save_model_checkpoint(  # noqa: PLR0913
         train_metrics=train_metrics,
         date=datetime.datetime.now(tz=datetime.UTC).isoformat(),
         model_metadata=ModelMetadataCheckpoint(
-            image_label_tasks=_serialize_image_label_task_specs_for_checkpoint(model),
-            tabular_feature_names=tuple(model.tabular_feature_names),
             dataset_yaml=dataset_yaml,
         ),
     )

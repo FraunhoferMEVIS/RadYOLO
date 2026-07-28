@@ -54,7 +54,6 @@ def test_predict_cli_passes_clip_override(monkeypatch, tmp_path: Path) -> None:
     assert captured["config"].num_load_workers == 2
     assert captured["config"].num_write_workers == 2
     assert captured["config"].save_masks is True
-    assert captured["config"].tabular_input_dir is None
     assert captured["config"].split_file is None
     assert captured["config"].split_fold == 0
     assert captured["config"].split_group == "test"
@@ -99,7 +98,6 @@ def test_predict_cli_uses_current_defaults(
     assert captured["config"].num_load_workers == 2
     assert captured["config"].num_write_workers == 2
     assert captured["config"].save_masks is True
-    assert captured["config"].tabular_input_dir is None
     assert captured["config"].split_file is None
     assert captured["config"].split_fold == 0
     assert captured["config"].split_group == "test"
@@ -154,42 +152,6 @@ def test_predict_cli_passes_tta_and_ensemble_options(
     assert captured["config"].ensembling_iou == 0.65
     assert captured["config"].ensembling_confidence_threshold == 0.25
     assert captured["config"].ensembling_class_agnostic is True
-
-
-def test_predict_cli_passes_tabular_input_dir(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    model_path = tmp_path / "model.pt"
-    model_path.write_bytes(b"checkpoint")
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    tabular_input_dir = tmp_path / "inputs_tabular"
-    tabular_input_dir.mkdir()
-    output_dir = tmp_path / "output"
-    captured: dict[str, PredictionConfig] = {}
-
-    def fake_run_prediction(config: PredictionConfig) -> int:
-        captured["config"] = config
-        return 0
-
-    monkeypatch.setattr("radyolo.run_prediction", fake_run_prediction)
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        [
-            "predict",
-            str(model_path),
-            str(input_dir),
-            str(output_dir),
-            "--tabular-input-dir",
-            str(tabular_input_dir),
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert captured["config"].tabular_input_dir == tabular_input_dir
 
 
 def test_predict_cli_passes_no_save_masks(monkeypatch, tmp_path: Path) -> None:
