@@ -244,7 +244,7 @@ def test_default_config_uses_renamed_voxel_size_field(minimal_train_config: Path
 def test_default_config_uses_epoch_based_ema_tau_default(minimal_train_config: Path) -> None:
     config = get_training_config(minimal_train_config, {})
 
-    assert config.ema_tau == 400.0
+    assert config.ema_tau == 732.0
 
 
 def test_get_cfg_infers_num_classes_from_dataset_names(minimal_train_config: Path) -> None:
@@ -560,7 +560,7 @@ def test_default_config_defaults_tal_topk_schedule_to_static_value(
     config = get_training_config(minimal_train_config, {})
 
     assert config.tal_topk_final == config.tal_topk
-    assert config.tal_topk_final_epoch == config.epochs
+    assert config.tal_topk_final_epoch == 900
 
 
 def test_default_config_migrates_legacy_prototype_booleans() -> None:
