@@ -2,7 +2,7 @@
 
 RadYOLO is a 3D YOLO11-based deep learning model for object detection, classification, and segmentation in medical images. It is designed to process MRI or CT volumes efficiently on GPU and CPU-only systems.
 
-RadYOLO is developed by the Fraunhofer Institute for Digital Medicine MEVIS.
+RadYOLO was developed by the Fraunhofer Institute for Digital Medicine MEVIS.
 
 If you use RadYOLO, please cite our paper:
 
@@ -53,3 +53,11 @@ Detailed guides are available in [documentation/](documentation/README.md):
 ## Disclaimer
 
 The software is not qualified for use as a medical product or as part thereof. Provided 'as is' without specific verification or validation.
+
+## License
+
+RadYOLO is licensed under the [AGPL-3.0 license](LICENSE).
+
+## Contact
+
+Kai Geissler, kai.geissler\<at>mevis.fraunhofer.de, Fraunhofer Institute for Digital Medicine MEVIS, Germany
