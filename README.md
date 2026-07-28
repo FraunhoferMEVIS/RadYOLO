@@ -4,7 +4,14 @@ RadYOLO is a 3D YOLO11-based deep learning model for object detection, classific
 
 If you use RadYOLO, please cite our paper:
 
-`<insert paper>`
+```bibtex
+@inproceedings{geissler2026radyolo,
+  title={RadYOLO: Computationally efficient 3D Object Detection and Segmentation in CT and MRI},
+  author={Geissler, Kai and Müller-Groh, Laurens and Meine, Hans},
+  booktitle={<enter when published>},
+  year={2026},
+}
+```
 
 ## Quick Start: Set Up A Training
 
