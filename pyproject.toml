@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "radyolo"
-version = "0.2.0"
+version = "1.0.0"
 authors = [
   { name = "Laurens Müller-Groh", email = "github@laurendus.de" },
   { name = "Kai Geissler", email = "kai.geissler@mevis.fraunhofer.de" },
