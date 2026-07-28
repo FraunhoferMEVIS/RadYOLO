@@ -1,5 +1,5 @@
-FROM registry.intern.mevis.fraunhofer.de/ghcr/astral-sh/uv:0.11.17 AS uv-base
-FROM registry.intern.mevis.fraunhofer.de/dockerhub/python:3.12-slim
+FROM astral/uv:0.11.17 AS uv-base
+FROM python:3.12-slim
 
 LABEL org.opencontainers.image.authors="Kai Geissler <kai.geissler@mevis.fraunhofer.de>, Laurens Müller-Groh <github@laurendus.de>"
 
