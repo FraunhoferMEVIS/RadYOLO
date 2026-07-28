@@ -141,7 +141,7 @@ class DefaultConfig(BaseModel):
     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
     # applied globally or a list of such dicts for each channel. For ct you have to define
     # mean, std, clip_min and clip_max in the dict.
-    normalization: dict | list[dict] = {"type": "none"}
+    normalization: dict | list[dict] = {"type": "zscore"}
     apply_preprocessing: bool = True  # keep preprocessing settings in config for inference, and apply them while loading raw training data
     preprocessing_device: Literal["cpu", "gpu"] = (
         "cpu"  # choose where training/validation preprocessing runs
@@ -162,56 +162,56 @@ class DefaultConfig(BaseModel):
         le=1.0,
     )  # minimum fraction of a box volume that must remain inside a sampled patch to keep it
     batch_size: int = 2  # number of images per GPU/process
-    nominal_batch_size: int = 64  # nominal effective global batch size for gradient accumulation
+    nominal_batch_size: int = 14  # nominal effective global batch size for gradient accumulation
     optimizer: Literal[
         "SGD", "Adam", "Adamax", "AdamW", "MuSGD", "NAdam", "RAdam", "RMSProp", "auto"
-    ] = "Adam"  # optimizer to use
+    ] = "SGD"  # optimizer to use
     muon_weight: float = Field(
         0.5,
         ge=0.0,
         le=1.0,
     )  # MuSGD mixture: muon_weight * moun + (1 - muon_weight) * sgd
-    initial_learning_rate: float = 0.01  # initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
+    initial_learning_rate: float = 0.0143  # initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
     final_learning_rate_ratio: float = (
-        0.01  # final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
+        0.0164  # final learning rate ratio (initial_learning_rate * final_learning_rate_ratio)
     )
-    momentum: float = 0.937  # SGD momentum/Adam beta1
-    weight_decay: float = 5e-4  # optimizer weight decay 5e-4
-    warmup_epochs: float = 3.0  # warmup epochs
-    warmup_momentum: float = 0.8  # warmup initial momentum
-    warmup_bias_lr: float = 0.1  # warmup initial bias learning rate
-    grad_clip_max_norm: float = 10.0  # max norm used for gradient clipping
+    momentum: float = 0.875  # SGD momentum/Adam beta1
+    weight_decay: float = 5.45e-06  # optimizer weight decay
+    warmup_epochs: float = 4.4  # warmup epochs
+    warmup_momentum: float = 0.72  # warmup initial momentum
+    warmup_bias_lr: float = 0.0021  # warmup initial bias learning rate
+    grad_clip_max_norm: float = 11.6  # max norm used for gradient clipping
     tal_topk: int = Field(
-        10, ge=1
+        3, ge=1
     )  # initial top-k anchors to keep per ground truth for task-aligned assignment
     tal_topk_final: int | None = Field(
         default=None, ge=1
     )  # final top-k anchors reached by the TAL schedule; defaults to tal_topk
     tal_topk_final_epoch: int | None = Field(
-        default=None, ge=1
+        default=900, ge=1
     )  # 1-based epoch at which tal_topk_final is reached; defaults to epochs
-    tal_alpha: float = 0.5  # class score exponent in task-aligned assignment metric
+    tal_alpha: float = 1.0  # class score exponent in task-aligned assignment metric
     tal_beta: float = 1.0  # IoU exponent in task-aligned assignment metric
-    ema_decay: float = 0.9999  # exponential moving average decay
-    ema_tau: float = 400.0  # EMA ramp-up factor, epochs until full ema_decay is used
+    ema_decay: float = 0.997  # exponential moving average decay
+    ema_tau: float = 732.0  # EMA ramp-up factor, epochs until full ema_decay is used
     objectness_loss: Literal["bce", "focal"] = (
         "bce"  # can be either "bce" (binary cross entropy) or "focal" (focal loss)
     )
     gamma: float = 2.0  # quality focal loss gamma (used when objectness_loss="focal")
     class_loss_gain: float = 0.5  # classification / objectness loss gain
     class_separate_loss_gain: float = 0.5  # class loss gain for separate softmax classification
-    mask_loss_gain: float = 1.0  # mask loss gain
-    mask_loss_on_only_one_grid_cell: bool = False  # if True, use one random grid cell per GT mask
+    mask_loss_gain: float = 0.5  # mask loss gain
+    mask_loss_on_only_one_grid_cell: bool = True  # if True, use one random grid cell per GT mask
     box_loss_gain: float = 7.5  # box loss gain (based on complete IoU (CIoU) loss)
-    dfl_loss_gain: float = 1.5  # DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
+    dfl_loss_gain: float = 100.0  # DFL loss gain (based on DFL loss, or l1 loss if dfl_reg_max=1)
     dfl_reg_max: int = Field(
-        16, ge=1
+        1, ge=1
     )  # DFL histogram size; use 1 for direct box edge regression without DFL
     bbox_center_offset_limit: float = Field(
         4.0, gt=0.5
     )  # max absolute anchor-relative center offset for center_extents bbox prediction
     bbox_parametrization: Literal["ltrb", "center_extents"] = (
-        "ltrb"  # bbox prediction format, choices=[ltrb, center_extents]
+        "center_extents"  # bbox prediction format, choices=[ltrb, center_extents]
     )
 
     # Validation settings
@@ -252,20 +252,20 @@ class DefaultConfig(BaseModel):
 
     # Zoom Augmentation
     max_zoom: float = Field(1.5, ge=0)
-    min_zoom: float = Field(0.7, ge=0)
+    min_zoom: float = Field(0.65, ge=0)
     out_zoom_padding: Literal["constant", "random"] = "constant"
-    prob_zoom: float = Field(0.4, ge=0, le=1.0)
+    prob_zoom: float = Field(0.5, ge=0, le=1.0)
     zoom_uniform: bool = False  # if false, enable anisotropic per-axis zoom factors
     zoom_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
     # Mirroring Augmentation
     prob_mirroring: float = Field(0.5, ge=0, le=1.0)
-    mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["z", "y", "x"])
+    mirror_axes: list[Literal["x", "y", "z"]] = Field(default_factory=lambda: ["x", "y", "z"])
     mirroring_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
     # Rotation augmentation
     prob_rotation: float = Field(0.2, ge=0, le=1.0)
-    rotation_angle: float | None = None
+    rotation_angle: float | None = 15.0
     rotation_angle_x: tuple[float, float] = (-15.0, 15.0)
     rotation_angle_y: tuple[float, float] = (-15.0, 15.0)
     rotation_angle_z: tuple[float, float] = (-15.0, 15.0)
@@ -286,32 +286,32 @@ class DefaultConfig(BaseModel):
     # Intensity augmentation parameters
     do_batchgenerators_intensity_augmentation: bool = True
     do_intensity_augmentations_per_channel: bool = False
-    intensity_noise_prob: float = 0.1
+    intensity_noise_prob: float = 0.2
     intensity_noise_variance: tuple[float, float] = (0.0, 0.1)
     intensity_noise_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
     intensity_blur_prob: float = 0.2
     intensity_blur_sigma: tuple[float, float] = (0.5, 1.0)
     intensity_blur_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
-    intensity_mult_brightness_prob: float = 0.15
+    intensity_mult_brightness_prob: float = 0.2
     intensity_mult_brightness_range: tuple[float, float] = (0.75, 1.25)
     intensity_mult_brightness_augmentation_device: Literal["cpu", "gpu"] = (
         "gpu"  # set to "cpu" or "gpu"
     )
     intensity_add_brightness_prob: float = 0.15
     intensity_add_brightness_mu: float = 0.0
-    intensity_add_brightness_sigma: float = 0.4
+    intensity_add_brightness_sigma: float = 0.3
     intensity_add_brightness_augmentation_device: Literal["cpu", "gpu"] = (
         "gpu"  # set to "cpu" or "gpu"
     )
     intensity_contrast_prob: float = 0.15
     intensity_contrast_range: tuple[float, float] = (0.75, 1.25)
     intensity_contrast_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
-    intensity_lowres_prob: float = 0.25
+    intensity_lowres_prob: float = 0.2
     intensity_lowres_scale: tuple[float, float] = (0.5, 1.0)
     intensity_lowres_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
-    intensity_gamma_prob: float = 0.4
+    intensity_gamma_prob: float = 0.3
     intensity_gamma_range: tuple[float, float] = (0.7, 1.5)
-    intensity_gamma_p_invert: float = 0.25
+    intensity_gamma_p_invert: float = 0.1
     intensity_gamma_p_retain_stats: float = 1.0
     intensity_gamma_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
@@ -319,7 +319,7 @@ class DefaultConfig(BaseModel):
     gin_layers: int = 4
     gin_channels: int = 2
     gin_prob_kernel_size_one: float = 0.8
-    gin_prob: float = 0.3
+    gin_prob: float = 0.0
     gin_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
     # Channel dropout augmentation (drop at most one channel)
