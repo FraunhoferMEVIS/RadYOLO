@@ -8,9 +8,11 @@ import numpy as np
 
 from radyolo.config.spatial import PatchSize, VoxelSize
 from radyolo.data.analyze_dataset import (
+    DatasetFingerprint,
     _foreground_channel_stats_and_samples,
     _image_stats,
     _labels_to_mask,
+    _serialize_dataset_fingerprint,
     analyze_dataset,
 )
 
@@ -180,5 +182,34 @@ def test_analyze_dataset_counts_images_with_and_without_objects(tmp_path: Path) 
 
     assert fingerprint["n_images_with_objects"] == 1
     assert fingerprint["n_images_without_objects"] == 2
+
+
+def test_serialize_dataset_fingerprint_sorts_class_keyed_dicts() -> None:
+    fingerprint = DatasetFingerprint(
+        foreground_channel_stats=[],
+        median_image_size=PatchSize(x=1, y=1, z=1),
+        median_voxel_size_mm=VoxelSize(x=1.0, y=1.0, z=1.0),
+        voxel_size_p10_mm=VoxelSize(x=1.0, y=1.0, z=1.0),
+        voxel_size_p90_mm=VoxelSize(x=1.0, y=1.0, z=1.0),
+        median_resampled_imagesize=PatchSize(x=1, y=1, z=1),
+        resampled_imagesize_p10_vox=PatchSize(x=1, y=1, z=1),
+        resampled_imagesize_p90_vox=PatchSize(x=1, y=1, z=1),
+        boxes_per_class={"10": 3, "2": 1, "1": 2},
+        box_size_median_vox={
+            "10": VoxelSize(x=10.0, y=10.0, z=10.0),
+            "2": VoxelSize(x=2.0, y=2.0, z=2.0),
+            "1": VoxelSize(x=1.0, y=1.0, z=1.0),
+        },
+        box_size_p05_vox=None,
+        box_size_p95_vox=None,
+        n_images_with_masks=0,
+        n_images_with_objects=0,
+        n_images_without_objects=0,
+    )
+
+    serialized = _serialize_dataset_fingerprint(fingerprint)
+
+    assert list(serialized["boxes_per_class"].keys()) == ["1", "2", "10"]
+    assert list(serialized["box_size_median_vox"].keys()) == ["1", "2", "10"]
 
 

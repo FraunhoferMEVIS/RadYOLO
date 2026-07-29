@@ -71,9 +71,13 @@ def _serialize_dataset_fingerprint(fingerprint: DatasetFingerprint) -> dict[str,
         "median_resampled_imagesize": list(fingerprint.median_resampled_imagesize.get_xyz()),
         "resampled_imagesize_p10_vox": list(fingerprint.resampled_imagesize_p10_vox.get_xyz()),
         "resampled_imagesize_p90_vox": list(fingerprint.resampled_imagesize_p90_vox.get_xyz()),
-        "boxes_per_class": fingerprint.boxes_per_class,
+        "boxes_per_class": {
+            cls: fingerprint.boxes_per_class[cls]
+            for cls in sorted(fingerprint.boxes_per_class, key=_class_id_sort_key)
+        },
         "box_size_median_vox": {
-            cls: list(size.get_xyz()) for cls, size in fingerprint.box_size_median_vox.items()
+            cls: list(fingerprint.box_size_median_vox[cls].get_xyz())
+            for cls in sorted(fingerprint.box_size_median_vox, key=_class_id_sort_key)
         },
         "box_size_p05_vox": (
             list(fingerprint.box_size_p05_vox.get_xyz())
