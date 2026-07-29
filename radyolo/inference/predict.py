@@ -102,8 +102,40 @@ def _load_model(
     loaded_model = load_checkpoint_model(cfg.model_path, device_override=cfg.device)
     train_config = loaded_model.train_config
     num_classes = train_config.num_classes
-    names = {i: f"class_{i}" for i in range(num_classes)}
+    names = _resolve_class_names(loaded_model.checkpoint["model_metadata"]["dataset_yaml"], num_classes)
     return loaded_model.model, train_config, names
+
+
+def _resolve_class_names(
+    dataset_yaml: object,
+    num_classes: int,
+) -> dict[int, str]:
+    """Resolve class names from checkpoint metadata with a deterministic fallback."""
+    names = {i: f"class_{i}" for i in range(num_classes)}
+    metadata_names = _extract_class_names_from_dataset_yaml(dataset_yaml)
+    for class_id, class_name in metadata_names.items():
+        if 0 <= class_id < num_classes:
+            names[class_id] = class_name
+    return names
+
+
+def _extract_class_names_from_dataset_yaml(dataset_yaml: object) -> dict[int, str]:
+    """Extract `names` from checkpoint dataset metadata when present."""
+    if not isinstance(dataset_yaml, dict):
+        return {}
+    raw_names = dataset_yaml.get("names")
+    if not isinstance(raw_names, dict):
+        return {}
+    parsed_names: dict[int, str] = {}
+    for raw_class_id, raw_class_name in raw_names.items():
+        try:
+            class_id = int(raw_class_id)
+        except (TypeError, ValueError):
+            continue
+        if class_id < 0:
+            continue
+        parsed_names[class_id] = str(raw_class_name)
+    return parsed_names
 
 
 def _iter_nifti(input_dir: Path) -> Iterable[Path]:
