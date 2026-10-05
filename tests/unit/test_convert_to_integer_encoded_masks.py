@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
 import pytest
 
-from radyolo.data.convert_to_integer_encoded_masks import convert_dataset_to_integer_encoded_masks
+from radyolo.data import convert_to_integer_encoded_masks as conversion
+from radyolo.data.convert_to_integer_encoded_masks import (
+    _convert_case,
+    convert_dataset_to_integer_encoded_masks,
+)
 
 if TYPE_CHECKING:
+    from multiprocessing.connection import Connection
     from pathlib import Path
 
 
@@ -128,16 +134,19 @@ def test_conversion_continues_after_case_errors(
             images_dir / f"{case_id}.nii.gz",
         )
 
-    original_save = nib.save
-
-    def failing_save(image: nib.Nifti1Image, filename: Path, **kwargs: object) -> None:
-        if filename.name == "case1.nii.gz":
-            filename.write_bytes(b"partial output")
+    def failing_run_case(dataset_path: Path, case_id: str) -> None:
+        if case_id == "case1":
+            (dataset_path / "masks_integer_encoded" / f"{case_id}.nii.gz").write_bytes(
+                b"partial output",
+            )
             msg = "simulated conversion failure"
             raise error_type(msg)
-        original_save(image, filename, **kwargs)
+        _convert_case(
+            dataset_path / "images", dataset_path / "labels", dataset_path / "masks",
+            dataset_path / "masks_integer_encoded", case_id,
+        )
 
-    monkeypatch.setattr(nib, "save", failing_save)
+    monkeypatch.setattr(conversion, "_run_case", failing_run_case)
     with caplog.at_level(logging.INFO):
         output_dir = convert_dataset_to_integer_encoded_masks(dataset_dir)
 
@@ -145,4 +154,43 @@ def test_conversion_continues_after_case_errors(
     assert (output_dir / "case2.nii.gz").is_file()
     assert "0 of 2 cases already processed; converting 2 remaining cases." in caplog.text
     assert f"Skipping case case1 because of {error_type.__name__}" in caplog.text
+    assert "1 cases skipped because of errors." in caplog.text
+
+
+def _abrupt_exit_worker(dataset_dir: Path, case_id: str, result: Connection) -> None:
+    output_path = dataset_dir / "masks_integer_encoded" / f"{case_id}.nii.gz"
+    if case_id == "case1":
+        output_path.write_bytes(b"partial output")
+        os._exit(137)
+    _convert_case(
+        dataset_dir / "images",
+        dataset_dir / "labels",
+        dataset_dir / "masks",
+        dataset_dir / "masks_integer_encoded",
+        case_id,
+    )
+    result.send(None)
+    result.close()
+
+
+def test_conversion_survives_abrupt_worker_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    for case_id in ("case1", "case2"):
+        nib.save(
+            nib.Nifti1Image(np.zeros((2, 2, 2), dtype=np.float32), affine=np.eye(4)),
+            images_dir / f"{case_id}.nii.gz",
+        )
+    monkeypatch.setattr(conversion, "_case_worker", _abrupt_exit_worker)
+
+    with caplog.at_level(logging.INFO):
+        output_dir = convert_dataset_to_integer_encoded_masks(tmp_path)
+
+    assert not (output_dir / "case1.nii.gz").exists()
+    assert (output_dir / "case2.nii.gz").is_file()
+    assert "Conversion worker exited with code 137" in caplog.text
     assert "1 cases skipped because of errors." in caplog.text

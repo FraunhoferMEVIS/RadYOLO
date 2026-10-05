@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import multiprocessing
+import sys
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -17,6 +19,7 @@ from radyolo.data.mask_compositing import (
 )
 
 if TYPE_CHECKING:
+    from multiprocessing.connection import Connection
     from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
@@ -89,7 +92,7 @@ def _convert_case(
 
     ref_nii = nib.load(image_path)
     labels_tuples = _labels_for_case(labels_dir, case_id)
-    ref_shape = tuple(np.asanyarray(ref_nii.dataobj).shape[:3])
+    ref_shape = tuple(ref_nii.shape[:3])
 
     if not labels_tuples:
         _write_integer_encoded_mask(
@@ -121,12 +124,54 @@ def _convert_case(
     _write_integer_encoded_mask(output_dir, case_id, labelmap, ref_nii)
 
 
+def _case_worker(dataset_dir: Path, case_id: str, result: Connection) -> None:
+    try:
+        _convert_case(
+            dataset_dir / "images",
+            dataset_dir / "labels",
+            dataset_dir / "masks",
+            dataset_dir / "masks_integer_encoded",
+            case_id,
+        )
+        result.send(None)
+    except Exception as exc:  # noqa: BLE001
+        result.send(f"{type(exc).__name__}: {str(exc)[:1000]}")
+    finally:
+        result.close()
+
+
+def _run_case(dataset_dir: Path, case_id: str) -> None:
+    context = multiprocessing.get_context("fork" if sys.platform == "linux" else "spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    process = context.Process(target=_case_worker, args=(dataset_dir, case_id, sender))
+    try:
+        process.start()
+        sender.close()
+        process.join()
+        if process.exitcode != 0:
+            msg = f"Conversion worker exited with code {process.exitcode} (possibly killed by OOM)."
+            raise RuntimeError(msg)
+        try:
+            error = receiver.recv()
+        except (EOFError, OSError) as exc:
+            msg = "Conversion worker exited without reporting a result."
+            raise RuntimeError(msg) from exc
+        if error is not None:
+            raise RuntimeError(error)
+    finally:
+        if process.pid is not None:
+            if process.is_alive():
+                process.terminate()
+                process.join()
+            process.close()
+        receiver.close()
+        sender.close()
+
+
 def convert_dataset_to_integer_encoded_masks(dataset_dir: Path) -> Path:
     """Create integer encoded masks under masks_integer_encoded/ for a RadYOLO dataset."""
     dataset_dir = dataset_dir.resolve()
     images_dir = dataset_dir / "images"
-    labels_dir = dataset_dir / "labels"
-    masks_dir = dataset_dir / "masks"
     output_dir = dataset_dir / "masks_integer_encoded"
     _ensure_dir(output_dir)
 
@@ -144,9 +189,10 @@ def convert_dataset_to_integer_encoded_masks(dataset_dir: Path) -> Path:
     with tqdm(total=len(pending_case_ids), desc="Converting", unit="case", smoothing=0.05) as pbar:
         for case_id in pending_case_ids:
             try:
-                _convert_case(images_dir, labels_dir, masks_dir, output_dir, case_id)
+                _run_case(dataset_dir, case_id)
             except Exception as exc:  # noqa: BLE001
                 skipped_errors += 1
+                (output_dir / f"{case_id}.nii.gz").unlink(missing_ok=True)
                 LOGGER.warning(
                     "Skipping case %s because of %s: %s", case_id, type(exc).__name__, exc
                 )
