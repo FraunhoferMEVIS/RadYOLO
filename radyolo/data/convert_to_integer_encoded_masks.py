@@ -69,7 +69,56 @@ def _write_integer_encoded_mask(
     out_path = output_dir / f"{case_id}.nii.gz"
     out_img = nib.Nifti1Image(labelmap.astype(np.uint16, copy=False), affine=ref_nii.affine)
     out_img.set_data_dtype(np.uint16)
-    nib.save(out_img, out_path)
+    try:
+        nib.save(out_img, out_path)
+    except Exception:
+        out_path.unlink(missing_ok=True)
+        raise
+
+
+def _convert_case(
+    images_dir: Path,
+    labels_dir: Path,
+    masks_dir: Path,
+    output_dir: Path,
+    case_id: str,
+) -> None:
+    image_path = images_dir / f"{case_id}.nii.gz"
+    if not image_path.exists():
+        image_path = images_dir / f"{case_id}.nii"
+
+    ref_nii = nib.load(image_path)
+    labels_tuples = _labels_for_case(labels_dir, case_id)
+    ref_shape = tuple(np.asanyarray(ref_nii.dataobj).shape[:3])
+
+    if not labels_tuples:
+        _write_integer_encoded_mask(
+            output_dir,
+            case_id,
+            np.zeros(ref_shape, dtype=np.uint16),
+            ref_nii,
+        )
+        return
+
+    mask_arr = _try_load_masks(masks_dir, case_id)
+
+    labelmap: np.ndarray | None = None
+    if mask_arr is not None:
+        labelmap = _compose_integer_encoded_from_masks(mask_arr, labels_tuples)
+        if labelmap is not None and labelmap.shape != ref_shape:
+            LOGGER.warning(
+                "Mask shape %s does not match image shape %s for case %s; "
+                "falling back to boxes.",
+                labelmap.shape,
+                ref_shape,
+                case_id,
+            )
+            labelmap = None
+
+    if labelmap is None:
+        labelmap = _compose_integer_encoded_from_boxes(ref_shape, labels_tuples)
+
+    _write_integer_encoded_mask(output_dir, case_id, labelmap, ref_nii)
 
 
 def convert_dataset_to_integer_encoded_masks(dataset_dir: Path) -> Path:
@@ -82,51 +131,28 @@ def convert_dataset_to_integer_encoded_masks(dataset_dir: Path) -> Path:
     _ensure_dir(output_dir)
 
     case_ids = _find_case_ids(images_dir)
-    with tqdm(total=len(case_ids), desc="Converting", unit="case", smoothing=0.05) as pbar:
-        for case_id in case_ids:
-            image_path = None
-            for suffix in (".nii.gz", ".nii"):
-                candidate = images_dir / f"{case_id}{suffix}"
-                if candidate.exists():
-                    image_path = candidate
-                    break
-            if image_path is None:
-                LOGGER.warning("Skipping case %s because the image file is missing.", case_id)
-                continue
-
-            ref_nii = nib.load(image_path)
-            labels_tuples = _labels_for_case(labels_dir, case_id)
-            ref_shape = tuple(np.asanyarray(ref_nii.dataobj).shape[:3])
-
-            if not labels_tuples:
-                _write_integer_encoded_mask(
-                    output_dir,
-                    case_id,
-                    np.zeros(ref_shape, dtype=np.uint16),
-                    ref_nii,
+    pending_case_ids = [
+        case_id for case_id in case_ids if not (output_dir / f"{case_id}.nii.gz").is_file()
+    ]
+    LOGGER.info(
+        "%d of %d cases already processed; converting %d remaining cases.",
+        len(case_ids) - len(pending_case_ids),
+        len(case_ids),
+        len(pending_case_ids),
+    )
+    skipped_errors = 0
+    with tqdm(total=len(pending_case_ids), desc="Converting", unit="case", smoothing=0.05) as pbar:
+        for case_id in pending_case_ids:
+            try:
+                _convert_case(images_dir, labels_dir, masks_dir, output_dir, case_id)
+            except Exception as exc:  # noqa: BLE001
+                skipped_errors += 1
+                LOGGER.warning(
+                    "Skipping case %s because of %s: %s", case_id, type(exc).__name__, exc
                 )
+            finally:
                 pbar.update(1)
-                continue
 
-            mask_arr = _try_load_masks(masks_dir, case_id)
-
-            labelmap: np.ndarray | None = None
-            if mask_arr is not None:
-                labelmap = _compose_integer_encoded_from_masks(mask_arr, labels_tuples)
-                if labelmap is not None and labelmap.shape != ref_shape:
-                    LOGGER.warning(
-                        "Mask shape %s does not match image shape %s for case %s; "
-                        "falling back to boxes.",
-                        labelmap.shape,
-                        ref_shape,
-                        case_id,
-                    )
-                    labelmap = None
-
-            if labelmap is None:
-                labelmap = _compose_integer_encoded_from_boxes(ref_shape, labels_tuples)
-
-            _write_integer_encoded_mask(output_dir, case_id, labelmap, ref_nii)
-            pbar.update(1)
+    LOGGER.info("Conversion finished: %d cases skipped because of errors.", skipped_errors)
 
     return output_dir
