@@ -4,6 +4,7 @@ import contextlib
 import itertools
 import json
 import logging
+import math
 import multiprocessing as mp
 import queue
 import traceback
@@ -18,7 +19,7 @@ from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DefaultConfig, DetectionPostprocessConfig
 from radyolo.config.spatial import VoxelSize
-from radyolo.data.preprocessing import preprocess_image
+from radyolo.data.preprocessing import INPUT_SIZE_DIVISOR, pad_to_multiple, preprocess_image
 from radyolo.inference.predict_utils import (
     LoadedImageTask,
     WriteTask,
@@ -199,12 +200,49 @@ def _resolve_patch_size(
     train_config: DefaultConfig,
     prediction_config: PredictionConfig,
 ) -> PatchSize:
-    """Choose prediction patch size, honoring CLI overrides."""
-    return (
+    """Choose prediction patch size, honoring CLI overrides.
+
+    Unless the model was trained with ``variable_input_size`` (where the patch size is only an
+    upper bound for whole-image inference), the size is fed to the network as is and therefore
+    has to be a multiple of the network's coarsest stride.
+    """
+    patch_size = (
         prediction_config.overwrite_patch_size
         if prediction_config.overwrite_patch_size is not None
         else train_config.patch_size
     )
+    needs_valid_network_size = (
+        train_config.training_mode == "patchwise" or not train_config.variable_input_size
+    )
+    if needs_valid_network_size and any(dim % INPUT_SIZE_DIVISOR for dim in patch_size.get_xyz()):
+        msg = (
+            f"Patch size (x, y, z) = {patch_size.get_xyz()} is not supported: every "
+            f"dimension has to be a multiple of {INPUT_SIZE_DIVISOR}."
+        )
+        raise ValueError(msg)
+    return patch_size
+
+
+def _pad_for_model(image: torch.Tensor) -> torch.Tensor:
+    """Pad a (C, Z, Y, X) image at the high end so every spatial size fits the network."""
+    return pad_to_multiple(image, INPUT_SIZE_DIVISOR, value=float(image.min()))
+
+
+def _crop_prototype_masks(
+    prototype_masks: torch.Tensor | None,
+    unpadded_shape: tuple[int, int, int],
+    padded_shape: tuple[int, int, int],
+) -> torch.Tensor | None:
+    """Remove the region of the prototype masks that belongs to input padding."""
+    if prototype_masks is None or unpadded_shape == padded_shape:
+        return prototype_masks
+    crop = [
+        min(prototype_dim, math.ceil(unpadded * prototype_dim / padded))
+        for unpadded, padded, prototype_dim in zip(
+            unpadded_shape, padded_shape, prototype_masks.shape[-3:], strict=True
+        )
+    ]
+    return prototype_masks[..., : crop[0], : crop[1], : crop[2]]
 
 
 def _resolve_input_voxel_size(loaded_image: LoadedImageTask) -> VoxelSize | None:
@@ -478,7 +516,11 @@ def _predict_whole_image(
     patch_size = _resolve_patch_size(train_config, prediction_config)
     input_voxel_size = _resolve_input_voxel_size(loaded_image)
     target_voxel_size = _resolve_target_voxel_size(train_config, prediction_config)
-    target_shape = patch_size if target_voxel_size is None else None
+    variable_input_size = train_config.variable_input_size
+    # Fixed-size models resize to the patch size; variable-size models keep the image shape and
+    # only shrink images that exceed the patch size.
+    target_shape = patch_size if target_voxel_size is None and not variable_input_size else None
+    max_shape = patch_size if variable_input_size else None
 
     device = model.device
     img_tensor = img_tensor.to(device)
@@ -488,20 +530,26 @@ def _predict_whole_image(
         target_shape=target_shape,
         input_voxel_size=input_voxel_size,
         target_voxel_size=target_voxel_size,
+        max_shape=max_shape,
         apply_resampling=True,
         apply_normalization=True,
         output_dtype=torch.float32,
     )
+    # Resampling to a voxel size or keeping the native shape can yield sizes the network cannot
+    # process directly. Padding only appends voxels, so box coordinates remain valid.
+    model_input = _pad_for_model(img_tensor)
+    padded_shape = tuple(int(dim) for dim in model_input.shape[-3:])
 
     autocast_ctx = torch.autocast(device.type) if device.type != "cpu" else contextlib.nullcontext()
     with torch.no_grad(), autocast_ctx:
-        model_output: ModelOutput = model(img_tensor.unsqueeze(0))
+        model_output: ModelOutput = model(model_input.unsqueeze(0))
     detections, proto_masks = _postprocess_single(
         model_output,
         train_config,
         prediction_config,
         len(names),
     )
+    proto_masks = _crop_prototype_masks(proto_masks, inference_shape, padded_shape)
     prototype_masks: np.ndarray | None = None
     mask_detections: list[np.ndarray] = []
     image_results: list[dict[str, object]] = []

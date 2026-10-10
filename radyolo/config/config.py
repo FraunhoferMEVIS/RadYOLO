@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from radyolo.config.spatial import (  # noqa: TC001, needs to be imported for pydantic model
+from radyolo.config.spatial import (  # needs to be imported for pydantic model
     PatchSize,
     VoxelSize,
 )
@@ -137,6 +137,10 @@ class DefaultConfig(BaseModel):
         "wholeimage"  # whether training/validation sample image patches or use resized whole images
     )
     patch_size: PatchSize  # input patch size stored in x, y, z (width, height, depth) order
+    # wholeimage only: if True, images are not resized to patch_size but keep their own shape
+    # (patch_size becomes the maximum size, larger images are downscaled to fit). Samples of a batch
+    # are padded to a common size that is a multiple of 32.
+    variable_input_size: bool = False
     voxel_size: VoxelSize | None = None  # optional inference/training resampling target in x, y, z
     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be
     # applied globally or a list of such dicts for each channel. For ct you have to define
@@ -272,6 +276,11 @@ class DefaultConfig(BaseModel):
     rotation_keep_box_volume: bool = True
     rotation_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
 
+    # Downsize Augmentation: resample the (augmented) training batch to a smaller size so the model
+    # also sees the same content at lower resolution.
+    prob_downsize: float = Field(0.0, ge=0, le=1.0)
+    downsize_min_patch_size: PatchSize = PatchSize(x=64, y=64, z=64)  # smallest size, x, y, z order
+
     # Cutout Augmentation
     prob_cutout: float = Field(0.1, ge=0, le=1.0)
     cutout_augmentation_device: Literal["cpu", "gpu"] = "gpu"  # set to "cpu" or "gpu"
@@ -386,6 +395,17 @@ class DefaultConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_downsize_augmentation(self) -> Self:
+        if self.prob_downsize > 0 and max(self.downsize_min_patch_size.get_xyz()) < 64:
+            msg = (
+                "downsize_min_patch_size must be at least 64 along one axis: a 32x32x32 input "
+                "leaves a single voxel in the deepest feature map, which BatchNorm cannot "
+                "train on for batches with one sample"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
     def _validate_normalization(self) -> Self:
         normalization = self.normalization
         if isinstance(normalization, list):
@@ -413,6 +433,9 @@ class DefaultConfig(BaseModel):
         if self.bbox_parametrization == "center_extents" and self.dfl_reg_max > 1:
             msg = "bbox_parametrization='center_extents' requires dfl_reg_max=1"
             raise ValueError(msg)
+        if self.variable_input_size and self.training_mode != "wholeimage":
+            msg = "variable_input_size=true is only supported with training_mode='wholeimage'"
+            raise ValueError(msg)
         if self.tal_topk_final is None:
             self.tal_topk_final = self.tal_topk
         if self.tal_topk_final_epoch is None:
@@ -429,6 +452,8 @@ class DefaultConfig(BaseModel):
         return self
 
     def uses_gpu_augmentations(self) -> bool:
+        if self.prob_downsize > 0:
+            return True
         return any(
             placement == "gpu"
             for placement in (

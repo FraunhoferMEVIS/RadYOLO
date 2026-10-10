@@ -314,6 +314,9 @@ def propose_model_config(
         }
     )
     proposed_config["channel_dropout_probabilities"] = [0.0] * input_channels
+    if resolved_training_mode != "wholeimage":
+        # variable input sizes are only supported for whole-image training
+        proposed_config["variable_input_size"] = False
 
     difference_channels = tuple(proposed_config.get("validation_plot_difference_channels", [0, 0]))
     if len(difference_channels) != 2 or max(difference_channels, default=0) >= input_channels:

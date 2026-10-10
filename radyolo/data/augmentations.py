@@ -15,6 +15,8 @@ from batchgeneratorsv2.transforms.spatial.low_resolution import SimulateLowResol
 from batchgeneratorsv2.transforms.utils.random import RandomTransform
 from torch import nn
 
+from radyolo.data.preprocessing import round_up
+
 if TYPE_CHECKING:
     from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
@@ -560,6 +562,54 @@ def random_mirroring(
             masks = torch.flip(masks, dims=flip_dims)
 
     return image, new_labels, masks
+
+
+def sample_downsize_scales(
+    base_shape_zyx: tuple[int, int, int],
+    min_shape_zyx: tuple[int, int, int],
+    divisor: int,
+    p: float,
+) -> tuple[float, float, float] | None:
+    """Sample per-axis scale factors for the downsize augmentation.
+
+    With probability ``p`` a new size is drawn independently for every axis from the multiples
+    of ``divisor`` between ``min_shape_zyx`` (rounded up to a multiple) and ``base_shape_zyx``.
+
+    Returns:
+        ``new_size / base_size`` per axis in (z, y, x) order, or None if the augmentation is not
+        applied (or would not change the size).
+    """
+    if random.random() >= p:
+        return None
+    scales: list[float] = []
+    for base, minimum in zip(base_shape_zyx, min_shape_zyx, strict=True):
+        lowest = min(base, round_up(minimum, divisor))
+        new_size = random.randrange(lowest, base + 1, divisor)
+        scales.append(new_size / base)
+    if all(scale == 1.0 for scale in scales):
+        return None
+    return scales[0], scales[1], scales[2]
+
+
+def resample_to_shape(
+    image: torch.Tensor,
+    masks: torch.Tensor | None,
+    shape_zyx: tuple[int, int, int],
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Resample an image (trilinear) and its instance masks (nearest) to a new spatial shape.
+
+    Box labels are normalized to the image extent and therefore stay valid. Interpolation
+    matches the resizing used in preprocessing/inference (no anti-aliasing).
+    """
+    resampled_image = F.interpolate(
+        image.unsqueeze(0), size=shape_zyx, mode="trilinear", align_corners=False
+    ).squeeze(0)
+    if masks is None:
+        return resampled_image, None
+    resampled_masks = F.interpolate(
+        masks.unsqueeze(0).float(), size=shape_zyx, mode="nearest-exact"
+    ).squeeze(0)
+    return resampled_image, resampled_masks.to(dtype=masks.dtype)
 
 
 def batch_generators_intensity_augmentations(

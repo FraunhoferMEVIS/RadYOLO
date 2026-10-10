@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
@@ -9,6 +9,9 @@ from torch.nn import functional as F  # noqa: N812
 
 from radyolo.utils.logging_utils import TaskAlignedEpochWarningStats
 from radyolo.utils.ops import bbox_iou
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -601,15 +604,22 @@ class TaskAlignedAssigner(nn.Module):
 
 def make_anchors(
     feats: list[torch.Tensor],
-    strides: torch.Tensor,
+    strides: torch.Tensor | Sequence[float],
     grid_cell_offset: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build anchor-center coordinates and matching stride values for all feature maps."""
+    """Build anchor-center coordinates and matching stride values for all feature maps.
+
+    The grid is derived purely from the shapes of ``feats``, so it follows whatever input size
+    the model sees. All shape arithmetic stays symbolic when traced (e.g. for dynamic-shape ONNX
+    export); ``strides`` should be python floats (or a CPU tensor) so that no data-dependent
+    ``.item()`` call ends up in the traced graph.
+    """
     anchor_points, stride_tensor = [], []
     if feats is None:
         raise ValueError
     dtype, device = feats[0].dtype, feats[0].device
-    for i, stride in enumerate(strides):
+    stride_values = strides.tolist() if isinstance(strides, torch.Tensor) else list(strides)
+    for i, stride in enumerate(stride_values):
         d, h, w = (
             feats[i].shape[2:]
             if isinstance(feats, list)
@@ -621,9 +631,9 @@ def make_anchors(
         sz, sy, sx = torch.meshgrid(sz, sy, sx, indexing="ij")
 
         # this creates a tensor of shape (d*h*w, 3) which represents each coordinate triple
-        anchor_points.append(torch.stack((sx, sy, sz), -1).view(-1, 3))
+        anchor_points.append(torch.stack((sx, sy, sz), -1).reshape(-1, 3))
 
-        stride_tensor.append(torch.full((d * h * w, 1), stride.item(), dtype=dtype, device=device))
+        stride_tensor.append(torch.full((d * h * w, 1), float(stride), dtype=dtype, device=device))
     return torch.cat(anchor_points), torch.cat(stride_tensor)
 
 

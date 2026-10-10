@@ -11,7 +11,7 @@ import torch.nn.functional as F  # noqa: N812
 from tqdm_loggable.auto import tqdm
 
 from radyolo.config.config import DetectionPostprocessConfig
-from radyolo.data.data import preprocess_batch_images
+from radyolo.data.data import pad_batch_to_common_shape, preprocess_batch_images
 from radyolo.utils import ops
 from radyolo.utils.ops import box_iou
 from radyolo.validation.metrics import (
@@ -215,6 +215,7 @@ class Validator:
             target_shape=self.config.patch_size,
             apply_preprocessing=self.config.apply_preprocessing,
             preprocessing_device=self.config.preprocessing_device,
+            variable_input_size=self.config.variable_input_size,
         )
         batch["masks"] = tuple(
             masks.to(self.device, non_blocking=True) if masks is not None else None
@@ -223,6 +224,9 @@ class Validator:
 
         for k in ["batch_idx", "cls", "bboxes"]:
             batch[k] = batch[k].to(self.device)
+
+        if self.config.variable_input_size:
+            pad_batch_to_common_shape(batch)
 
         return batch
 

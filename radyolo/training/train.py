@@ -35,6 +35,7 @@ from radyolo.data.data import (
     WholeImageDataset,
     apply_configured_augmentations_to_batch,
     build_dataloader,
+    pad_batch_to_common_shape,
     preprocess_batch_images,
 )
 from radyolo.models.model import (
@@ -976,6 +977,7 @@ class Trainer:
             target_shape=self.config.patch_size,
             apply_preprocessing=self.config.apply_preprocessing,
             preprocessing_device=self.config.preprocessing_device,
+            variable_input_size=self.config.variable_input_size,
         )
         if self.config.segmentation_output:
             batch["masks"] = tuple(
@@ -992,6 +994,8 @@ class Trainer:
                 self.config.patch_size,
                 placement="gpu",
             )
+        if self.config.variable_input_size:
+            pad_batch_to_common_shape(batch)
         return batch
 
     @staticmethod

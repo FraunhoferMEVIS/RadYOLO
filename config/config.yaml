@@ -1,5 +1,5 @@
 # Data and Output Settings
-data: "D:/datasets/AMOS22/radyolo_new_96_96_96_zscore_float16" # (str) path to data folder containing dataset.yaml
+data: "D:/datasets/AMOS22/radyolo_128_128_128_zscore_float16" # (str) path to data folder containing dataset.yaml
 fold: 0                    # (int) fold from data splits file to use for training
 split_file_name: "data_splits.json" # (str) split file name inside the dataset folder
 output_folder_base: "runs" # (str, optional) base folder for experiment outputs
@@ -40,7 +40,8 @@ box_head_channel_factor: 0.25 # (float) multiplier applied to the first detectio
 epochs: 1000                      # (int) number of epochs to train for
 patience: 300                     # (int) epochs to wait for no observable improvement for early stopping of training
 training_mode: "wholeimage"       # (literal) choose "wholeimage" for resized full-image training or "patchwise" for nnU-Net-style patch sampling
-patch_size: {x: 96, y: 96, z: 96} # input patch size stored in x, y, z (width, height, depth) order
+patch_size: {x: 128, y: 128, z: 128} # input patch size stored in x, y, z (width, height, depth) order
+variable_input_size: True         # (bool) only for training_mode "wholeimage": keep each image's own shape instead of resizing to patch_size (patch_size then acts as the maximum size); batches are padded to a multiple of 32
 voxel_size: null                  # optional resampling target in x, y, z: {x: 0.8, y: 0.8, z: 1.5} or null, only used for patchwise training
 normalization: {type: "zscore"}     # Normalization for image intensities. Can be {type: "none"/"zscore"/"255_to_01"/"ct"} to be applied globally or a list of such dicts for each channel. For ct you have to define mean, std, clip_min and clip_max in the dict.
 apply_preprocessing: False        # (bool) apply patch_size/normalization while loading raw training data; set False for already-preprocessed inputs while still keeping inference metadata
@@ -114,6 +115,10 @@ prob_rotation: 0.2
 rotation_angle: 15
 rotation_keep_box_volume: true
 rotation_augmentation_device: "gpu"  # set to "cpu" or "gpu"
+
+# Downsize Augmentation (runs per batch in the GPU/batch augmentation step; helps robustness to varying input sizes)
+prob_downsize: 0.5                              # (float) probability to resample a batch to a smaller size; 0 disables
+downsize_min_patch_size: {x: 64, y: 64, z: 64}  # (x, y, z) smallest size to sample (rounded up to a multiple of 32, at least 64 along one axis); the maximum is the current batch size
 
 # Cutout Augmentation
 prob_cutout: 0.1

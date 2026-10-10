@@ -67,6 +67,9 @@ class HardcodedModel(nn.Module):
         "x": (1.00, 1.50, 768),
     }
 
+    # Overwritten at the end of __init__ once the strides are known (1 disables the shape check).
+    size_divisor: int = 1
+
     def __init__(
         self,
         input_channels: int,
@@ -332,12 +335,35 @@ class HardcodedModel(nn.Module):
         sample_output = self.forward(torch.zeros(1, input_channels, s, s, s))
         self.l23.stride = torch.tensor([s / x.shape[-2] for x in sample_output.raw_predictions])
         self.stride = self.l23.stride
+        # The anchor grid is derived from the input at runtime, so any input size works as long
+        # as every spatial dimension is a multiple of the coarsest stride (otherwise the
+        # upsampled feature maps no longer line up with their skip connections).
+        self.size_divisor = int(self.stride.max().item())
         self.l23.bias_init()
+
+    def check_input_shape(self, x_input: torch.Tensor) -> None:
+        """Raise a descriptive error if the spatial input size is not supported."""
+        spatial_shape = tuple(int(dim) for dim in x_input.shape[-3:])
+        if any(dim % self.size_divisor for dim in spatial_shape):
+            msg = (
+                f"Spatial input size (z, y, x) = {spatial_shape} is not supported: every "
+                f"dimension has to be a multiple of {self.size_divisor}. Pad the input "
+                "(e.g. with radyolo.data.preprocessing.pad_to_multiple) and crop the outputs."
+            )
+            raise ValueError(msg)
 
     def forward(
         self,
         x_input: torch.Tensor,
     ) -> ModelOutput:
+        is_tracing = (
+            torch.jit.is_tracing()
+            or torch.compiler.is_compiling()
+            or torch.onnx.is_in_onnx_export()
+        )
+        if not is_tracing:
+            self.check_input_shape(x_input)
+
         # BACKBONE
         x = o0 = self.l0(x_input)
         x = self.l1(x)

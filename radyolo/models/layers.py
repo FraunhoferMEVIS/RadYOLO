@@ -656,6 +656,18 @@ class Detect(nn.Module):
             )
         self.dfl = DFL(self.dfl_bins, min_value=self.dfl_min) if self.use_dfl else nn.Identity()
 
+    @property
+    def stride(self) -> torch.Tensor:
+        """Per-level strides (voxels per feature cell) as a tensor."""
+        return self._stride
+
+    @stride.setter
+    def stride(self, value: torch.Tensor) -> None:
+        self._stride = value
+        # Plain python floats let anchor generation avoid tensor ``.item()`` calls, which would be
+        # data-dependent (and thus baked in or rejected) when tracing for dynamic-shape export.
+        self.stride_values: tuple[float, ...] = tuple(float(s) for s in value.tolist())
+
     def forward(self, pred_raw: list[torch.Tensor]) -> ModelOutput:
         """Apply per-scale heads and decode predictions when running in eval mode."""
         for i in range(self.nl):
@@ -675,24 +687,27 @@ class Detect(nn.Module):
         """Adds decoded boxes and class probabilities to model output object."""
         x = output.raw_predictions
         shape = x[0].shape
-        if self.shape != shape:
-            self.anchors, self.strides = (
-                x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5)
-            )
-            self.shape = shape
+        if self.export:
+            # Never cache while exporting: the anchor grid must be computed from the (possibly
+            # symbolic) input shape inside the graph so the exported model accepts any input size.
+            anchors, strides = (a.transpose(0, 1) for a in make_anchors(x, self.stride_values, 0.5))
+        else:
+            if self.shape != shape:
+                # Cached per feature-map shape, so a new input size simply rebuilds the grid.
+                self.anchors, self.strides = (
+                    a.transpose(0, 1) for a in make_anchors(x, self.stride_values, 0.5)
+                )
+                self.shape = shape
+            anchors, strides = self.anchors, self.strides
         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
         if self.separate_objectness_head:
             box, cls, obj = x_cat.split((self.reg_channels, self.nc, 1), 1)
-            output.decoded_boxes = (
-                self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-            )
+            output.decoded_boxes = self.decode_bboxes(self.dfl(box), anchors.unsqueeze(0)) * strides
             output.class_probabilities = cls.softmax(1)
             output.objectness_probabilities = obj.sigmoid()
             return output
         box, cls = x_cat.split((self.reg_channels, self.nc), 1)
-        output.decoded_boxes = (
-            self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
-        )
+        output.decoded_boxes = self.decode_bboxes(self.dfl(box), anchors.unsqueeze(0)) * strides
         output.class_probabilities = cls.sigmoid()
         return output
 

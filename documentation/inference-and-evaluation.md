@@ -13,6 +13,7 @@ uv run -m radyolo predict <path-to-model-checkpoint> <input-image-folder> <outpu
 - You can override preprocessing for inference only:
   - `--overwrite-patch-size x y z`
   - `--overwrite-normalization "{type: ...}"`
+- Patch sizes have to be multiples of 32.
 - Output contains detections and optional segmentation masks in `output-folder`.
 
 The prediction for each case is written as one JSON file containing a list of detections. Example:

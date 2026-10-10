@@ -23,11 +23,20 @@ from radyolo.data.augmentations import (
     random_mirroring,
     random_rotation,
     random_zoom,
+    resample_to_shape,
+    sample_downsize_scales,
     tensor_cutout,
 )
 from radyolo.data.data_splits import DEFAULT_SPLIT_FILE_NAME, get_split_file_path
 from radyolo.data.object_labels import load_case_object_labels
-from radyolo.data.preprocessing import preprocess_image, resample_mask
+from radyolo.data.preprocessing import (
+    INPUT_SIZE_DIVISOR,
+    fit_shape_within,
+    pad_to_multiple,
+    preprocess_image,
+    resample_mask,
+    round_up_to_multiple,
+)
 from radyolo.utils.ops import xyzwhd2xyzxyz, xyzxyz2xyzwhd
 
 if TYPE_CHECKING:
@@ -239,6 +248,9 @@ def _apply_configured_augmentations_to_sample(
     placement: Literal["cpu", "gpu"],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Apply configured spatial and intensity augmentations to one sample."""
+    if config.variable_input_size:
+        # No fixed reference size: labels are normalized to the sample's own extent.
+        patch_size = PatchSize.from_zyx(tuple(int(dim) for dim in image.shape[-3:]))
     if _has_spatial_augmentations_on_device(config, placement):
         image, classes, bboxes, masks = _apply_configured_spatial_augmentations_to_sample(
             image,
@@ -339,6 +351,42 @@ def _apply_configured_spatial_augmentations_to_sample(
     return image, labels[:, 0:1], labels[:, 1:], masks
 
 
+def _apply_batch_downsize(
+    images: list[torch.Tensor],
+    masks: list[torch.Tensor | None],
+    config: DefaultConfig,
+) -> tuple[list[torch.Tensor], list[torch.Tensor | None], list[tuple[int, int, int]]]:
+    """Resample all samples of a batch to one smaller size with probability ``prob_downsize``.
+
+    The target size is drawn per axis from the multiples of the network stride between
+    ``downsize_min_patch_size`` and the (stride-aligned) size of the batch. Samples of different
+    shapes (variable input size) are scaled by the same factors; padding to a common shape
+    happens afterwards.
+    """
+    shapes = [tuple(int(dim) for dim in image.shape[-3:]) for image in images]
+    if config.prob_downsize <= 0:
+        return images, masks, shapes
+    base_shape = round_up_to_multiple(tuple(max(dims) for dims in zip(*shapes, strict=True)))
+    scales = sample_downsize_scales(
+        base_shape,
+        config.downsize_min_patch_size.get_zyx(),
+        INPUT_SIZE_DIVISOR,
+        config.prob_downsize,
+    )
+    if scales is None:
+        return images, masks, shapes
+
+    new_shapes = [
+        tuple(max(1, round(dim * scale)) for dim, scale in zip(shape, scales, strict=True))
+        for shape in shapes
+    ]
+    resampled = [
+        resample_to_shape(image, sample_masks, new_shape)
+        for image, sample_masks, new_shape in zip(images, masks, new_shapes, strict=True)
+    ]
+    return [image for image, _ in resampled], [m for _, m in resampled], new_shapes
+
+
 def apply_configured_augmentations_to_batch(
     batch: Batch,
     config: DefaultConfig,
@@ -415,7 +463,10 @@ def apply_configured_augmentations_to_batch(
                 )
             )
 
-    batch["img"] = torch.stack(images_out)
+    if placement == "gpu":
+        images_out, masks_out, shapes_out = _apply_batch_downsize(images_out, masks_out, config)
+
+    batch["img"] = _to_image_batch(images_out)
     batch["shape"] = tuple(shapes_out)
     batch["ratio_pad"] = tuple(ratio_pad_out)
     batch["masks"] = tuple(masks_out)
@@ -978,7 +1029,7 @@ def _to_image_batch(images: list[torch.Tensor]) -> ImageBatch:
     return tuple(images)
 
 
-def preprocess_batch_images(
+def preprocess_batch_images(  # noqa: PLR0913
     batch: Batch,
     *,
     device: torch.device,
@@ -987,14 +1038,20 @@ def preprocess_batch_images(
     apply_preprocessing: bool,
     preprocessing_device: Literal["cpu", "gpu"],
     non_blocking: bool = True,
+    variable_input_size: bool = False,
 ) -> Batch:
-    """Move batch images to device and optionally preprocess them on GPU."""
+    """Move batch images to device and optionally preprocess them on GPU.
+
+    With ``variable_input_size`` images are not resized to ``target_shape`` but only downscaled
+    if they exceed it, and images of different shapes stay in a tuple (see
+    ``pad_batch_to_common_shape`` to stack them).
+    """
     images = batch["img"]
     if preprocessing_device == "cpu":
         if isinstance(images, torch.Tensor):
             batch["img"] = images.to(device, non_blocking=non_blocking)
         else:
-            batch["img"] = torch.stack(
+            batch["img"] = _to_image_batch(
                 [image.to(device, non_blocking=non_blocking) for image in images]
             )
         return batch
@@ -1008,7 +1065,8 @@ def preprocess_batch_images(
         processed_image, original_shape, resized_shape = preprocess_image(
             image_gpu,
             normalization,
-            target_shape=target_shape,
+            target_shape=None if variable_input_size else target_shape,
+            max_shape=target_shape if variable_input_size else None,
             apply_resampling=apply_preprocessing,
             apply_normalization=apply_preprocessing,
             output_dtype=torch.float32,
@@ -1029,9 +1087,55 @@ def preprocess_batch_images(
             )
         )
 
-    batch["img"] = torch.stack(processed_images)
+    batch["img"] = _to_image_batch(processed_images)
     batch["shape"] = tuple(updated_shapes)
     batch["ratio_pad"] = tuple(updated_ratio_pad)
+    return batch
+
+
+def pad_batch_to_common_shape(batch: Batch, divisor: int = INPUT_SIZE_DIVISOR) -> Batch:
+    """Stack a batch of differently sized images by padding them to one common shape.
+
+    The common shape is the per-axis maximum rounded up to a multiple of ``divisor``. Images are
+    padded at the high end with their minimum value, masks with zeros. Because the padding only
+    extends the image, voxel coordinates stay valid; the normalized box labels are rescaled from
+    the extent of their own image to the extent of the padded image. ``ratio_pad`` stays correct
+    since it only describes the resizing of the original image.
+    """
+    images = batch["img"]
+    image_list = list(images.unbind(0)) if isinstance(images, torch.Tensor) else list(images)
+    shapes = [tuple(int(dim) for dim in image.shape[-3:]) for image in image_list]
+    common_shape = round_up_to_multiple(
+        tuple(max(dims) for dims in zip(*shapes, strict=True)), divisor
+    )
+    if all(shape == common_shape for shape in shapes):
+        batch["img"] = images if isinstance(images, torch.Tensor) else torch.stack(image_list)
+        return batch
+
+    bboxes = batch["bboxes"].clone()
+    masks_out: list[torch.Tensor | None] = []
+    for sample_idx, (image, shape) in enumerate(zip(image_list, shapes, strict=True)):
+        image_list[sample_idx] = pad_to_multiple(
+            image, divisor, value=float(image.min()), target_shape=common_shape
+        )
+        masks = batch["masks"][sample_idx]
+        masks_out.append(
+            pad_to_multiple(masks, divisor, value=0, target_shape=common_shape)
+            if masks is not None
+            else None
+        )
+        sample_boxes = batch["batch_idx"] == sample_idx
+        if sample_boxes.any() and shape != common_shape:
+            extent_ratio_xyz = bboxes.new_tensor(
+                [
+                    own / common
+                    for own, common in zip(reversed(shape), reversed(common_shape), strict=True)
+                ]
+            )
+            bboxes[sample_boxes] *= extent_ratio_xyz.repeat(2)
+    batch["img"] = torch.stack(image_list)
+    batch["bboxes"] = bboxes
+    batch["masks"] = tuple(masks_out)
     return batch
 
 
@@ -1323,6 +1427,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
         self.foreground_oversampling = foreground_oversampling
         self.background_undersampling = background_undersampling
         self.min_box_crop_fraction = min_box_crop_fraction
+        self.variable_input_size = config is not None and config.variable_input_size
         self.split_file_name = split_file_name or (
             config.split_file_name if config is not None else DEFAULT_SPLIT_FILE_NAME
         )
@@ -1442,13 +1547,14 @@ class WholeImageDataset(Dataset[Sample], Sized):
 
         image = self.load_image(case_name)
         image, original_shape, resized_shape = self.resample_and_normalize(image)
+        mask_shape = self._resolve_mask_shape(original_shape, resized_shape)
         ratio = (
             resized_shape[0] / original_shape[0],
             resized_shape[1] / original_shape[1],
             resized_shape[2] / original_shape[2],
         )
         pad = (0, 0, 0)
-        classes, bboxes, masks = self.load_labels_and_masks(case_name)
+        classes, bboxes, masks = self.load_labels_and_masks(case_name, mask_shape)
 
         return Sample(
             image=image,
@@ -1476,15 +1582,29 @@ class WholeImageDataset(Dataset[Sample], Sized):
         image_resampled_normalized, original_shape, resized_shape = preprocess_image(
             image,
             self.normalization,
-            target_shape=self.patch_size,
+            target_shape=None if self.variable_input_size else self.patch_size,
+            max_shape=self.patch_size if self.variable_input_size else None,
             apply_resampling=self.apply_preprocessing,
             apply_normalization=self.apply_preprocessing,
             output_dtype=torch.float32,
         )
         return image_resampled_normalized, original_shape, resized_shape
 
+    def _resolve_mask_shape(
+        self,
+        original_shape: tuple[int, int, int],
+        resized_shape: tuple[int, int, int],
+    ) -> PatchSize:
+        """Return the spatial size masks must be resampled to so they match the image."""
+        if not self.variable_input_size:
+            return self.patch_size
+        if self.preprocessing_device == "gpu" and self.apply_preprocessing:
+            # The image is resized later on the device; predict the shape it will end up with.
+            return PatchSize.from_zyx(fit_shape_within(original_shape, self.patch_size.get_zyx()))
+        return PatchSize.from_zyx(resized_shape)
+
     def load_labels_and_masks(
-        self, case_name: str
+        self, case_name: str, mask_shape: PatchSize | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Load detection labels and optional masks for a case."""
         return _load_labels_and_masks(
@@ -1492,7 +1612,7 @@ class WholeImageDataset(Dataset[Sample], Sized):
             case_name,
             self.image_format,
             load_masks=self.load_masks,
-            patch_size=self.patch_size,
+            patch_size=mask_shape or self.patch_size,
         )
 
     @staticmethod

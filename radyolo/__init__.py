@@ -186,6 +186,16 @@ def train(config: Path) -> int:
     help="Internal compute dtype for the exported ONNX graph. Inputs and outputs stay float32.",
 )
 @click.option(
+    "--fixed-input-size",
+    is_flag=True,
+    default=False,
+    help=(
+        "Export the model for exactly the training patch size and batch size 1. By default the "
+        "exported model accepts any batch size and any spatial size that is a multiple of 32 "
+        "(see the 'size_divisor' ONNX metadata entry)."
+    ),
+)
+@click.option(
     "--metadata-overwrite",
     "metadata_overrides",
     multiple=True,
@@ -199,6 +209,7 @@ def train(config: Path) -> int:
 def onnx_export(
     model_path: Path,
     internal_dtype: str,
+    fixed_input_size: bool,
     metadata_overrides: dict[str, object],
 ) -> int:
     """Export a ModelCheckpoint to ONNX-Format.
@@ -206,7 +217,8 @@ def onnx_export(
     This command expects a PATH to a ModelCheckpoint loadable by `torch.load()`, usually
     a file ending with `.pt`.
 
-    It exports the containing model to ONNX next to it.
+    It exports the containing model to ONNX next to it. Unless --fixed-input-size is given, the
+    exported model has a dynamic batch size and dynamic spatial input sizes (multiples of 32).
     """
     try:
         LOGGER.info(f"Exporting model {model_path} to onnx...")
@@ -226,6 +238,7 @@ def onnx_export(
             model_path,
             internal_dtype=internal_dtype.lower(),
             metadata=metadata,
+            dynamic_input_size=not fixed_input_size,
         )
     except Exception as e:  # pragma: no cover
         LOGGER.exception("An unexpected error occurred", exc_info=e)
