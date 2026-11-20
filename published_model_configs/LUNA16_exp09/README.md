@@ -2,6 +2,8 @@
 
 This model was trained on the LUNA16 dataset for lung nodule detection using a 90/10% training/validation split.
 
+The model was trained using this repository at commit 90cd464c31a1be6b063c8dd4013d4e116fe6d7af.
+
 This model was used in the paper
 
 ```bibtex
